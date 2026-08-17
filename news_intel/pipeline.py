@@ -141,8 +141,8 @@ def process(
             "article_id": work.article_id, "category": result.data.category,
             "confidence": result.data.confidence, "rationale": result.data.rationale,
             "memory_keywords": json.dumps(result.data.matched_economics_keywords + result.data.matched_security_keywords, ensure_ascii=False),
-            "method": classifier.name, "prompt_version": CLASSIFY_VERSION, "provider": classifier.name,
-            "model": classifier.model, "run_id": run_id, "created_at": dag.utc_now(),
+            "method": classifier.name, "prompt_version": CLASSIFY_VERSION, "provider": result.usage.provider,
+            "model": result.usage.model, "run_id": run_id, "created_at": dag.utc_now(),
         })
         return result
 
@@ -155,7 +155,7 @@ def process(
         db.insert(conn, "evaluations", {
             "article_id": work.article_id,
             **{key: getattr(result.data, key) for key in ("confidence_occurrence", "gold_price_impact", "security_relevance", "gold_trend", "rationale")},
-            "prompt_version": EVALUATE_VERSION, "provider": evaluator.name, "model": evaluator.model,
+            "prompt_version": EVALUATE_VERSION, "provider": result.usage.provider, "model": result.usage.model,
             "run_id": run_id, "created_at": dag.utc_now(),
         })
         return result
@@ -166,7 +166,7 @@ def process(
         db.insert(conn, "summaries", {
             "article_id": work.article_id, "optimized_title": result.data.optimized_title,
             "one_line": result.data.one_line, "prompt_version": SUMMARIZE_VERSION,
-            "provider": summarizer.name, "model": summarizer.model, "run_id": run_id, "created_at": dag.utc_now(),
+            "provider": result.usage.provider, "model": result.usage.model, "run_id": run_id, "created_at": dag.utc_now(),
         })
         return result
 

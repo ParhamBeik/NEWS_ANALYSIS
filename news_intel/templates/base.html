@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="fa" dir="rtl">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}News Intel{% endblock %}</title>
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
   /* Palette roles from the validated reference instance. Only the slots used. */
   :root {
@@ -62,9 +63,12 @@
     border-radius: 10px; padding: 20px;
   }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: right; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
   th { color: var(--muted); font-weight: 600; font-size: 12px; }
-  td.num, th.num { font-variant-numeric: tabular-nums; }
+  td.num, th.num { font-variant-numeric: tabular-nums; text-align: right; }
+  /* Scoped wrapper for the article content itself, which is Persian and reads RTL -
+     the page around it stays English/LTR. */
+  .rtl { direction: rtl; text-align: right; }
   .pill {
     display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
     padding: 2px 9px; border-radius: 99px; border: 1px solid var(--border);
@@ -86,9 +90,11 @@
 <header>
   <span class="brand">News Intel</span>
   <nav>
-    <a href="/review" class="{{ 'active' if page == 'review' }}">بازبینی</a>
-    <a href="/kpi" class="{{ 'active' if page == 'kpi' }}">شاخص‌ها</a>
-    <a href="/" class="{{ 'active' if page == 'overview' }}">وضعیت سامانه</a>
+    <a href="/" class="{{ 'active' if page == 'home' }}">Home</a>
+    <a href="/compare" class="{{ 'active' if page == 'compare' }}">A/B Diff</a>
+    <a href="/ops" class="{{ 'active' if page == 'ops' }}">Ops</a>
+    <a href="/review" class="{{ 'active' if page == 'review' }}">Review</a>
+    <a href="/kpi" class="{{ 'active' if page == 'kpi' }}">Quality</a>
   </nav>
 </header>
 <main>{% block content %}{% endblock %}</main>

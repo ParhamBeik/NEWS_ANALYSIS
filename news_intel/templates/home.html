@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block head %}
+<style>
+  .window-form { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+  .window-form label { font-size: 13px; color: var(--text-secondary); }
+  .window-form input[type=number] {
+    width: 70px; font-family: inherit; font-size: 14px; padding: 7px 9px;
+    border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary);
+  }
+  .feed { display: flex; flex-direction: column; gap: 12px; }
+  .story { padding: 18px 20px; }
+  .story .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .story .title { font-size: 18px; font-weight: 700; line-height: 1.5; margin: 0 0 6px; }
+  .story .one-line { font-size: 14px; color: var(--text-secondary); margin: 0 0 10px; }
+  .story .scores { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .story .scores .pill { font-variant-numeric: tabular-nums; }
+  .story a.src { font-size: 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Home</h1>
+<p class="sub">News that scored high enough to notify, in the last {{ window_days }} days.</p>
+
+<form class="window-form" method="post" action="/settings/window">
+  <label for="days">Rolling window (days)</label>
+  <input type="number" id="days" name="days" min="1" value="{{ window_days }}">
+  <button type="submit">Save</button>
+</form>
+
+{% if not articles %}
+  <div class="card empty">
+    <p style="font-size:15px;margin:0 0 8px">No notify-worthy news in this window yet.</p>
+    <p style="margin:0">See <a href="/ops">Ops</a> for pipeline and fetch status.</p>
+  </div>
+{% else %}
+  <div class="feed">
+  {% for a in articles %}
+    <div class="card story">
+      <div class="meta">
+        <span class="pill">{{ category_labels.get(a.category, a.category) }}</span>
+        <span class="pill">{{ a.outlet or a.source }}</span>
+        {% if a.published %}<span class="pill">{{ a.published }}{% if a.published_time %} {{ a.published_time }}{% endif %}</span>{% endif %}
+      </div>
+      <div class="title rtl">{{ a.title }}</div>
+      {% if a.one_line %}<p class="one-line rtl">{{ a.one_line }}</p>{% endif %}
+      <div class="scores">
+        <span class="pill">Occurrence: {{ a.confidence_occurrence or "—" }}</span>
+        <span class="pill">Gold impact: {{ a.gold_price_impact or "—" }}</span>
+        <span class="pill">Security: {{ a.security_relevance or "—" }}</span>
+        {% if a.gold_trend %}<span class="pill">Trend: {{ a.gold_trend }}</span>{% endif %}
+      </div>
+      <a class="src" href="{{ a.url }}" target="_blank" rel="noopener">{{ a.url | short_url }}</a>
+    </div>
+  {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}شاخص‌های عملکرد مدل{% endblock %}
+{% block title %}Quality{% endblock %}
 {% block head %}
 <style>
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
@@ -15,8 +15,8 @@
   .matrix td.cell i {
     position: absolute; inset: 2px; border-radius: 4px; display: block; z-index: 0;
   }
-  .matrix th.rowhead { text-align: right; color: var(--text-secondary); font-weight: 600; }
-  .matrix caption { caption-side: top; text-align: right; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+  .matrix th.rowhead { text-align: left; color: var(--text-secondary); font-weight: 600; }
+  .matrix caption { caption-side: top; text-align: left; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
   .diag { outline: 1px solid var(--good); outline-offset: -2px; border-radius: 4px; }
 
   .barrow { display: flex; align-items: center; gap: 10px; }
@@ -27,43 +27,43 @@
 {% endblock %}
 
 {% block content %}
-<h1>شاخص‌های عملکرد مدل</h1>
-<p class="sub">همه اعداد بر پایه مقایسه خروجی مدل با برچسب‌های تأییدشده انسانی است.</p>
+<h1>Quality</h1>
+<p class="sub">Every number here compares the model's output against approved human labels.</p>
 
 {% if report.labelled == 0 %}
   <div class="card empty">
-    <p style="font-size:15px;margin:0 0 8px">هنوز برچسب تأییدشده‌ای ثبت نشده است.</p>
-    <p style="margin:0 0 18px">تا زمانی که موارد بازبینی نشوند، دقت مدل قابل اندازه‌گیری نیست.</p>
-    <a class="btn" href="/review">شروع بازبینی</a>
+    <p style="font-size:15px;margin:0 0 8px">No approved labels recorded yet.</p>
+    <p style="margin:0 0 18px">Model accuracy can't be measured until cases are reviewed.</p>
+    <a class="btn" href="/review">Start reviewing</a>
   </div>
 {% else %}
   <div class="tiles">
     <div class="tile">
-      <div class="label">موارد برچسب‌خورده</div>
+      <div class="label">Labelled cases</div>
       <div class="value">{{ report.labelled }}<small> / {{ report.labelled + report.pending }}</small></div>
-      <div class="note">{{ (report.progress * 100) | round(0) | int }}٪ از صف بازبینی</div>
+      <div class="note">{{ (report.progress * 100) | round(0) | int }}% of the review queue</div>
     </div>
     <div class="tile">
-      <div class="label">صحت دسته‌بندی</div>
+      <div class="label">Category accuracy</div>
       <div class="value">{{ pct(report.category_accuracy) }}</div>
-      <div class="note">{{ report.category_correct }} از {{ report.category_compared }} مورد</div>
+      <div class="note">{{ report.category_correct }} of {{ report.category_compared }} cases</div>
     </div>
     <div class="tile">
-      <div class="label">میانگین F1 (ماکرو)</div>
+      <div class="label">Macro F1</div>
       <div class="value">{{ pct(report.macro_f1) }}</div>
-      <div class="note">میانگین چهار دسته، بدون وزن حجم</div>
+      <div class="note">Average across four classes, unweighted by volume</div>
     </div>
     <div class="tile">
-      <div class="label">دقت هشدار</div>
+      <div class="label">Notify precision</div>
       <div class="value">{{ pct(report.notify_precision) }}</div>
-      <div class="note">بازیابی: {{ pct(report.notify_recall) }}</div>
+      <div class="note">Recall: {{ pct(report.notify_recall) }}</div>
     </div>
   </div>
 
-  <h2>ماتریس درهم‌ریختگی دسته‌بندی</h2>
+  <h2>Category confusion matrix</h2>
   <div class="card">
     <table class="matrix">
-      <caption>سطر: برچسب انسانی · ستون: پیش‌بینی مدل · قطر سبز = درست</caption>
+      <caption>Row: human label · Column: model prediction · Green diagonal = correct</caption>
       <thead>
         <tr><th></th>{% for c in categories %}<th class="num">{{ c }}</th>{% endfor %}</tr>
       </thead>
@@ -83,10 +83,10 @@
     </table>
   </div>
 
-  <h2>دقت هر دسته</h2>
+  <h2>Accuracy per category</h2>
   <div class="card">
     <table>
-      <thead><tr><th>دسته</th><th class="num">تعداد</th><th class="num">دقت</th><th class="num">بازیابی</th><th class="num">F1</th></tr></thead>
+      <thead><tr><th>Category</th><th class="num">Support</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1</th></tr></thead>
       <tbody>
       {% for m in report.per_class %}
         <tr>
@@ -101,13 +101,13 @@
     </table>
   </div>
 
-  <h2>دقت محورهای امتیازدهی</h2>
+  <h2>Score axis accuracy</h2>
   <div class="card">
     <p class="sub" style="margin-bottom:14px">
-      این محورها ترتیبی‌اند، پس «تا یک سطح اختلاف» معیار واقع‌بینانه‌تری از تطابق دقیق است.
+      These axes are ordinal, so "within one level" is a more realistic match measure than exact.
     </p>
     <table>
-      <thead><tr><th>محور</th><th class="num">مقایسه‌شده</th><th class="num">تطابق دقیق</th><th style="width:180px">تا یک سطح</th><th class="num">خطای میانگین</th><th class="num">اختلاف در ارزیابی‌نشدن</th></tr></thead>
+      <thead><tr><th>Axis</th><th class="num">Compared</th><th class="num">Exact match</th><th style="width:180px">Within one</th><th class="num">Mean abs. error</th><th class="num">Presence disagreement</th></tr></thead>
       <tbody>
       {% for a in report.axes %}
         <tr>

@@ -18,11 +18,13 @@ news_intel/          the package
   routing.py         which model answers which node
   prompts.py         prompt text + pydantic output schemas
   pipeline.py        ingest and inference orchestration
+  backfill.py        rolling N-day window coverage + auto-backfill
   reviews.py         human review queue, feeds few-shot examples
   metrics.py         model-vs-human agreement, drives /kpi
-  evals.py           golden-set export + scoring
+  telemetry.py       tokens/cost/success-rate/fetch-health aggregation, drives /ops
+  evals.py           golden-set export + scoring + A/B diff (compare / diff_variants)
   exports.py         Excel / TXT / Markdown outputs
-  dashboard.py       FastAPI: human review, KPIs, system health
+  dashboard.py       FastAPI: notify feed, A/B diff, ops, review, KPIs
   cli.py             entry point
 
 config/              checked in, human-edited
@@ -84,18 +86,35 @@ pytest                                                       # offline, no API c
 Use it to verify wiring before spending anything. `--provider routed` reads
 `config/routing.yaml`; any other value pins every node to that one provider.
 
-## The review loop
+## Dashboard pages
 
-The dashboard's main page is `/review`, not monitoring. It shows one article and a form
-pre-filled with the model's own answer, so a reviewer corrects rather than fills. Every
-approved row becomes three things at once:
+`cli serve` exposes five pages. UI chrome is English throughout; article title/lead/body
+are Persian and render RTL inline (scoped `dir="rtl"` wrappers) - the news itself is the
+one thing that's still Persian by nature, not the surrounding interface.
 
-1. truth for `/kpi` — accuracy, macro F1, per-axis MAE, notify precision/recall;
-2. few-shot examples selected by title similarity (`reviews.reviewed_examples`);
-3. the golden set, via `cli golden`.
+- **`/` (Home)** — the notify feed: news that crossed the notify threshold
+  (`core/scoring.decide()`) within the rolling window. The window size (days) is a
+  setting editable right here, persisted in the `settings` table, read fresh by
+  `run`/`run-loop` every cycle.
+- **`/compare` (A/B Diff)** — read-only. Pick two already-run `(provider, model,
+  prompt_version)` variants and see, article by article, where they agreed or disagreed
+  on category/scores. GET-only, no write path - `evals.diff_variants` also backs the
+  `cli compare` command, which writes the same diff to txt files instead of HTML.
+- **`/ops` (Pipeline Ops)** — chart-first: cost/tokens per day, LLM node outcome rates,
+  fetch volume per source, the fetch→unique→classified→evaluated funnel, and per-source
+  rolling-window coverage (honest about which sources can't backfill - see below).
+  Absorbs what used to be the system-health landing page.
+- **`/review`** — one article and a form pre-filled with the model's own answer, so a
+  reviewer corrects rather than fills. Every approved row becomes three things at once:
+  truth for `/kpi` (accuracy, macro F1, per-axis MAE, notify precision/recall), few-shot
+  examples selected by title similarity (`reviews.reviewed_examples`), and the golden
+  set via `cli golden`.
+- **`/kpi` (Quality)** — model-vs-human agreement metrics.
 
-`"ارزیابی نشد"` is a real choice on every axis. An axis nobody judged stays NULL through
-all three of those paths — see the design note below for why that matters.
+"Not assessed" is a real choice on every score axis in the review form. An axis nobody
+judged stays NULL through all three of the review page's downstream paths - see the
+design note below for why that matters. It's stored and posted as the workbook's own
+Persian vocabulary (`خیلی کم` etc.); only the on-screen label is translated.
 
 ## Design notes
 
@@ -146,3 +165,23 @@ counted from the provider's reported usage. `NEWS_MAX_PROVIDER_CALLS` is a runaw
 circuit breaker on request count and belongs well above a normal cycle — it was previously
 defaulted to 3, which would abort any real run after three calls and, because the failure
 is `Fatal`, stop `run-loop` entirely.
+
+**The rolling window heals itself, cheaply, when it's already whole.** Every `run` cycle
+calls `backfill.ensure_window()` after its normal fetch: one indexed query per source
+checks Jalali date coverage over the last N days, and the (possibly slow) paginated
+backfill only runs when a real gap is found. Only khabarfoori (`?page=N`) and mehr
+(`archive?tp=&pi=`) have a real history mechanism — reimplemented standalone this
+session, not imported from `LEGACY/` — capped at a fixed page depth per attempt
+(`ponytail:` comment in `sources.py` names the ceiling and its cost tradeoff) with a
+6-hour retry cooldown so a structurally unfillable gap isn't re-attempted every cycle.
+shahrekhabar has no such endpoint in the legacy code either, so it stays single-page,
+and `/ops` shows its coverage honestly rather than pretending.
+
+**Provider fallback never overrides the budget guard.** `config/routing.yaml` can give
+any node a `fallback:` provider, wrapped by `providers.FallbackProvider`. It catches
+exhausted-retry `Transient` and auth `Fatal` errors and retries via the fallback - but
+never `dag.BudgetExceeded` (also a `Fatal`), which always aborts the run immediately,
+since falling back on a budget error would just keep spending through a second provider.
+The wrapper's `.name`/`.model` are a static composite so the per-node cache/existence
+check stays deterministic regardless of which backend answers; the persisted row still
+records whichever backend actually produced it, via `ProviderResponse.usage`.

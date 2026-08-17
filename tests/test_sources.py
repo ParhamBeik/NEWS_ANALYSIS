@@ -92,3 +92,74 @@ def test_fetch_rejects_unknown_strategy():
     session = Session({spec.url: Response("ignored")})
     with pytest.raises(ValueError):
         sources.fetch(spec, session, limit=1)
+
+
+def _khabarfoori_article(date):
+    return f"""
+    <script type="application/ld+json">{{"@type":"NewsArticle","headline":"t",
+    "description":"d","datePublished":"{date}"}}</script>
+    <div id="main_ck_editor"><p>enough content here for extraction to accept as real.</p></div>
+    """
+
+
+def test_backfill_khabarfoori_stops_once_an_article_predates_the_window():
+    spec = sources.SourceSpec("khabarfoori", 2, "listing_detail", "https://site.test/list")
+    listing_p1 = """<ul class="box container">
+    <li><h2 class="title"><a href="/news/known">known</a></h2></li>
+    <li><h2 class="title"><a href="/news/1">new</a></h2></li></ul>"""
+    listing_p2 = """<ul class="box container">
+    <li><h2 class="title"><a href="/news/2">older</a></h2></li></ul>"""
+    session = Session({
+        spec.url: Response(listing_p1),
+        f"{spec.url}/?page=2": Response(listing_p2),
+        "https://site.test/news/1": Response(_khabarfoori_article("2026-08-10T10:00:00+03:30")),
+        "https://site.test/news/2": Response(_khabarfoori_article("2026-07-01T10:00:00+03:30")),
+    })
+    articles = list(sources.backfill_fetch(
+        spec, session, since_date="2026-08-05", known_urls={"https://site.test/news/known"},
+    ))
+    # page 3 was never requested (not in `responses`, would KeyError if fetched) -
+    # since_date was crossed on page 2, so the loop stopped there.
+    assert [a.url for a in articles] == ["https://site.test/news/1", "https://site.test/news/2"]
+
+
+def test_backfill_khabarfoori_stops_after_consecutive_pages_with_nothing_new():
+    spec = sources.SourceSpec("khabarfoori", 2, "listing_detail", "https://site.test/list")
+    all_known = """<ul class="box container">
+    <li><h2 class="title"><a href="/news/known">known</a></h2></li></ul>"""
+    session = Session({
+        spec.url: Response(all_known),
+        f"{spec.url}/?page=2": Response(all_known),
+    })
+    articles = list(sources.backfill_fetch(
+        spec, session, since_date="2020-01-01", known_urls={"https://site.test/news/known"},
+    ))
+    assert articles == []  # page 3 never requested - stale-page limit stopped it at page 2
+
+
+def test_backfill_mehr_walks_each_category_archive_endpoint():
+    article = """
+    <script type="application/ld+json">{"@type":"NewsArticle","headline":"t",
+    "description":"d","datePublished":"2026-08-10T10:00:00+03:30"}</script>
+    <article><p>enough content here for the extractor to accept as a real body.</p></article>
+    """
+    empty = "<ul></ul>"
+    spec = sources.SourceSpec("mehr", 1, "rss", "https://www.mehrnews.com/rss")
+    responses = {}
+    for tp in sources._MEHR_ARCHIVE_CATEGORIES.values():
+        base = sources._MEHR_ARCHIVE_URL
+        listing = f'<li class="news"><div class="desc"><h3><a href="/news/{tp}/x">t</a></h3></div></li>'
+        responses[f"{base}?tp={tp}&pi=1"] = Response(listing)
+        responses[f"{base}?tp={tp}&pi=2"] = Response(empty)
+        responses[f"{base}?tp={tp}&pi=3"] = Response(empty)
+        responses[f"https://www.mehrnews.com/news/{tp}/x"] = Response(article)
+    session = Session(responses)
+    articles = list(sources.backfill_fetch(spec, session, since_date="2026-08-01", known_urls=set()))
+    expected = {f"https://www.mehrnews.com/news/{tp}/x" for tp in sources._MEHR_ARCHIVE_CATEGORIES.values()}
+    assert {a.url for a in articles} == expected
+
+
+def test_backfill_fetch_yields_nothing_for_a_source_without_a_history_mechanism():
+    """shahrekhabar has no archive/date endpoint - honest limitation, not a guess."""
+    spec = sources.SourceSpec("shahrekhabar", 2, "listing_relay", "https://shahr.test/list")
+    assert list(sources.backfill_fetch(spec, since_date="2020-01-01", known_urls=set())) == []

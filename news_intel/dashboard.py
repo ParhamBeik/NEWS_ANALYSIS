@@ -1,21 +1,28 @@
-"""Dashboard: human review, model KPIs, and system monitoring.
+"""Dashboard: notify feed, A/B diff, pipeline ops, human review, and model KPIs.
 
-The primary job is the review page, not monitoring. Labelling is the bottleneck on
-knowing whether the model works, so the interface optimises for one thing: how fast a
-person can confirm or correct one article.
+Design decisions worth stating:
 
-Two design decisions worth stating:
+- The home page is the notify feed, not system health - the question a human actually
+  opens this for is "what needs my attention", not "is the pipeline alive". Pipeline
+  health lives on /ops instead.
+- The review page's model answer is PRE-SELECTED on the form. A reviewer corrects rather
+  than fills, which is several times faster and is why the queue can realistically be
+  finished. The model's own answer is also shown as text under each field, so agreeing is
+  never accidental - you can see what you are agreeing with.
+- "Not assessed" is a real option on every score axis, not an empty default. An axis
+  nobody judged must stay NULL; substituting a value there is the exact bug that
+  silently suppressed every security alert in the legacy pipeline.
+- UI chrome is English throughout. Article title/lead/content stay Persian and render
+  RTL inline (scoped `dir="rtl"` wrappers), since that's the actual content. Ordinal
+  levels and gold-trend symbols keep their Persian values under the hood - the team's
+  Excel workbook dropdown requires those exact strings - only their on-screen labels
+  are translated.
+- /compare is GET-only and never writes: two dropdowns select variants, the page renders
+  the diff. Nothing here has a POST form.
 
-- The model's answer is PRE-SELECTED on the form. A reviewer corrects rather than fills,
-  which is several times faster and is why the queue can realistically be finished.
-  The model's own answer is also shown as text under each field, so agreeing is never
-  accidental - you can see what you are agreeing with.
-- "ارزیابی نشد" (not assessed) is a real option on every score axis, not an empty
-  default. An axis nobody judged must stay NULL; substituting a value there is the exact
-  bug that silently suppressed every security alert in the legacy pipeline.
-
-Monitoring reads through a read-only connection. Review submission is the one write
-path, and it opens its own connection deliberately rather than widening the other.
+Monitoring reads through a read-only connection. Review submission and the window-days
+setting are the only write paths, and each opens its own connection deliberately rather
+than widening the shared read connection.
 """
 
 # NOTE: deliberately no `from __future__ import annotations` here. FastAPI resolves route
@@ -27,30 +34,45 @@ import sqlite3
 from html import escape
 from pathlib import Path
 
-from . import metrics, prompts
-from .core import config, dag, db
+from . import evals, metrics, prompts, telemetry
+from .core import config, dag, db, scoring
 
 CATEGORY_LABELS = [
-    ("security", "امنیتی"),
-    ("economics", "اقتصادی"),
-    ("security/economics", "امنیتی/اقتصادی"),
-    ("other", "سایر"),
+    ("security", "Security"),
+    ("economics", "Economics"),
+    ("security/economics", "Security/Economics"),
+    ("other", "Other"),
 ]
 AXIS_LABELS = {
-    "confidence_occurrence": "اطمینان از وقوع خبر",
-    "gold_price_impact": "اثر بر قیمت طلا",
-    "security_relevance": "ارتباط با امنیت",
+    "confidence_occurrence": "Event confidence",
+    "gold_price_impact": "Gold price impact",
+    "security_relevance": "Security relevance",
 }
 AXIS_HINTS = {
-    "confidence_occurrence": "چقدر مطمئنیم این رویداد واقعاً رخ داده است؟",
-    "gold_price_impact": "اگر خبر به طلا مربوط نیست، «ارزیابی نشد» را انتخاب کنید.",
-    "security_relevance": "اگر خبر بار امنیتی ندارد، «ارزیابی نشد» را انتخاب کنید.",
+    "confidence_occurrence": "How confident are we that this event actually happened?",
+    "gold_price_impact": "If the article isn't gold-related, choose \"Not assessed\".",
+    "security_relevance": "If the article has no security angle, choose \"Not assessed\".",
+}
+# Ordinal levels and trend symbols are the workbook's own Persian vocabulary and stay
+# that way as the stored/posted value; only the on-screen label is translated.
+LEVEL_LABELS = {
+    "خیلی کم": "Very low (خیلی کم)",
+    "کم": "Low (کم)",
+    "متوسط": "Medium (متوسط)",
+    "زیاد": "High (زیاد)",
+    "خیلی زیاد": "Very high (خیلی زیاد)",
+}
+TREND_LABELS = {
+    "↑": "↑ Up",
+    "↓": "↓ Down",
+    "خنثی": "Neutral (خنثی)",
+    "نامطمئن": "Uncertain (نامطمئن)",
 }
 TRENDS = list(prompts.GOLD_TRENDS)
 
 
 def _percent(value: float | None) -> str:
-    return "—" if value is None else f"{value * 100:.0f}٪"
+    return "—" if value is None else f"{value * 100:.0f}%"
 
 
 def _short_url(url: str, limit: int = 72) -> str:
@@ -89,6 +111,156 @@ def create_app(path: Path | None = None):
 
     def write() -> sqlite3.Connection:
         return db.connect(database)
+
+    def window_days(conn: sqlite3.Connection) -> int:
+        return int(db.get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
+
+    # --------------------------------------------------------------- home
+
+    @app.get("/", response_class=HTMLResponse)
+    def home(request: Request):
+        with read() as conn:
+            days = window_days(conn)
+            rows = conn.execute(
+                """
+                SELECT a.id, a.original_title AS title, a.url, a.source,
+                       a.original_outlet AS outlet, a.published_at_persian AS published,
+                       a.published_time, c.category,
+                       e.confidence_occurrence, e.gold_price_impact, e.security_relevance,
+                       e.gold_trend, s.one_line
+                FROM articles a
+                JOIN latest_classification c ON c.article_id = a.id
+                JOIN latest_evaluation e ON e.article_id = a.id
+                LEFT JOIN latest_summary s ON s.article_id = a.id
+                WHERE a.duplicate_of IS NULL AND a.fetched_at >= date('now', ?)
+                ORDER BY COALESCE(a.published_at_gregorian, a.fetched_at) DESC
+                """,
+                (f"-{max(days, 1) - 1} days",),
+            ).fetchall()
+        notify = [
+            row for row in rows
+            if scoring.decide(
+                row["confidence_occurrence"], row["gold_price_impact"], row["security_relevance"]
+            ).notify
+        ]
+        return templates.TemplateResponse(request, "home.html", {
+            "page": "home",
+            "window_days": days,
+            "articles": notify,
+            "category_labels": dict(CATEGORY_LABELS),
+        })
+
+    @app.post("/settings/window")
+    def set_window(days: int = Form(...)):
+        conn = write()
+        try:
+            db.set_setting(conn, "rolling_window_days", str(max(1, days)))
+            conn.commit()
+        finally:
+            conn.close()
+        return RedirectResponse("/", status_code=303)
+
+    # ------------------------------------------------------------ compare
+
+    def _parse_variant(encoded: str) -> "evals.Variant | None":
+        if not encoded:
+            return None
+        provider, model, version = encoded.split("\x1f")
+        return evals.Variant(provider, model or None, version)
+
+    @app.get("/compare", response_class=HTMLResponse)
+    def compare_page(request: Request, a: str = "", b: str = ""):
+        with read() as conn:
+            variant_rows = conn.execute(
+                "SELECT DISTINCT provider, model, prompt_version FROM classifications"
+                " ORDER BY provider, model, prompt_version"
+            ).fetchall()
+            options = [
+                {"key": f"{r['provider']}\x1f{r['model'] or ''}\x1f{r['prompt_version']}",
+                 "label": f"{r['provider']} / {r['model'] or 'default'} / {r['prompt_version']}"}
+                for r in variant_rows
+            ]
+            records: list[dict] = []
+            error: str | None = None
+            variant_a, variant_b = _parse_variant(a), _parse_variant(b)
+            if variant_a and variant_b:
+                try:
+                    records = evals.diff_variants(conn, variant_a, variant_b)
+                except ValueError as exc:
+                    error = str(exc)
+        return templates.TemplateResponse(request, "compare.html", {
+            "page": "compare",
+            "options": options,
+            "records": records,
+            "error": error,
+            "same_count": sum(1 for r in records if r["agree"]),
+            "selected": {"a": a, "b": b},
+        })
+
+    # ---------------------------------------------------------------- ops
+
+    def runs_html() -> str:
+        with read() as conn:
+            rows = conn.execute(
+                "SELECT run_id,status,started_at,articles_fetched,articles_processed,cost_usd"
+                " FROM runs ORDER BY started_at DESC LIMIT 10"
+            ).fetchall()
+        if not rows:
+            return "<p class='empty' style='padding:20px'>No runs recorded yet.</p>"
+        body = "".join(
+            f"<tr><td>{escape(r['run_id'])}</td><td>{escape(r['status'])}</td>"
+            f"<td class='num'>{r['articles_fetched']}</td>"
+            f"<td class='num'>{r['articles_processed']}</td>"
+            f"<td class='num'>${r['cost_usd']:.4f}</td></tr>"
+            for r in rows
+        )
+        return (
+            "<table><thead><tr><th>Run ID</th><th>Status</th><th class='num'>Fetched</th>"
+            "<th class='num'>Processed</th><th class='num'>Cost</th></tr></thead>"
+            f"<tbody>{body}</tbody></table>"
+        )
+
+    @app.get("/ops", response_class=HTMLResponse)
+    def ops(request: Request):
+        with read() as conn:
+            days = window_days(conn)
+            source_rows = conn.execute(
+                "SELECT name, health_status, last_success_at, last_error, priority"
+                " FROM sources ORDER BY priority, name"
+            ).fetchall()
+            dead_reasons = conn.execute(
+                "SELECT node, error_class, COUNT(*) n FROM dead_letters"
+                " WHERE resolved_at IS NULL GROUP BY node, error_class ORDER BY n DESC"
+            ).fetchall()
+            coverage = telemetry.source_coverage(conn, days)
+            funnel = telemetry.funnel(conn, days)
+            dead_total = conn.execute(
+                "SELECT COUNT(*) c FROM dead_letters WHERE resolved_at IS NULL"
+            ).fetchone()["c"]
+        return templates.TemplateResponse(request, "ops.html", {
+            "page": "ops",
+            "window_days": days,
+            "sources": source_rows,
+            "dead_reasons": dead_reasons,
+            "dead_total": dead_total,
+            "coverage": coverage,
+            "funnel": funnel,
+            "runs_html": runs_html(),
+        })
+
+    @app.get("/partials/runs", response_class=HTMLResponse)
+    def partial_runs():
+        return runs_html()
+
+    @app.get("/api/telemetry")
+    def api_telemetry(days: int = 14):
+        with read() as conn:
+            return {
+                "token_cost_by_day": telemetry.token_cost_by_day(conn, days),
+                "node_status_counts": telemetry.node_status_counts(conn, days),
+                "provider_breakdown": telemetry.provider_breakdown(conn, days),
+                "fetch_volume_by_source": telemetry.fetch_volume_by_source(conn, days),
+            }
 
     # ---------------------------------------------------------------- review
 
@@ -131,7 +303,9 @@ def create_app(path: Path | None = None):
             "percent": round(done / total * 100) if total else 0,
             "categories": CATEGORY_LABELS,
             "levels": metrics.level_options(),
+            "level_labels": LEVEL_LABELS,
             "trends": TRENDS,
+            "trend_labels": TREND_LABELS,
             "axes": [
                 {
                     "name": axis,
@@ -213,68 +387,6 @@ def create_app(path: Path | None = None):
                 "ramp": lambda n: _sequential(n, largest),
             },
         )
-
-    # -------------------------------------------------------------- overview
-
-    def runs_html() -> str:
-        with read() as conn:
-            rows = conn.execute(
-                "SELECT run_id,status,started_at,articles_fetched,articles_processed,cost_usd"
-                " FROM runs ORDER BY started_at DESC LIMIT 10"
-            ).fetchall()
-        if not rows:
-            return "<p class='empty' style='padding:20px'>اجرایی ثبت نشده است.</p>"
-        body = "".join(
-            f"<tr><td>{escape(r['run_id'])}</td><td>{escape(r['status'])}</td>"
-            f"<td class='num'>{r['articles_fetched']}</td>"
-            f"<td class='num'>{r['articles_processed']}</td>"
-            f"<td class='num'>${r['cost_usd']:.4f}</td></tr>"
-            for r in rows
-        )
-        return (
-            "<table><thead><tr><th>شناسه اجرا</th><th>وضعیت</th><th class='num'>دریافت</th>"
-            "<th class='num'>پردازش</th><th class='num'>هزینه</th></tr></thead>"
-            f"<tbody>{body}</tbody></table>"
-        )
-
-    @app.get("/", response_class=HTMLResponse)
-    def overview(request: Request):
-        with read() as conn:
-            sources = conn.execute(
-                "SELECT name, health_status, last_success_at, last_error, priority"
-                " FROM sources ORDER BY priority, name"
-            ).fetchall()
-            totals = {
-                "articles": conn.execute("SELECT COUNT(*) c FROM articles").fetchone()["c"],
-                "canonical": conn.execute(
-                    "SELECT COUNT(*) c FROM articles WHERE duplicate_of IS NULL"
-                ).fetchone()["c"],
-                "classifications": conn.execute(
-                    "SELECT COUNT(*) c FROM classifications"
-                ).fetchone()["c"],
-                "dead": conn.execute(
-                    "SELECT COUNT(*) c FROM dead_letters WHERE resolved_at IS NULL"
-                ).fetchone()["c"],
-            }
-            dead_reasons = conn.execute(
-                "SELECT node, error_class, COUNT(*) n FROM dead_letters"
-                " WHERE resolved_at IS NULL GROUP BY node, error_class ORDER BY n DESC"
-            ).fetchall()
-        return templates.TemplateResponse(
-            request,
-            "overview.html",
-            {
-                "page": "overview",
-                "sources": sources,
-                "totals": totals,
-                "dead_reasons": dead_reasons,
-                "runs_html": runs_html(),
-            },
-        )
-
-    @app.get("/partials/runs", response_class=HTMLResponse)
-    def partial_runs():
-        return runs_html()
 
     # -------------------------------------------------------------- json api
 

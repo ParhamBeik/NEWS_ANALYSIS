@@ -24,6 +24,16 @@ nodes:
   # what silently suppressed every security alert in the legacy pipeline, so this is the
   # last node to move off the strongest model available - and only once /kpi shows the
   # local model matching on the review set.
+  #
+  # `fallback:` (optional, any node) is tried only when the primary is unavailable -
+  # exhausted retries or an auth failure - never on a budget-ceiling error, which always
+  # aborts the run instead of spending more through a second provider. Commented out
+  # here since it requires Ollama running locally; uncomment and point it at whatever
+  # your fallback actually is:
+  # evaluate:
+  #   provider: gapgpt
+  #   fallback:
+  #     provider: ollama
   evaluate:
     provider: gapgpt
 

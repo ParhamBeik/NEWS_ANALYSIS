@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import urljoin
 from xml.etree import ElementTree
 
@@ -182,6 +182,16 @@ def parse_mehr_feed(xml: str) -> list[RawArticle]:
     return [article for article in articles if article.url and article.title]
 
 
+def parse_mehr_archive_listing(html: str, base_url: str) -> list[str]:
+    """Mehr's paginated archive index (distinct from its RSS feed, which has no history)."""
+    soup = BeautifulSoup(html, "html.parser")
+    urls = [
+        urljoin(base_url, link["href"])
+        for link in soup.select("li.news div.desc h3 a[href]")
+    ]
+    return list(dict.fromkeys(urls))
+
+
 def parse_shahrekhabar_listing(html: str, base_url: str) -> list[RawArticle]:
     soup = BeautifulSoup(html, "html.parser")
     articles: list[RawArticle] = []
@@ -317,6 +327,116 @@ def _fetch_listing_relay(spec: SourceSpec, session: requests.Session, response, 
         if len(articles) >= limit:
             break
     return articles
+
+
+# Historical pagination for the rolling-window backfill. Distinct from _STRATEGIES:
+# not every source that shares a *fetch* shape also has a *history* mechanism - Mehr's
+# RSS feed and its archive endpoint are unrelated URLs. Keyed by source name because the
+# techniques below are genuinely source-specific, not a shape other sources could share.
+# Shahrekhabar has no entry: no archive/date endpoint exists for it, so backfill.py skips
+# it and the dashboard shows it as capped, rather than the code silently pretending.
+# A safety ceiling against a runaway loop, not a target depth - the real stop conditions
+# are since_date and the stale-page counter below. 500 matches the legacy pipeline's own
+# HARD_MAX_PAGES, which served the same role there. Each page costs 1 listing fetch plus
+# 1 detail fetch per new article, so this can still be slow on a wide window against a
+# high-volume source; that cost is the tradeoff for actually reaching the window's floor
+# instead of stopping short of it.
+_MAX_BACKFILL_PAGES = 500
+_STALE_PAGE_LIMIT = 2  # consecutive pages with zero new URLs before giving up
+_MEHR_ARCHIVE_URL = "https://www.mehrnews.com/archive"
+# Mehr's own topic ids; fixed by their site, not something a deployment would edit.
+_MEHR_ARCHIVE_CATEGORIES = {"economics": 25, "politics": 7, "society": 6}
+
+
+def _fetch_backfill_khabarfoori(
+    spec: SourceSpec, session: requests.Session, *, since_date: str, known_urls: set[str]
+) -> Iterator[RawArticle]:
+    seen = set(known_urls)
+    stale = 0
+    for page in range(1, _MAX_BACKFILL_PAGES + 1):
+        page_url = spec.url if page == 1 else f"{spec.url}/?page={page}"
+        try:
+            response = session.get(page_url, headers=USER_AGENT, timeout=20)
+            response.raise_for_status()
+        except requests.RequestException:
+            break
+        new_urls = [u for u in parse_khabarfoori_listing(response.text, spec.url) if u not in seen]
+        if not new_urls:
+            stale += 1
+            if stale >= _STALE_PAGE_LIMIT:
+                break
+            continue
+        stale = 0
+        reached_since = False
+        for url in new_urls:
+            seen.add(url)
+            try:
+                detail = session.get(url, headers=USER_AGENT, timeout=20)
+                detail.raise_for_status()
+            except requests.RequestException:
+                continue
+            article = parse_khabarfoori_article(detail.text, url)
+            yield article
+            if article.published_at and article.published_at < since_date:
+                reached_since = True
+        if reached_since:
+            break
+
+
+def _fetch_backfill_mehr(
+    spec: SourceSpec, session: requests.Session, *, since_date: str, known_urls: set[str]
+) -> Iterator[RawArticle]:
+    seen = set(known_urls)
+    for tp in _MEHR_ARCHIVE_CATEGORIES.values():
+        stale = 0
+        for page in range(1, _MAX_BACKFILL_PAGES + 1):
+            page_url = f"{_MEHR_ARCHIVE_URL}?tp={tp}&pi={page}"
+            try:
+                response = session.get(page_url, headers=USER_AGENT, timeout=20)
+                response.raise_for_status()
+            except requests.RequestException:
+                break
+            new_urls = [u for u in parse_mehr_archive_listing(response.text, _MEHR_ARCHIVE_URL) if u not in seen]
+            if not new_urls:
+                stale += 1
+                if stale >= _STALE_PAGE_LIMIT:
+                    break
+                continue
+            stale = 0
+            reached_since = False
+            for url in new_urls:
+                seen.add(url)
+                try:
+                    detail = session.get(url, headers=USER_AGENT, timeout=20)
+                    detail.raise_for_status()
+                except requests.RequestException:
+                    continue
+                article = parse_generic_article(detail.text, "mehr", url, "مهر")
+                yield article
+                if article.published_at and article.published_at < since_date:
+                    reached_since = True
+            if reached_since:
+                break
+
+
+_BACKFILL_STRATEGIES: dict[str, Callable[..., Iterator[RawArticle]]] = {
+    "khabarfoori": _fetch_backfill_khabarfoori,
+    "mehr": _fetch_backfill_mehr,
+}
+
+
+def backfill_fetch(
+    spec: SourceSpec, session: requests.Session | None = None, *, since_date: str, known_urls: set[str]
+) -> Iterator[RawArticle]:
+    """Paginate a source as far back as `since_date` (a 'YYYY-MM-DD' Gregorian floor).
+
+    Only sources with a real history mechanism are registered; others yield nothing.
+    """
+    handler = _BACKFILL_STRATEGIES.get(spec.name)
+    if handler is None:
+        return
+    session = session or requests.Session()
+    yield from handler(spec, session, since_date=since_date, known_urls=known_urls)
 
 
 def fetch(spec: SourceSpec, session: requests.Session | None = None, *, limit: int = 25) -> list[RawArticle]:

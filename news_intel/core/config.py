@@ -32,6 +32,8 @@ DB_PATH = VAR_DIR / "news.db"
 
 TEHRAN_TZ = "Asia/Tehran"
 DEFAULT_GAPGPT_MODEL = "gemini-2.5-flash-lite"
+# Rolling-window default until a human sets one from the dashboard's home page.
+DEFAULT_WINDOW_DAYS = "14"
 
 
 def load_dotenv(path: Path | None = None) -> None:

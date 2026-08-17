@@ -6,7 +6,7 @@ import argparse
 import json
 import time
 
-from . import dashboard, dedupe, evals, exports, pipeline, reviews, routing, sources
+from . import backfill, dashboard, dedupe, evals, exports, pipeline, reviews, routing, sources
 from .core import config, dag, db
 from .providers import Provider, make_provider
 
@@ -40,6 +40,8 @@ def run_once(args: argparse.Namespace) -> dict[str, int]:
             pipeline.set_source_health(conn, name, ok=False, error=str(exc)[:2000])
     with conn:
         stats = pipeline.process(conn, collected, providers)
+    window_days = int(db.get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
+    stats["backfilled"] = sum(backfill.ensure_window(conn, specs, providers, days=window_days).values())
     if args.export:
         exports.export_all(conn, config.OUTPUT_DIR)
     conn.close()

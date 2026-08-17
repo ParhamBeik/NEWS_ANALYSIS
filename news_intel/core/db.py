@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS levels (
     score INTEGER NOT NULL
 );
 
+-- Small user-editable knobs (e.g. rolling_window_days) that need to change from the
+-- dashboard without a restart. Not for anything derivable from code or env defaults.
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sources (
     name            TEXT PRIMARY KEY,
     tier            INTEGER NOT NULL,
@@ -262,6 +269,19 @@ def level_score(level: str | None) -> int | None:
         return LEVELS.index(level) + 1
     except ValueError:
         return None
+
+
+def get_setting(conn: sqlite3.Connection, key: str, default: str) -> str:
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES(?, ?)"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
 
 
 def insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> int:

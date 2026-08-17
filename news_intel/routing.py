@@ -29,7 +29,7 @@ from typing import Callable, Mapping
 import yaml
 
 from .core import config
-from .providers import Provider, make_provider
+from .providers import FallbackProvider, Provider, make_provider
 
 # The nodes that issue provider calls. Anything not listed here is not routable.
 NODES = ("classify", "evaluate", "summarize")
@@ -42,20 +42,25 @@ class Route:
     # None means "whatever that provider's configured default model is", which keeps
     # routing.yaml from having to be re-edited every time a model name changes in .env.
     model: str | None = None
+    # A second route tried when the primary is unavailable (exhausted retries, or an
+    # auth failure) - never inherited implicitly, always its own explicit block.
+    fallback: "Route | None" = None
 
 
-def _coerce(node: str, value: object, fallback: Route | None) -> Route:
-    """Accept either `classify: ollama` or a `{provider:, model:}` mapping."""
+def _coerce(node: str, value: object, default: Route | None) -> Route:
+    """Accept either `classify: ollama` or a `{provider:, model:, fallback:}` mapping."""
     if isinstance(value, str):
         return Route(node, value, None)
     if isinstance(value, Mapping):
-        name = value.get("provider") or (fallback.provider if fallback else None)
+        name = value.get("provider") or (default.provider if default else None)
         if not name:
             raise config.ConfigError(
                 f"routing: node {node!r} has no provider and no default to fall back on"
             )
         model = value.get("model")
-        return Route(node, str(name), str(model) if model else None)
+        fallback_value = value.get("fallback")
+        fallback = _coerce(node, fallback_value, None) if fallback_value is not None else None
+        return Route(node, str(name), str(model) if model else None, fallback)
     raise config.ConfigError(
         f"routing: node {node!r} must be a provider name or a mapping, got {type(value).__name__}"
     )
@@ -101,7 +106,7 @@ def load(path: Path | None = None, *, override: str | None = None) -> dict[str, 
         if node in nodes:
             routes[node] = _coerce(node, nodes[node], default)
         elif default is not None:
-            routes[node] = Route(node, default.provider, default.model)
+            routes[node] = Route(node, default.provider, default.model, default.fallback)
         else:
             raise config.ConfigError(
                 f"routing: node {node!r} is unrouted and no `default` is set in {path}"
@@ -114,14 +119,27 @@ def build(
     *,
     factory: Callable[..., Provider] = make_provider,
 ) -> dict[str, Provider]:
-    """Instantiate one provider per distinct (provider, model), shared across nodes."""
+    """Instantiate one provider per distinct (provider, model), shared across nodes.
+
+    A route with a `fallback` gets wrapped in a `FallbackProvider`; the underlying
+    primary/fallback instances are still deduplicated by (provider, model) same as any
+    other route, so the request-count cap stays correctly shared.
+    """
     shared: dict[tuple[str, str | None], Provider] = {}
+
+    def instance(provider: str, model: str | None) -> Provider:
+        key = (provider, model)
+        if key not in shared:
+            shared[key] = factory(provider, model=model)
+        return shared[key]
+
     resolved: dict[str, Provider] = {}
     for node, route in routes.items():
-        key = (route.provider, route.model)
-        if key not in shared:
-            shared[key] = factory(route.provider, model=route.model)
-        resolved[node] = shared[key]
+        primary = instance(route.provider, route.model)
+        if route.fallback is None:
+            resolved[node] = primary
+        else:
+            resolved[node] = FallbackProvider(primary, instance(route.fallback.provider, route.fallback.model))
     return resolved
 
 

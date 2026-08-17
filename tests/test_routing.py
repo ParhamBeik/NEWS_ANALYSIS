@@ -104,6 +104,46 @@ def test_the_shipped_routing_file_loads():
     assert set(routing.load(config.ROUTING_PATH)) == set(routing.NODES)
 
 
+def test_a_node_can_declare_a_fallback_provider(tmp_path):
+    routes = routing.load(write(tmp_path, """
+default:
+  provider: gapgpt
+nodes:
+  evaluate:
+    provider: gapgpt
+    fallback:
+      provider: ollama
+      model: qwen2.5:7b
+"""))
+    assert routes["evaluate"].fallback == routing.Route("evaluate", "ollama", "qwen2.5:7b")
+    assert routes["classify"].fallback is None, "fallback is never inherited implicitly"
+
+
+def test_a_bare_fallback_provider_name_is_accepted(tmp_path):
+    routes = routing.load(write(tmp_path, """
+default:
+  provider: gapgpt
+nodes:
+  classify:
+    provider: gapgpt
+    fallback: ollama
+"""))
+    assert routes["classify"].fallback == routing.Route("classify", "ollama", None)
+
+
+def test_a_fallback_block_without_its_own_provider_is_a_config_error(tmp_path):
+    with pytest.raises(config.ConfigError, match="no provider"):
+        routing.load(write(tmp_path, """
+default:
+  provider: gapgpt
+nodes:
+  classify:
+    provider: gapgpt
+    fallback:
+      model: qwen2.5:7b
+"""))
+
+
 # ------------------------------------------------------------------ building
 
 
@@ -120,6 +160,18 @@ def test_nodes_routed_identically_share_one_provider_instance():
     providers = routing.build(routing.load(override="rule"), factory=factory)
     assert built == 1
     assert providers["classify"] is providers["evaluate"] is providers["summarize"]
+
+
+def test_a_route_with_a_fallback_builds_a_fallback_provider():
+    from news_intel.providers import FallbackProvider
+
+    routes = {
+        "classify": routing.Route("classify", "rule", "primary", routing.Route("classify", "rule", "backup")),
+    }
+    providers = routing.build(routes, factory=lambda name, *, model=None: RuleProvider(name=name, model=model))
+    wrapped = providers["classify"]
+    assert isinstance(wrapped, FallbackProvider)
+    assert wrapped.primary.model == "primary" and wrapped.fallback.model == "backup"
 
 
 def test_differently_routed_nodes_get_different_instances():

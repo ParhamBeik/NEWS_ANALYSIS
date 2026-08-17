@@ -162,6 +162,47 @@ class OpenAICompatibleProvider:
         return self._call(summary_messages(article, examples), SummaryOutput)
 
 
+@dataclass
+class FallbackProvider:
+    """Try `primary`; on exhausted retries or a non-budget Fatal, try `fallback`.
+
+    `dag.BudgetExceeded` (a `Fatal` subclass, raised by both the run's dollar ceiling and
+    a provider's own request-count cap) is deliberately NOT a fallback trigger and always
+    propagates immediately - falling back to a second provider on a budget error would
+    just keep spending past the ceiling that error exists to enforce. Auth failures and
+    exhausted-retry Transient errors mean "this provider is unavailable right now", which
+    is exactly what a fallback should catch.
+    """
+
+    primary: Provider
+    fallback: Provider
+    supports_structured_output: bool = field(init=False)
+    name: str = field(init=False)
+    model: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.supports_structured_output = self.primary.supports_structured_output
+        self.name = f"{self.primary.name}+{self.fallback.name}"
+        self.model = f"{self.primary.model}+{self.fallback.model}"
+
+    def _try(self, method: str, *args: Any, **kwargs: Any):
+        try:
+            return getattr(self.primary, method)(*args, **kwargs)
+        except dag.BudgetExceeded:
+            raise
+        except (dag.Transient, dag.Fatal):
+            return getattr(self.fallback, method)(*args, **kwargs)
+
+    def classify(self, article: RawArticle, examples=()):
+        return self._try("classify", article, examples)
+
+    def evaluate(self, article: RawArticle, category: str, examples=()):
+        return self._try("evaluate", article, category, examples)
+
+    def summarize(self, article: RawArticle, examples=()):
+        return self._try("summarize", article, examples)
+
+
 def make_provider(name: str, *, model: str | None = None) -> Provider:
     """Build a provider. `model` overrides the environment default (see routing.py)."""
     if name == "rule":

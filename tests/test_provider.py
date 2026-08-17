@@ -5,7 +5,7 @@ import pytest
 from news_intel import pipeline
 from news_intel.core import dag
 from news_intel.prompts import ClassificationOutput, EvaluationOutput, SummaryOutput
-from news_intel.providers import OpenAICompatibleProvider, ProviderResponse, Usage
+from news_intel.providers import FallbackProvider, OpenAICompatibleProvider, ProviderResponse, Usage
 from news_intel.sources import RawArticle
 
 
@@ -67,6 +67,69 @@ class MeteredProvider:
 
     def summarize(self, article, examples=()):
         return self._response(SummaryOutput(optimized_title=article.title, one_line=article.title))
+
+
+class Failing:
+    def __init__(self, exc, name="failing", model="f1"):
+        self.exc, self.name, self.model = exc, name, model
+        self.supports_structured_output = True
+
+    def classify(self, article, examples=()):
+        raise self.exc
+
+    def evaluate(self, article, category, examples=()):
+        raise self.exc
+
+    def summarize(self, article, examples=()):
+        raise self.exc
+
+
+def test_fallback_provider_tries_the_backup_after_exhausted_retries():
+    wrapped = FallbackProvider(Failing(dag.Transient("exhausted")), MeteredProvider())
+    response = wrapped.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
+    assert response.usage.provider == "fake"
+
+
+def test_fallback_provider_tries_the_backup_after_a_fatal_auth_error():
+    wrapped = FallbackProvider(Failing(dag.Fatal("auth failed")), MeteredProvider())
+    response = wrapped.evaluate(RawArticle(source="test", url="https://test/1", title="خبر"), "security")
+    assert response.usage.provider == "fake"
+
+
+def test_fallback_provider_never_falls_back_on_a_budget_error():
+    """Falling back on a budget ceiling would just keep spending past it."""
+    wrapped = FallbackProvider(Failing(dag.BudgetExceeded("over budget")), MeteredProvider())
+    with pytest.raises(dag.BudgetExceeded):
+        wrapped.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
+
+
+def test_fallback_provider_reraises_when_the_backup_also_fails():
+    wrapped = FallbackProvider(Failing(dag.Transient("a")), Failing(dag.Permanent("b")))
+    with pytest.raises(dag.Permanent, match="b"):
+        wrapped.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
+
+
+def test_fallback_provider_static_identity_is_a_composite_of_both_backends():
+    wrapped = FallbackProvider(Failing(dag.Transient("x")), MeteredProvider())
+    assert wrapped.name == "failing+fake"
+    assert wrapped.model == "f1+fake-v1"
+
+
+def test_pipeline_records_the_backend_that_actually_answered_not_the_route_identity(conn):
+    """A FallbackProvider's own .name/.model are a static composite for the exists-check;
+    the persisted row must reflect whichever backend actually produced it."""
+    wrapped = FallbackProvider(Failing(dag.Transient("down")), MeteredProvider())
+    article = RawArticle(
+        source="test", url="https://test/2", title="حمله موشکی به تاسیسات نفتی کشور",
+        lead="جزئیات حادثه", content="متن کامل خبر",
+        published_at="2026-08-16T10:00:00+03:30",
+    )
+    pipeline.process(conn, [article], wrapped, run_id="fallback-run")
+    row = conn.execute(
+        "SELECT provider, model FROM classifications WHERE article_id="
+        "(SELECT id FROM articles WHERE url=?)", (article.url,)
+    ).fetchone()
+    assert row["provider"] == "fake" and row["model"] == "fake-v1"
 
 
 def test_pipeline_persists_provider_usage_in_node_events(conn):

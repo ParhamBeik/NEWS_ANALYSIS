@@ -153,31 +153,47 @@ def _block(label: str, row: dict[str, Any]) -> str:
     )
 
 
-def compare(conn: sqlite3.Connection, *, a: Variant, b: Variant, out_dir: Path) -> dict[str, Any]:
-    """Diff two already-run prompt/provider variants over their shared articles.
+def diff_variants(conn: sqlite3.Connection, a: Variant, b: Variant) -> list[dict[str, Any]]:
+    """Per-article diff between two already-run variants, for their shared articles.
 
     Reads from rows already stored by `cli run` - inference is append-only, so running
     the same articles under two prompt versions (or two providers) just means two prior
-    `run` invocations, and this reads both instead of paying for a third call. Mirrors
-    legacy's pipeline_comparison_{same,different,all}.txt so a human can judge which
-    variant is better before either one becomes the default in config/routing.yaml.
+    `run` invocations, and this reads both instead of paying for a third call. Each
+    record carries `agree` plus both sides' full row under `a`/`b`. Shared by the
+    `compare` CLI command (writes txt files from this) and the dashboard's read-only
+    A/B page (renders it directly, no file I/O).
     """
     a_rows, b_rows = _variant_rows(conn, a), _variant_rows(conn, b)
     if not a_rows:
         raise ValueError(f"no rows for variant A ({a.provider}/{a.prompt_version}); run it first")
     if not b_rows:
         raise ValueError(f"no rows for variant B ({b.provider}/{b.prompt_version}); run it first")
-    shared = sorted(set(a_rows) & set(b_rows))
+    return [
+        {
+            "article_id": article_id,
+            "title": a_rows[article_id]["title"],
+            "url": a_rows[article_id]["url"],
+            "agree": _verdict(a_rows[article_id]) == _verdict(b_rows[article_id]),
+            "a": a_rows[article_id],
+            "b": b_rows[article_id],
+        }
+        for article_id in sorted(set(a_rows) & set(b_rows))
+    ]
 
+
+def compare(conn: sqlite3.Connection, *, a: Variant, b: Variant, out_dir: Path) -> dict[str, Any]:
+    """Write comparison_{same,different,all}.txt for two variants, mirroring legacy's
+    pipeline_comparison_{same,different,all}.txt, so a human can judge which variant is
+    better before either one becomes the default in config/routing.yaml.
+    """
+    records = diff_variants(conn, a, b)
     same_lines, diff_lines, all_lines = [], [], []
     same_count = 0
-    for article_id in shared:
-        left, right = a_rows[article_id], b_rows[article_id]
-        header = f"{left['title']}\n{left['url']}"
-        agree = _verdict(left) == _verdict(right)
-        block = f"{header}\n{_block('A', left)}\n{_block('B', right)}\n" + "-" * 50
-        all_lines.append(("same" if agree else "different") + " | " + block)
-        if agree:
+    for record in records:
+        header = f"{record['title']}\n{record['url']}"
+        block = f"{header}\n{_block('A', record['a'])}\n{_block('B', record['b'])}\n" + "-" * 50
+        all_lines.append(("same" if record["agree"] else "different") + " | " + block)
+        if record["agree"]:
             same_count += 1
             same_lines.append(block)
         else:
@@ -188,9 +204,9 @@ def compare(conn: sqlite3.Connection, *, a: Variant, b: Variant, out_dir: Path) 
     (out_dir / "comparison_different.txt").write_text("\n\n".join(diff_lines), encoding="utf-8")
     (out_dir / "comparison_all.txt").write_text("\n\n".join(all_lines), encoding="utf-8")
     return {
-        "shared_articles": len(shared),
+        "shared_articles": len(records),
         "same": same_count,
-        "different": len(shared) - same_count,
+        "different": len(records) - same_count,
         "out_dir": str(out_dir),
     }
 

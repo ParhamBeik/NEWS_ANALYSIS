@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}بازبینی خبر{% endblock %}
+{% block title %}Review{% endblock %}
 {% block head %}
 <style>
   .progress-row { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
@@ -13,7 +13,7 @@
      the reviewer needs the text visible the whole time they are answering about it. */
   .article { position: sticky; top: 76px; }
 
-  /* The article block: the thing the reviewer actually reads. */
+  /* The article block: the thing the reviewer actually reads. Persian, so scoped RTL. */
   .article { padding: 26px 28px; }
   .article .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
   .article .title {
@@ -30,7 +30,7 @@
   }
   .article .body::-webkit-scrollbar { width: 8px; }
   .article .body::-webkit-scrollbar-thumb { background: var(--baseline); border-radius: 99px; }
-  .article .src { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--grid); font-size: 12px; }
+  .article .src { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--grid); font-size: 12px; direction: ltr; text-align: left; }
   /* Percent-encoded Persian URLs run to 200+ characters; unconstrained they wrap over
      five lines and visually outweigh the article itself. */
   .article .src a {
@@ -80,44 +80,44 @@
 
 {% block content %}
 {% if not case %}
-  <h1>بازبینی خبر</h1>
+  <h1>Review</h1>
   <div class="card empty">
-    <p style="font-size:15px;margin:0 0 8px">همه موارد صف بازبینی بررسی شده‌اند.</p>
-    <p style="margin:0 0 18px">برای ساخت صف جدید:
+    <p style="font-size:15px;margin:0 0 8px">Every case in the review queue has been reviewed.</p>
+    <p style="margin:0 0 18px">To build a new queue:
       <code>python -m news_intel.cli review-queue --size 100</code></p>
-    <a class="btn" href="/kpi">مشاهده شاخص‌ها</a>
+    <a class="btn" href="/kpi">View quality metrics</a>
   </div>
 {% else %}
-  <h1>بازبینی خبر</h1>
-  <p class="sub">پاسخ مدل از پیش انتخاب شده است؛ فقط موارد نادرست را اصلاح کنید.</p>
+  <h1>Review</h1>
+  <p class="sub">The model's answer is pre-selected; only correct what's wrong.</p>
 
   <div class="progress-row">
-    <span class="count">{{ done }} از {{ total }}</span>
+    <span class="count">{{ done }} of {{ total }}</span>
     <span class="bar"><i style="width: {{ percent }}%"></i></span>
-    <span class="count">{{ percent }}٪</span>
+    <span class="count">{{ percent }}%</span>
   </div>
 
   <form method="post" action="/review/{{ case.review_id }}">
   <div class="split">
-    <section class="card article">
+    <section class="card article rtl">
       <div class="meta">
         <span class="pill">{{ case.outlet or case.source }}</span>
         {% if case.published %}<span class="pill">{{ case.published }}</span>{% endif %}
-        <span class="pill">دسته نمونه: {{ case.stratum }}</span>
+        <span class="pill">Stratum: {{ case.stratum }}</span>
       </div>
       <h2 class="title">{{ case.title }}</h2>
       {% if case.lead %}<p class="lead">{{ case.lead }}</p>{% endif %}
-      <div class="body">{{ case.content or "متن کامل در دسترس نیست." }}</div>
-      <div class="src">منبع: <a href="{{ case.url }}" target="_blank" rel="noopener">{{ case.url | short_url }}</a></div>
+      <div class="body">{{ case.content or "Full text not available." }}</div>
+      <div class="src">Source: <a href="{{ case.url }}" target="_blank" rel="noopener">{{ case.url | short_url }}</a></div>
     </section>
 
     <section class="card">
       {% if case.model_rationale %}
-        <div class="rationale"><b>استدلال مدل:</b> {{ case.model_rationale }}</div>
+        <div class="rationale"><b>Model rationale:</b> <span class="rtl" style="display:inline">{{ case.model_rationale }}</span></div>
       {% endif %}
 
       <fieldset>
-        <legend>دسته‌بندی</legend>
+        <legend>Category</legend>
         <div class="choices">
           {% for value, label in categories %}
             <input type="radio" id="cat-{{ loop.index }}" name="reviewed_category"
@@ -126,7 +126,7 @@
           {% endfor %}
         </div>
         {% if case.model_category %}
-          <div class="model-said">مدل: <b>{{ case.model_category }}</b></div>
+          <div class="model-said">Model: <b>{{ case.model_category }}</b></div>
         {% endif %}
       </fieldset>
 
@@ -138,43 +138,43 @@
           {% for level in levels %}
             <input type="radio" id="{{ axis.name }}-{{ loop.index }}" name="{{ axis.name }}"
                    value="{{ level }}" {{ 'checked' if axis.value == level }}>
-            <label for="{{ axis.name }}-{{ loop.index }}">{{ level }}</label>
+            <label for="{{ axis.name }}-{{ loop.index }}">{{ level_labels.get(level, level) }}</label>
           {% endfor %}
           <input type="radio" id="{{ axis.name }}-none" name="{{ axis.name }}"
                  value="" {{ 'checked' if not axis.value }}>
-          <label class="none" for="{{ axis.name }}-none">ارزیابی نشد</label>
+          <label class="none" for="{{ axis.name }}-none">Not assessed</label>
         </div>
-        <div class="model-said">مدل: <b>{{ axis.value or "ارزیابی نشد" }}</b></div>
+        <div class="model-said">Model: <b>{{ level_labels.get(axis.value, axis.value) if axis.value else "Not assessed" }}</b></div>
       </fieldset>
       {% endfor %}
 
       <fieldset>
-        <legend>جهت طلا</legend>
+        <legend>Gold trend</legend>
         <div class="choices">
           {% for trend in trends %}
             <input type="radio" id="trend-{{ loop.index }}" name="gold_trend"
                    value="{{ trend }}" {{ 'checked' if case.gold_trend == trend }}>
-            <label for="trend-{{ loop.index }}">{{ trend }}</label>
+            <label for="trend-{{ loop.index }}">{{ trend_labels.get(trend, trend) }}</label>
           {% endfor %}
           <input type="radio" id="trend-none" name="gold_trend" value=""
                  {{ 'checked' if not case.gold_trend }}>
-          <label class="none" for="trend-none">ندارد</label>
+          <label class="none" for="trend-none">None</label>
         </div>
       </fieldset>
 
       <fieldset>
-        <legend>خلاصه یک‌خطی</legend>
-        <textarea name="one_line" rows="2">{{ case.one_line or "" }}</textarea>
+        <legend>One-line summary</legend>
+        <textarea name="one_line" rows="2" class="rtl">{{ case.one_line or "" }}</textarea>
       </fieldset>
 
       <fieldset>
-        <legend>یادداشت بازبین</legend>
-        <input type="text" name="reviewer_notes" value="" placeholder="اختیاری">
+        <legend>Reviewer notes</legend>
+        <input type="text" name="reviewer_notes" value="" placeholder="Optional">
       </fieldset>
 
       <div class="actions">
-        <button type="submit" class="primary" name="action" value="approve">ثبت و بعدی</button>
-        <button type="submit" name="action" value="skip">رد کردن</button>
+        <button type="submit" class="primary" name="action" value="approve">Submit and next</button>
+        <button type="submit" name="action" value="skip">Skip</button>
         <span class="spacer"></span>
       </div>
     </section>
