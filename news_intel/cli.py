@@ -41,7 +41,16 @@ def run_once(args: argparse.Namespace) -> dict[str, int]:
     with conn:
         stats = pipeline.process(conn, collected, providers)
     window_days = int(db.get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
-    stats["backfilled"] = sum(backfill.ensure_window(conn, specs, providers, days=window_days).values())
+    # Backfill always classifies on the free offline baseline, never the run's real
+    # provider - a coverage gap can mean hundreds of articles, and paying to label all of
+    # them as a silent side effect of a routine `run --provider gapgpt` is not something
+    # a budget ceiling catching it after the fact makes acceptable. Re-run classification
+    # at a real provider later (`cli replay --node classify`) if current-quality labels
+    # matter for the backfilled window.
+    backfill_providers = {node: make_provider("rule") for node in ("classify", "evaluate", "summarize")}
+    stats["backfilled"] = sum(
+        backfill.ensure_window(conn, specs, backfill_providers, days=window_days).values()
+    )
     if args.export:
         exports.export_all(conn, config.OUTPUT_DIR)
     conn.close()

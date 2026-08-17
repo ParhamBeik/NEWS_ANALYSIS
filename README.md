@@ -175,7 +175,11 @@ session, not imported from `LEGACY/` — capped at a fixed page depth per attemp
 (`ponytail:` comment in `sources.py` names the ceiling and its cost tradeoff) with a
 6-hour retry cooldown so a structurally unfillable gap isn't re-attempted every cycle.
 shahrekhabar has no such endpoint in the legacy code either, so it stays single-page,
-and `/ops` shows its coverage honestly rather than pretending.
+and `/ops` shows its coverage honestly rather than pretending. Backfilled articles always
+classify/evaluate/summarize on the free `rule` baseline (`cli.py:run_once`), never
+whatever real provider the cycle was given - a coverage gap can mean hundreds of
+articles, and a routine `run --provider gapgpt` silently paying to label all of them is
+not something the `$1` budget ceiling catching it after the fact makes acceptable.
 
 **Provider fallback never overrides the budget guard.** `config/routing.yaml` can give
 any node a `fallback:` provider, wrapped by `providers.FallbackProvider`. It catches
