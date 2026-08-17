@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}شاخص‌های عملکرد مدل{% endblock %}
+{% block head %}
+<style>
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .tile .label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
+  .tile .value { font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
+  .tile .value small { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .tile .note { font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+  /* Sequential single-hue ramp, light -> dark, for magnitude. Never a rainbow. */
+  .matrix td.cell { text-align: center; font-variant-numeric: tabular-nums; position: relative; }
+  .matrix td.cell span { position: relative; z-index: 1; }
+  .matrix td.cell i {
+    position: absolute; inset: 2px; border-radius: 4px; display: block; z-index: 0;
+  }
+  .matrix th.rowhead { text-align: right; color: var(--text-secondary); font-weight: 600; }
+  .matrix caption { caption-side: top; text-align: right; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+  .diag { outline: 1px solid var(--good); outline-offset: -2px; border-radius: 4px; }
+
+  .barrow { display: flex; align-items: center; gap: 10px; }
+  .barrow .track { flex: 1; height: 8px; background: var(--grid); border-radius: 99px; overflow: hidden; }
+  .barrow .track > i { display: block; height: 100%; background: var(--series-1); border-radius: 99px; }
+  .barrow .pct { font-size: 12px; color: var(--text-secondary); width: 46px; font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>شاخص‌های عملکرد مدل</h1>
+<p class="sub">همه اعداد بر پایه مقایسه خروجی مدل با برچسب‌های تأییدشده انسانی است.</p>
+
+{% if report.labelled == 0 %}
+  <div class="card empty">
+    <p style="font-size:15px;margin:0 0 8px">هنوز برچسب تأییدشده‌ای ثبت نشده است.</p>
+    <p style="margin:0 0 18px">تا زمانی که موارد بازبینی نشوند، دقت مدل قابل اندازه‌گیری نیست.</p>
+    <a class="btn" href="/review">شروع بازبینی</a>
+  </div>
+{% else %}
+  <div class="tiles">
+    <div class="tile">
+      <div class="label">موارد برچسب‌خورده</div>
+      <div class="value">{{ report.labelled }}<small> / {{ report.labelled + report.pending }}</small></div>
+      <div class="note">{{ (report.progress * 100) | round(0) | int }}٪ از صف بازبینی</div>
+    </div>
+    <div class="tile">
+      <div class="label">صحت دسته‌بندی</div>
+      <div class="value">{{ pct(report.category_accuracy) }}</div>
+      <div class="note">{{ report.category_correct }} از {{ report.category_compared }} مورد</div>
+    </div>
+    <div class="tile">
+      <div class="label">میانگین F1 (ماکرو)</div>
+      <div class="value">{{ pct(report.macro_f1) }}</div>
+      <div class="note">میانگین چهار دسته، بدون وزن حجم</div>
+    </div>
+    <div class="tile">
+      <div class="label">دقت هشدار</div>
+      <div class="value">{{ pct(report.notify_precision) }}</div>
+      <div class="note">بازیابی: {{ pct(report.notify_recall) }}</div>
+    </div>
+  </div>
+
+  <h2>ماتریس درهم‌ریختگی دسته‌بندی</h2>
+  <div class="card">
+    <table class="matrix">
+      <caption>سطر: برچسب انسانی · ستون: پیش‌بینی مدل · قطر سبز = درست</caption>
+      <thead>
+        <tr><th></th>{% for c in categories %}<th class="num">{{ c }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for truth in categories %}
+        <tr>
+          <th class="rowhead">{{ truth }}</th>
+          {% for pred in categories %}
+            {% set n = report.confusion[truth][pred] %}
+            <td class="cell {{ 'diag' if truth == pred }}">
+              <i style="background: {{ ramp(n) }}"></i><span>{{ n or '' }}</span>
+            </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>دقت هر دسته</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>دسته</th><th class="num">تعداد</th><th class="num">دقت</th><th class="num">بازیابی</th><th class="num">F1</th></tr></thead>
+      <tbody>
+      {% for m in report.per_class %}
+        <tr>
+          <td>{{ m.label }}</td>
+          <td class="num">{{ m.support }}</td>
+          <td class="num">{{ pct(m.precision) }}</td>
+          <td class="num">{{ pct(m.recall) }}</td>
+          <td class="num">{{ pct(m.f1) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>دقت محورهای امتیازدهی</h2>
+  <div class="card">
+    <p class="sub" style="margin-bottom:14px">
+      این محورها ترتیبی‌اند، پس «تا یک سطح اختلاف» معیار واقع‌بینانه‌تری از تطابق دقیق است.
+    </p>
+    <table>
+      <thead><tr><th>محور</th><th class="num">مقایسه‌شده</th><th class="num">تطابق دقیق</th><th style="width:180px">تا یک سطح</th><th class="num">خطای میانگین</th><th class="num">اختلاف در ارزیابی‌نشدن</th></tr></thead>
+      <tbody>
+      {% for a in report.axes %}
+        <tr>
+          <td>{{ axis_labels[a.axis] }}</td>
+          <td class="num">{{ a.compared }}</td>
+          <td class="num">{{ pct(a.exact_rate) }}</td>
+          <td>
+            <div class="barrow">
+              <span class="track"><i style="width: {{ ((a.within_one_rate or 0) * 100) | round(0) | int }}%"></i></span>
+              <span class="pct">{{ pct(a.within_one_rate) }}</span>
+            </div>
+          </td>
+          <td class="num">{{ '%.2f' % a.mae if a.mae is not none else '—' }}</td>
+          <td class="num">{{ a.disagreed_on_presence }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

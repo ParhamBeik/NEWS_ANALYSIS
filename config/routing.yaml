@@ -1,0 +1,33 @@
+# Which model answers which node.
+#
+# Used by `python -m news_intel.cli run --provider routed`. An explicit
+# `--provider gapgpt` overrides this file entirely for a one-off run.
+#
+# Providers: rule (offline keyword baseline, free, no network)
+#            gapgpt (hosted, OpenAI-compatible; needs GAPGPT_API_KEY)
+#            ollama (local, OpenAI-compatible; needs Ollama running)
+#
+# `model` is optional. Leave it out and the provider uses its configured default
+# (GAPGPT_MODEL / OLLAMA_MODEL in .env), so model upgrades happen in one place.
+
+default:
+  provider: gapgpt
+
+nodes:
+  # Four-way choice over a title and lead. The cheapest node, and the one to move to a
+  # local model first when you try that: if a 7B model can do this, most of the run's
+  # token spend goes away and nothing that decides a notification has changed.
+  classify:
+    provider: gapgpt
+
+  # Produces the three ordinal scores that feed the notify decision. Being wrong here is
+  # what silently suppressed every security alert in the legacy pipeline, so this is the
+  # last node to move off the strongest model available - and only once /kpi shows the
+  # local model matching on the review set.
+  evaluate:
+    provider: gapgpt
+
+  # Rewrites a headline and writes one line of Persian. Quality here is visible to a
+  # human reading the workbook, not to the decision logic; a local model is fine.
+  summarize:
+    provider: gapgpt

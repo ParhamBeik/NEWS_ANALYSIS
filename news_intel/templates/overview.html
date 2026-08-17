@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}وضعیت سامانه{% endblock %}
+{% block head %}
+<style>
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 6px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 15px 17px; }
+  .tile .label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 5px; }
+  .tile .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+  .dot.good { background: var(--good); } .dot.bad { background: var(--critical); }
+  .dot.unknown { background: var(--muted); }
+  code { font-size: 12px; background: var(--page); padding: 1px 6px; border-radius: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>وضعیت سامانه</h1>
+<p class="sub">پایش اجراها، منابع و خطاها. این صفحه فقط خواندنی است.</p>
+
+<div class="tiles">
+  <div class="tile"><div class="label">کل اخبار</div><div class="value">{{ totals.articles }}</div></div>
+  <div class="tile"><div class="label">اخبار یکتا</div><div class="value">{{ totals.canonical }}</div></div>
+  <div class="tile"><div class="label">دسته‌بندی‌شده</div><div class="value">{{ totals.classifications }}</div></div>
+  <div class="tile"><div class="label">در قرنطینه</div><div class="value">{{ totals.dead }}</div></div>
+</div>
+
+<h2>سلامت منابع</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>منبع</th><th>وضعیت</th><th class="num">اولویت</th><th>آخرین موفقیت</th><th>آخرین خطا</th></tr></thead>
+    <tbody>
+    {% for s in sources %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td><span class="dot {{ 'good' if s.health_status == 'healthy' else 'bad' if s.health_status == 'degraded' else 'unknown' }}"></span>
+            {{ s.health_status }}</td>
+        <td class="num">{{ s.priority }}</td>
+        <td>{{ (s.last_success_at or '—')[:19] }}</td>
+        <td>{{ (s.last_error or '—')[:60] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>اجراهای اخیر</h2>
+<div class="card" hx-get="/partials/runs" hx-trigger="load, every 30s">{{ runs_html | safe }}</div>
+
+<h2>دلایل قرنطینه</h2>
+<div class="card">
+  {% if dead_reasons %}
+  <table>
+    <thead><tr><th>مرحله</th><th>دلیل</th><th class="num">تعداد</th></tr></thead>
+    <tbody>
+    {% for d in dead_reasons %}
+      <tr><td>{{ d.node }}</td><td><code>{{ d.error_class }}</code></td><td class="num">{{ d.n }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty" style="padding:20px">موردی در قرنطینه نیست.</p>
+  {% endif %}
+</div>
+{% endblock %}
