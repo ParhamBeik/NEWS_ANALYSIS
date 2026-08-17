@@ -41,6 +41,20 @@ class TestCleanVersusFold:
     def test_clean_preserves_zwnj(self):
         assert n.clean("می‌رود") == "می‌رود"
 
+    def test_clean_decodes_literal_html_entities(self):
+        """khabarfoori's JSON-LD carries &zwnj;/&laquo; as literal text, not the real
+        character. Undecoded, it's six visible garbage characters to a reader, and
+        content_hash()/fold() - which both run on already-clean()'d text - would treat
+        them as six extra characters no dedup rule ever accounts for."""
+        assert n.clean("دانش&zwnj;آموز") == "دانش‌آموز"
+        assert n.clean("&laquo;متن&raquo;") == "«متن»"
+
+    def test_an_undecoded_entity_would_have_broken_dedup_too(self):
+        """Same story, one copy with the raw entity, one with the real character - after
+        clean() (which every source runs before constructing a RawArticle), content_hash
+        must treat them as identical."""
+        assert n.content_hash(n.clean("دانش&zwnj;آموز"), "", "") == n.content_hash(n.clean("دانش‌آموز"), "", "")
+
     def test_fold_removes_zwnj_so_spellings_match(self):
         assert n.fold("می‌رود") == n.fold("میرود")
 

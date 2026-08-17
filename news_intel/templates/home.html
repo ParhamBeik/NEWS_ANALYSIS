@@ -17,12 +17,15 @@
   .story .scores { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .story .scores .pill { font-variant-numeric: tabular-nums; }
   .story a.src { font-size: 12px; }
+  .pager { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 20px 0; }
+  .pager span { font-size: 13px; color: var(--text-secondary); }
 </style>
 {% endblock %}
 
 {% block content %}
 <h1>Home</h1>
-<p class="sub">News that scored high enough to notify, in the last {{ window_days }} days.</p>
+<p class="sub">News that scored high enough to notify, in the last {{ window_days }} days
+  {% if total_count %}({{ total_count }} total){% endif %}.</p>
 
 <form class="window-form" method="post" action="/settings/window">
   <label for="days">Rolling window (days)</label>
@@ -56,5 +59,14 @@
     </div>
   {% endfor %}
   </div>
+  {% if total_pages > 1 %}
+  <div class="pager">
+    <a class="btn{% if current_page <= 1 %} disabled{% endif %}"
+       href="/?page={{ current_page - 1 }}"{% if current_page <= 1 %} aria-disabled="true" tabindex="-1"{% endif %}>Previous</a>
+    <span>Page {{ current_page }} of {{ total_pages }}</span>
+    <a class="btn{% if current_page >= total_pages %} disabled{% endif %}"
+       href="/?page={{ current_page + 1 }}"{% if current_page >= total_pages %} aria-disabled="true" tabindex="-1"{% endif %}>Next</a>
+  </div>
+  {% endif %}
 {% endif %}
 {% endblock %}

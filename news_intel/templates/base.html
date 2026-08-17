@@ -66,6 +66,7 @@
   th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
   th { color: var(--muted); font-weight: 600; font-size: 12px; }
   td.num, th.num { font-variant-numeric: tabular-nums; text-align: right; }
+  td code { font-size: 12px; background: var(--surface-2, var(--surface-1)); padding: 2px 6px; border-radius: 5px; cursor: help; }
   /* Scoped wrapper for the article content itself, which is Persian and reads RTL -
      the page around it stays English/LTR. */
   .rtl { direction: rtl; text-align: right; }
@@ -83,6 +84,7 @@
   }
   button.primary { background: var(--series-1); color: #fff; border-color: transparent; font-weight: 600; }
   button:disabled { opacity: .5; cursor: not-allowed; }
+  a.btn.disabled { opacity: .5; pointer-events: none; }
 </style>
 {% block head %}{% endblock %}
 </head>

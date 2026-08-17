@@ -14,6 +14,7 @@ outlet under two names: 'ايسنا' with Arabic YEH (1,177 rows) and 'ایسن�
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 import unicodedata
 
@@ -56,12 +57,21 @@ def fold_digits(text: str) -> str:
 
 
 def clean(text: str) -> str:
-    """Display-safe normalization: NFC, collapse whitespace, strip.
+    """Display-safe normalization: unescape HTML entities, NFC, collapse whitespace, strip.
 
     Preserves ZWNJ and letter identity - this text is read by humans and by the LLM,
     and mangling it changes meaning.
+
+    Some sources' JSON-LD carries HTML-entity-encoded text (`&zwnj;`, `&laquo;`) as a
+    literal string rather than the real character, which BeautifulSoup's parser does not
+    unescape a second time. Left alone, `&zwnj;` sits in the title/lead/content as six
+    visible characters instead of the zero-width joiner it names - visible to a reader,
+    and also six extra characters `fold()` never strips, since content_hash() and title
+    trigram matching both run on clean()'d text, so undecoded entities silently degraded
+    dedup too, not just display.
     """
-    text = unicodedata.normalize("NFC", text or "")
+    text = html.unescape(text or "")
+    text = unicodedata.normalize("NFC", text)
     text = text.replace("\xa0", " ")
     return _WHITESPACE.sub(" ", text).strip()
 
@@ -110,6 +120,8 @@ if __name__ == "__main__":
     assert fold("می‌رود") == "میرود", "ZWNJ must not split a word for matching"
     assert clean("می‌رود") == "می‌رود", "clean() must preserve ZWNJ"
     assert clean("  a\xa0 b ") == "a b"
+    assert clean("دانش&zwnj;آموز") == "دانش‌آموز", "literal HTML entities must decode"
+    assert clean("&laquo;متن&raquo;") == "«متن»"
     assert jaccard(trigrams("حمله موشکی به تاسیسات"), trigrams("حمله موشكی به تاسیسات")) > 0.9
     assert content_hash("a", "b", "c") == content_hash("a", "b", "c")
     assert content_hash("a", "b", "c") != content_hash("a", "b", "d")

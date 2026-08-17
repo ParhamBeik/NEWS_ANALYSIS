@@ -70,7 +70,7 @@
             {{ s.health_status }}</td>
         <td class="num">{{ s.priority }}</td>
         <td>{{ (s.last_success_at or '—')[:19] }}</td>
-        <td>{{ (s.last_error or '—')[:60] }}</td>
+        <td>{% if s.last_error %}<code title="{{ s.last_error }}">{{ s.last_error[:60] }}{% if s.last_error|length > 60 %}…{% endif %}</code>{% else %}—{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -109,7 +109,7 @@
         data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).cost_usd || 0),
         borderColor: '#2a78d6', tension: 0.2,
       }] },
-      options: { plugins: { title: { display: true, text: 'Cost per day' } } },
+      options: { plugins: { title: { display: true, text: 'Cost per day' } }, scales: { y: { beginAtZero: true } } },
     });
 
     new Chart(document.getElementById('tokensChart'), {

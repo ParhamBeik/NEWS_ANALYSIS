@@ -117,8 +117,10 @@ def create_app(path: Path | None = None):
 
     # --------------------------------------------------------------- home
 
+    HOME_PAGE_SIZE = 30  # ponytail: fixed page size, add a picker if users ever ask for one
+
     @app.get("/", response_class=HTMLResponse)
-    def home(request: Request):
+    def home(request: Request, page: int = 1):
         with read() as conn:
             days = window_days(conn)
             rows = conn.execute(
@@ -143,11 +145,17 @@ def create_app(path: Path | None = None):
                 row["confidence_occurrence"], row["gold_price_impact"], row["security_relevance"]
             ).notify
         ]
+        total_pages = max(1, -(-len(notify) // HOME_PAGE_SIZE))
+        page = min(max(1, page), total_pages)
+        start = (page - 1) * HOME_PAGE_SIZE
         return templates.TemplateResponse(request, "home.html", {
             "page": "home",
             "window_days": days,
-            "articles": notify,
+            "articles": notify[start : start + HOME_PAGE_SIZE],
             "category_labels": dict(CATEGORY_LABELS),
+            "total_count": len(notify),
+            "current_page": page,
+            "total_pages": total_pages,
         })
 
     @app.post("/settings/window")
