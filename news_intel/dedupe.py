@@ -41,9 +41,9 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-from .core import normalize
+from .core import dates, normalize
 
 THRESHOLD = 0.75
 WINDOW_HOURS = 36
@@ -64,11 +64,8 @@ class Match:
 
 def _window(published_at: str | None) -> tuple[str, str] | None:
     """ISO strings compare lexicographically, so a string BETWEEN is a valid time window."""
-    if not published_at:
-        return None
-    try:
-        moment = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-    except ValueError:
+    moment = dates.parse_iso(published_at)
+    if moment is None:
         return None
     span = timedelta(hours=WINDOW_HOURS)
     return (moment - span).isoformat(), (moment + span).isoformat()

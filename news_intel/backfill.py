@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 import jdatetime
 
 from . import pipeline, sources
-from .core import db
+from .core import dates, db
 
 # Skip re-attempting a source whose gap didn't close on the last try. Prevents hammering
 # a source every cycle over a gap that's structurally unfillable (e.g. no article was
@@ -23,13 +23,9 @@ from .core import db
 _RETRY_COOLDOWN_HOURS = 6
 
 
-def _jalali_str(value: jdatetime.date) -> str:
-    return f"{value.year:04d}-{value.month:02d}-{value.day:02d}"
-
-
 def _window_dates(days: int) -> list[str]:
     today = jdatetime.date.today()
-    return [_jalali_str(today - timedelta(days=offset)) for offset in range(days)]
+    return [dates.jalali_str(today - timedelta(days=offset)) for offset in range(days)]
 
 
 def coverage(conn: sqlite3.Connection, source: str, days: int) -> set[str]:

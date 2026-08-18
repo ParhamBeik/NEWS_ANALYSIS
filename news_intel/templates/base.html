@@ -43,14 +43,16 @@
   }
   header {
     background: var(--surface-1); border-bottom: 1px solid var(--border);
-    padding: 0 24px; display: flex; align-items: center; gap: 28px;
+    padding: 0 24px; display: flex; align-items: center; gap: 28px; flex-wrap: wrap;
     position: sticky; top: 0; z-index: 10;
   }
-  header .brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; padding: 16px 0; }
-  header nav { display: flex; gap: 4px; }
+  header .brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; padding: 16px 0; white-space: nowrap; }
+  /* Scrolls horizontally rather than wrapping mid-word once five tabs no longer fit
+     next to the brand - narrow phones (~390px) hit this on every page. */
+  header nav { display: flex; gap: 4px; overflow-x: auto; max-width: 100%; }
   header nav a {
     color: var(--text-secondary); text-decoration: none; font-size: 14px;
-    padding: 16px 14px; border-bottom: 2px solid transparent;
+    padding: 16px 14px; border-bottom: 2px solid transparent; white-space: nowrap;
   }
   header nav a:hover { color: var(--text-primary); }
   header nav a.active { color: var(--series-1); border-bottom-color: var(--series-1); }

@@ -12,10 +12,7 @@ from typing import Any
 
 from . import backfill
 from . import sources as sources_module
-
-
-def _floor(days: int) -> str:
-    return f"-{max(days, 1) - 1} days"
+from .core import db
 
 
 def token_cost_by_day(conn: sqlite3.Connection, days: int) -> list[dict[str, Any]]:
@@ -24,7 +21,7 @@ def token_cost_by_day(conn: sqlite3.Connection, days: int) -> list[dict[str, Any
         " SUM(tokens_out) AS tokens_out, SUM(cost_usd) AS cost_usd"
         " FROM node_events WHERE created_at >= date('now', ?)"
         " GROUP BY day ORDER BY day",
-        (_floor(days),),
+        (db.day_floor(days),),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -33,7 +30,7 @@ def node_status_counts(conn: sqlite3.Connection, days: int) -> list[dict[str, An
     rows = conn.execute(
         "SELECT node, status, COUNT(*) AS n FROM node_events"
         " WHERE created_at >= date('now', ?) GROUP BY node, status ORDER BY node, status",
-        (_floor(days),),
+        (db.day_floor(days),),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -44,7 +41,7 @@ def provider_breakdown(conn: sqlite3.Connection, days: int) -> list[dict[str, An
         " SUM(tokens_out) AS tokens_out, SUM(cost_usd) AS cost_usd"
         " FROM node_events WHERE created_at >= date('now', ?) AND provider IS NOT NULL"
         " GROUP BY provider, model ORDER BY cost_usd DESC",
-        (_floor(days),),
+        (db.day_floor(days),),
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -53,13 +50,13 @@ def fetch_volume_by_source(conn: sqlite3.Connection, days: int) -> list[dict[str
     rows = conn.execute(
         "SELECT source, date(fetched_at) AS day, COUNT(*) AS n FROM articles"
         " WHERE fetched_at >= date('now', ?) GROUP BY source, day ORDER BY day, source",
-        (_floor(days),),
+        (db.day_floor(days),),
     ).fetchall()
     return [dict(row) for row in rows]
 
 
 def funnel(conn: sqlite3.Connection, days: int) -> dict[str, int]:
-    floor = _floor(days)
+    floor = db.day_floor(days)
     fetched = conn.execute(
         "SELECT COUNT(*) c FROM articles WHERE fetched_at >= date('now', ?)", (floor,)
     ).fetchone()["c"]

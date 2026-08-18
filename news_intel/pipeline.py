@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import jdatetime
 
 from . import dedupe, quality
-from .core import config, dag, db, normalize
+from .core import config, dag, dates, db, normalize
 from .prompts import PROMPT_VERSION
 from .providers import Provider, provider_identities
 from .reviews import reviewed_examples
@@ -36,14 +36,12 @@ class Work:
 
 
 def _published_fields(value: str | None) -> tuple[str | None, str | None]:
-    if not value:
+    moment = dates.parse_iso(value)
+    if moment is None:
         return None, None
-    try:
-        moment = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(ZoneInfo(config.TEHRAN_TZ))
-        date = jdatetime.date.fromgregorian(year=moment.year, month=moment.month, day=moment.day)
-        return f"{date.year:04d}-{date.month:02d}-{date.day:02d}", moment.strftime("%H:%M")
-    except ValueError:
-        return None, None
+    moment = moment.astimezone(ZoneInfo(config.TEHRAN_TZ))
+    date = jdatetime.date.fromgregorian(year=moment.year, month=moment.month, day=moment.day)
+    return dates.jalali_str(date), moment.strftime("%H:%M")
 
 
 def upsert_article(conn: sqlite3.Connection, article: RawArticle, run_id: str) -> tuple[int, bool, bool]:
@@ -191,6 +189,13 @@ def process(
             })
         return result
 
+    def _run_if_needed(table: str, version: str, node_provider: Provider, node, work: Work) -> bool:
+        with ctx.lock:
+            needed = not _exists(conn, table, work.article_id, version, node_provider)
+        if needed:
+            node(work, ctx, article_id=work.article_id)
+        return needed
+
     def _process_one(work: Work) -> tuple[bool, bool, bool]:
         """Run one article's classify -> evaluate -> summarize chain.
 
@@ -198,28 +203,15 @@ def process(
         category classify just wrote), but this whole function is dispatched concurrently
         *across* articles - the network wait per node is what parallelizing buys back.
         """
-        classified = evaluated = summarized = False
-        with ctx.lock:
-            needs_classify = not _exists(conn, "classifications", work.article_id, CLASSIFY_VERSION, classifier)
-        if needs_classify:
-            classify(work, ctx, article_id=work.article_id)
-            classified = True
+        classified = _run_if_needed("classifications", CLASSIFY_VERSION, classifier, classify, work)
         with ctx.lock:
             category = conn.execute(
                 "SELECT category FROM latest_classification WHERE article_id=?", (work.article_id,)
             ).fetchone()["category"]
         if category == "other":
-            return classified, evaluated, summarized
-        with ctx.lock:
-            needs_evaluate = not _exists(conn, "evaluations", work.article_id, EVALUATE_VERSION, evaluator)
-        if needs_evaluate:
-            evaluate(work, ctx, article_id=work.article_id)
-            evaluated = True
-        with ctx.lock:
-            needs_summarize = not _exists(conn, "summaries", work.article_id, SUMMARIZE_VERSION, summarizer)
-        if needs_summarize:
-            summarize(work, ctx, article_id=work.article_id)
-            summarized = True
+            return classified, False, False
+        evaluated = _run_if_needed("evaluations", EVALUATE_VERSION, evaluator, evaluate, work)
+        summarized = _run_if_needed("summaries", SUMMARIZE_VERSION, summarizer, summarize, work)
         return classified, evaluated, summarized
 
     try:

@@ -69,6 +69,7 @@ TREND_LABELS = {
     "نامطمئن": "Uncertain (نامطمئن)",
 }
 TRENDS = list(prompts.GOLD_TRENDS)
+CATEGORY_LABEL_MAP = dict(CATEGORY_LABELS)
 
 
 def _percent(value: float | None) -> str:
@@ -105,6 +106,13 @@ def create_app(path: Path | None = None):
     database = path or config.DB_PATH
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     templates.env.filters["short_url"] = _short_url
+    # /compare renders classification/evaluation values straight from storage, which are
+    # the workbook's own Persian vocabulary - every other page runs them through these
+    # maps before display. Without this filter, /compare was the one screen where "UI
+    # chrome is English throughout" didn't hold.
+    templates.env.filters["level_label"] = lambda v: LEVEL_LABELS.get(v, v) if v else "—"
+    templates.env.filters["trend_label"] = lambda v: TREND_LABELS.get(v, v) if v else "—"
+    templates.env.filters["category_label"] = lambda v: CATEGORY_LABEL_MAP.get(v, v) if v else "—"
 
     def read() -> sqlite3.Connection:
         return db.connect(database, readonly=True)
@@ -113,7 +121,7 @@ def create_app(path: Path | None = None):
         return db.connect(database)
 
     def window_days(conn: sqlite3.Connection) -> int:
-        return int(db.get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
+        return db.window_days(conn)
 
     # --------------------------------------------------------------- home
 
@@ -137,7 +145,7 @@ def create_app(path: Path | None = None):
                 WHERE a.duplicate_of IS NULL AND a.fetched_at >= date('now', ?)
                 ORDER BY COALESCE(a.published_at_gregorian, a.fetched_at) DESC, a.id DESC
                 """,
-                (f"-{max(days, 1) - 1} days",),
+                (db.day_floor(days),),
             ).fetchall()
         notify = [
             row for row in rows
@@ -152,7 +160,7 @@ def create_app(path: Path | None = None):
             "page": "home",
             "window_days": days,
             "articles": notify[start : start + HOME_PAGE_SIZE],
-            "category_labels": dict(CATEGORY_LABELS),
+            "category_labels": CATEGORY_LABEL_MAP,
             "total_count": len(notify),
             "current_page": page,
             "total_pages": total_pages,
@@ -207,12 +215,18 @@ def create_app(path: Path | None = None):
 
     # ---------------------------------------------------------------- ops
 
-    def runs_html() -> str:
-        with read() as conn:
-            rows = conn.execute(
-                "SELECT run_id,status,started_at,articles_fetched,articles_processed,cost_usd"
-                " FROM runs ORDER BY started_at DESC LIMIT 10"
-            ).fetchall()
+    def _runs_rows(conn: sqlite3.Connection):
+        return conn.execute(
+            "SELECT run_id,status,started_at,articles_fetched,articles_processed,cost_usd"
+            " FROM runs ORDER BY started_at DESC LIMIT 10"
+        ).fetchall()
+
+    def runs_html(conn: sqlite3.Connection | None = None) -> str:
+        if conn is None:
+            with read() as conn:
+                rows = _runs_rows(conn)
+        else:
+            rows = _runs_rows(conn)
         if not rows:
             return "<p class='empty' style='padding:20px'>No runs recorded yet.</p>"
         body = "".join(
@@ -245,6 +259,10 @@ def create_app(path: Path | None = None):
             dead_total = conn.execute(
                 "SELECT COUNT(*) c FROM dead_letters WHERE resolved_at IS NULL"
             ).fetchone()["c"]
+            first_fetch = conn.execute(
+                "SELECT MIN(fetched_at) f FROM articles"
+            ).fetchone()["f"]
+            rendered_runs = runs_html(conn)
         return templates.TemplateResponse(request, "ops.html", {
             "page": "ops",
             "window_days": days,
@@ -253,7 +271,8 @@ def create_app(path: Path | None = None):
             "dead_total": dead_total,
             "coverage": coverage,
             "funnel": funnel,
-            "runs_html": runs_html(),
+            "runs_html": rendered_runs,
+            "first_fetch_date": (first_fetch or "")[:10],
         })
 
     @app.get("/partials/runs", response_class=HTMLResponse)

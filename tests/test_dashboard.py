@@ -304,5 +304,7 @@ def test_compare_page_renders_a_real_diff_between_two_variants(client):
     # A real <select>'s submitted value goes through form/URL percent-encoding, so build
     # the request the same way rather than embedding the raw control char in a URL string.
     body = client.get("/compare", params={"a": a, "b": b}).text
-    assert "category: security" in body and "category: economics" in body
+    # Category/level/trend values render through the same English labels as every other
+    # page now, not the raw stored vocabulary - see dashboard.py's category_label filter.
+    assert "category: Security" in body and "category: Economics" in body
     assert "Disagreements (1)" in body

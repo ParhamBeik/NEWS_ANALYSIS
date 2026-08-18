@@ -213,14 +213,18 @@ def compare(conn: sqlite3.Connection, *, a: Variant, b: Variant, out_dir: Path) 
 
 def evaluate(cases: list[EvaluationCase], provider: Provider) -> dict[str, Any]:
     categories = [provider.classify(case.article).data.category for case in cases]
+    # One evaluate() call per case: it already returns all three axes together (see
+    # EvaluationOutput), so calling it again per axis below would just triple the
+    # provider requests for the same answers.
+    evaluations = [provider.evaluate(case.article, case.category).data for case in cases]
     report: dict[str, Any] = {"cases": len(cases), "category_accuracy": sum(actual == case.category for actual, case in zip(categories, cases)) / len(cases) if cases else None, "kappa": {}}
     for axis in ("confidence_occurrence", "gold_price_impact", "security_relevance"):
         expected, actual = [], []
-        for case in cases:
+        for case, evaluation in zip(cases, evaluations):
             wanted = case.scores.get(axis)
             if wanted not in db.LEVELS:
                 continue
-            got = getattr(provider.evaluate(case.article, case.category).data, axis)
+            got = getattr(evaluation, axis)
             if got in db.LEVELS:
                 expected.append(db.level_score(wanted))
                 actual.append(db.level_score(got))

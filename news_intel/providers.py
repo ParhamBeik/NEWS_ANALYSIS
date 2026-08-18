@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Generic, Iterable, Protocol, TypeVar
+from typing import Any, Callable, Generic, Iterable, Protocol, TypeVar
 
 import requests
 from pydantic import BaseModel, ValidationError
@@ -217,25 +217,55 @@ def provider_identities(provider: Provider) -> list[tuple[str, str]]:
     return [(provider.name, provider.model)]
 
 
+@dataclass(frozen=True)
+class _HostedDefaults:
+    model_env: str
+    default_model: str
+    base_url_env: str
+    default_base_url: str
+    api_key: Callable[[], str]
+    supports_structured_output: bool
+
+
+# One entry per hosted (non-rule) provider name. Adding a provider is a new entry here,
+# not a new branch in make_provider().
+_HOSTED_PROVIDERS: dict[str, _HostedDefaults] = {
+    "gapgpt": _HostedDefaults(
+        model_env="GAPGPT_MODEL",
+        default_model=config.DEFAULT_GAPGPT_MODEL,
+        base_url_env="GAPGPT_BASE_URL",
+        default_base_url="https://api.gapgpt.app/v1",
+        api_key=lambda: config.require_env("GAPGPT_API_KEY"),
+        supports_structured_output=True,
+    ),
+    "ollama": _HostedDefaults(
+        model_env="OLLAMA_MODEL",
+        default_model="qwen2.5:7b",
+        base_url_env="OLLAMA_BASE_URL",
+        default_base_url="http://localhost:11434/v1",
+        api_key=lambda: config.env("OLLAMA_API_KEY", "ollama"),
+        supports_structured_output=False,
+    ),
+}
+
+
 def make_provider(name: str, *, model: str | None = None) -> Provider:
     """Build a provider. `model` overrides the environment default (see routing.py)."""
     if name == "rule":
         return RuleProvider()
-    if name in {"gapgpt", "ollama"}:
-        model = model or config.env(
-            "GAPGPT_MODEL" if name == "gapgpt" else "OLLAMA_MODEL",
-            config.DEFAULT_GAPGPT_MODEL if name == "gapgpt" else "qwen2.5:7b",
-        )
-        # The legacy value was retired June 1, 2026. Keep old .env files safe.
-        if name == "gapgpt" and model == "gemini-2.0-flash-lite":
-            model = config.DEFAULT_GAPGPT_MODEL
-        return OpenAICompatibleProvider(
-            name=name,
-            model=model,
-            base_url=config.env("GAPGPT_BASE_URL" if name == "gapgpt" else "OLLAMA_BASE_URL", "https://api.gapgpt.app/v1" if name == "gapgpt" else "http://localhost:11434/v1"),
-            api_key=config.require_env("GAPGPT_API_KEY") if name == "gapgpt" else config.env("OLLAMA_API_KEY", "ollama"),
-            max_calls=config.provider_max_calls(),
-            max_output_tokens=config.provider_max_output_tokens(),
-            supports_structured_output=name == "gapgpt",
-        )
-    raise config.ConfigError(f"unknown provider {name!r}; choose rule, gapgpt, or ollama")
+    defaults = _HOSTED_PROVIDERS.get(name)
+    if defaults is None:
+        raise config.ConfigError(f"unknown provider {name!r}; choose rule, gapgpt, or ollama")
+    model = model or config.env(defaults.model_env, defaults.default_model)
+    # The legacy gapgpt value was retired June 1, 2026. Keep old .env files safe.
+    if name == "gapgpt" and model == "gemini-2.0-flash-lite":
+        model = defaults.default_model
+    return OpenAICompatibleProvider(
+        name=name,
+        model=model,
+        base_url=config.env(defaults.base_url_env, defaults.default_base_url),
+        api_key=defaults.api_key(),
+        max_calls=config.provider_max_calls(),
+        max_output_tokens=config.provider_max_output_tokens(),
+        supports_structured_output=defaults.supports_structured_output,
+    )

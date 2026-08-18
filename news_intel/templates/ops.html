@@ -37,6 +37,11 @@
 </div>
 
 <h2>Source coverage (rolling {{ window_days }}-day window)</h2>
+<p class="sub" style="margin-top:-8px">
+  Window is set on <a href="/">Home</a>.
+  {% if first_fetch_date %}Collecting since {{ first_fetch_date }} - a short gap here can mean
+  the pipeline hasn't run that far back yet, not necessarily a missed article.{% endif %}
+</p>
 <div class="card">
   <table>
     <thead><tr><th>Source</th><th class="num">Days covered</th><th>Backfill</th></tr></thead>
@@ -99,6 +104,11 @@
 <script>
 (function () {
   const days = {{ window_days }};
+  // Look up one field for one key combination in an API row array, defaulting to 0.
+  // `match` is {field: value, ...} - every listed field must match the row.
+  const valueFor = (rows, match, field) =>
+    (rows.find(r => Object.entries(match).every(([k, v]) => r[k] === v)) || {})[field] || 0;
+
   fetch(`/api/telemetry?days=${days}`).then(r => r.json()).then(data => {
     const days_ = [...new Set(data.token_cost_by_day.map(r => r.day))].sort();
 
@@ -106,7 +116,7 @@
       type: 'line',
       data: { labels: days_, datasets: [{
         label: 'Cost (USD)',
-        data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).cost_usd || 0),
+        data: days_.map(d => valueFor(data.token_cost_by_day, { day: d }, 'cost_usd')),
         borderColor: '#2a78d6', tension: 0.2,
       }] },
       options: { plugins: { title: { display: true, text: 'Cost per day' } }, scales: { y: { beginAtZero: true } } },
@@ -115,8 +125,8 @@
     new Chart(document.getElementById('tokensChart'), {
       type: 'bar',
       data: { labels: days_, datasets: [
-        { label: 'Tokens in', data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).tokens_in || 0), backgroundColor: '#86b6ef' },
-        { label: 'Tokens out', data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).tokens_out || 0), backgroundColor: '#1c5cab' },
+        { label: 'Tokens in', data: days_.map(d => valueFor(data.token_cost_by_day, { day: d }, 'tokens_in')), backgroundColor: '#86b6ef' },
+        { label: 'Tokens out', data: days_.map(d => valueFor(data.token_cost_by_day, { day: d }, 'tokens_out')), backgroundColor: '#1c5cab' },
       ] },
       options: { plugins: { title: { display: true, text: 'Tokens per day' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
     });
@@ -128,7 +138,7 @@
       type: 'bar',
       data: { labels: nodes, datasets: statuses.map(status => ({
         label: status,
-        data: nodes.map(node => (data.node_status_counts.find(r => r.node === node && r.status === status) || {}).n || 0),
+        data: nodes.map(node => valueFor(data.node_status_counts, { node, status }, 'n')),
         backgroundColor: statusColors[status] || '#898781',
       })) },
       options: { plugins: { title: { display: true, text: 'LLM node outcomes' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
@@ -140,7 +150,7 @@
       type: 'bar',
       data: { labels: fetchDays, datasets: sources.map((source, i) => ({
         label: source,
-        data: fetchDays.map(d => (data.fetch_volume_by_source.find(r => r.source === source && r.day === d) || {}).n || 0),
+        data: fetchDays.map(d => valueFor(data.fetch_volume_by_source, { source, day: d }, 'n')),
         backgroundColor: ['#2a78d6', '#0ca30c', '#fab219', '#d03b3b'][i % 4],
       })) },
       options: { plugins: { title: { display: true, text: 'Articles fetched per day' } }, scales: { x: { stacked: true }, y: { stacked: true } } },

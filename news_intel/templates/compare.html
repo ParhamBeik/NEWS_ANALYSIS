@@ -64,15 +64,15 @@
         <div class="sides">
           <div class="side">
             <b>A</b>
-            category: {{ r.a.category }} · confidence: {{ r.a.confidence }}<br>
-            occurrence: {{ r.a.confidence_occurrence or "—" }} · gold: {{ r.a.gold_price_impact or "—" }}
-            · security: {{ r.a.security_relevance or "—" }} · trend: {{ r.a.gold_trend or "—" }}
+            category: {{ r.a.category | category_label }} · confidence: {{ r.a.confidence | level_label }}<br>
+            occurrence: {{ r.a.confidence_occurrence | level_label }} · gold: {{ r.a.gold_price_impact | level_label }}
+            · security: {{ r.a.security_relevance | level_label }} · trend: {{ r.a.gold_trend | trend_label }}
           </div>
           <div class="side">
             <b>B</b>
-            category: {{ r.b.category }} · confidence: {{ r.b.confidence }}<br>
-            occurrence: {{ r.b.confidence_occurrence or "—" }} · gold: {{ r.b.gold_price_impact or "—" }}
-            · security: {{ r.b.security_relevance or "—" }} · trend: {{ r.b.gold_trend or "—" }}
+            category: {{ r.b.category | category_label }} · confidence: {{ r.b.confidence | level_label }}<br>
+            occurrence: {{ r.b.confidence_occurrence | level_label }} · gold: {{ r.b.gold_price_impact | level_label }}
+            · security: {{ r.b.security_relevance | level_label }} · trend: {{ r.b.gold_trend | trend_label }}
           </div>
         </div>
       </div>
@@ -85,7 +85,7 @@
       <div class="card diff-row">
         <div class="head rtl">{{ r.title }}</div>
         <a href="{{ r.url }}" target="_blank" rel="noopener" style="font-size:12px">{{ r.url | short_url }}</a>
-        <p class="sub" style="margin:6px 0 0">category: {{ r.a.category }} · both agree</p>
+        <p class="sub" style="margin:6px 0 0">category: {{ r.a.category | category_label }} · both agree</p>
       </div>
     {% endfor %}
   </details>

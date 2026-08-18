@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from .core import normalize
+from .core import dates, normalize
 
 MIN_TITLE_CHARS = 10
 # Title plus lead is enough to classify a photo post; body alone is not required.
@@ -36,11 +36,8 @@ ACCEPTED = Verdict(True)
 
 
 def _parse(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+    moment = dates.parse_iso(value)
+    if moment is None:
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 

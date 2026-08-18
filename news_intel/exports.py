@@ -9,6 +9,7 @@ import zipfile
 import re
 from copy import copy
 from datetime import time
+from functools import lru_cache
 from pathlib import Path
 
 import jdatetime
@@ -16,7 +17,7 @@ from openpyxl import load_workbook
 
 from .core import config
 from .core.db import LEVELS
-from .core.scoring import NOTIFY, decide
+from .core.scoring import FLOOR, HIGH_BAR, HIGH_COUNT_REQUIRED, NOTIFY, NO_NOTIFY, decide
 from .prompts import GOLD_TRENDS
 
 HEADERS = [
@@ -92,11 +93,19 @@ def rows(conn: sqlite3.Connection) -> list[dict[str, str]]:
     return result
 
 
+# The workbook formula must vote the same way core.scoring.decide() does, so it is built
+# from the same thresholds/vocabulary rather than hardcoding a second copy of them.
+_HIGH_LEVELS = LEVELS[HIGH_BAR - 1 :]
+_FLOOR_VIOLATIONS = LEVELS[: FLOOR - 1]
+
+
 def _formula(row: int) -> str:
     metrics = f"F{row}:H{row}"
+    high_count = "+".join(f'COUNTIF({metrics},"{level}")' for level in _HIGH_LEVELS)
+    floor_violations = "+".join(f'COUNTIF({metrics},"{level}")' for level in _FLOOR_VIOLATIONS)
     return (
-        f'=IF(AND(COUNTIF({metrics},"زیاد")+COUNTIF({metrics},"خیلی زیاد")>=2,'
-        f'COUNTIF({metrics},"خیلی کم")=0),"اطلاع‌رسانی شود","اطلاع‌رسانی نشود")'
+        f'=IF(AND({high_count}>={HIGH_COUNT_REQUIRED},{floor_violations}=0),'
+        f'"{NOTIFY}","{NO_NOTIFY}")'
     )
 
 
@@ -108,23 +117,30 @@ def _load_template():
         return load_workbook(config.WORKBOOK_TEMPLATE_PATH)
 
 
-def _template_extensions(path: Path) -> bytes | None:
+@lru_cache(maxsize=1)
+def _template_sheet1_xml() -> bytes:
+    """The template's sheet1.xml, read once - it does not change during the process's
+    lifetime and export_all() rebuilds a workbook per day, so this would otherwise be
+    re-read from disk on every call."""
     with zipfile.ZipFile(config.WORKBOOK_TEMPLATE_PATH) as source:
-        xml = source.read("xl/worksheets/sheet1.xml")
+        return source.read("xl/worksheets/sheet1.xml")
+
+
+def _template_extensions() -> bytes | None:
+    xml = _template_sheet1_xml()
     start = xml.find(b"<extLst")
     end = xml.find(b"</extLst>", start)
     return xml[start:end + len(b"</extLst>")] if start >= 0 and end >= 0 else None
 
 
 def _restore_template_extensions(path: Path) -> None:
-    extension = _template_extensions(path)
+    extension = _template_extensions()
     if not extension:
         return
     with zipfile.ZipFile(path) as source:
         payload = {entry.filename: source.read(entry.filename) for entry in source.infolist()}
     xml = payload["xl/worksheets/sheet1.xml"]
-    with zipfile.ZipFile(config.WORKBOOK_TEMPLATE_PATH) as source:
-        template_xml = source.read("xl/worksheets/sheet1.xml")
+    template_xml = _template_sheet1_xml()
     template_root_start = template_xml.find(b"<worksheet")
     template_root_end = template_xml.find(b">", template_root_start) + 1
     output_root_start = xml.find(b"<worksheet")

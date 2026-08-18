@@ -120,7 +120,7 @@ def parse_khabarfoori_listing(html: str, base_url: str) -> list[str]:
     return list(dict.fromkeys(urls))
 
 
-def _body(soup: BeautifulSoup, data: dict[str, Any], selector: str) -> tuple[str, str]:
+def _body(root: Any, data: dict[str, Any], selector: str, *, min_length: int = 0) -> tuple[str, str]:
     """Article body, preferring the published contract over the page's markup.
 
     Returns (text, tier) so callers can record how the body was obtained. JSON-LD
@@ -129,9 +129,14 @@ def _body(soup: BeautifulSoup, data: dict[str, Any], selector: str) -> tuple[str
     dropped, losing 5-10% of the text. CSS remains the fallback for pages without
     JSON-LD, and a redesign that breaks the selector now shows up as a tier change
     rather than as silently truncated articles.
+
+    `root` may be None (e.g. a generic page with no matching container), in which case
+    the CSS body is empty and JSON-LD alone decides the tier.
     """
     published_body = normalize.clean(data.get("articleBody") or "")
-    css_body = "\n".join(_text(p) for p in soup.select(selector) if _text(p))
+    css_body = "\n".join(
+        text for p in (root.select(selector) if root else []) if (text := _text(p)) and len(text) > min_length
+    )
     if len(published_body) >= len(css_body):
         return published_body, "jsonld"
     return css_body, "css"
@@ -217,16 +222,8 @@ def parse_shahrekhabar_listing(html: str, base_url: str) -> list[RawArticle]:
 def parse_generic_article(html: str, source: str, url: str, outlet: str | None = None) -> RawArticle:
     soup = BeautifulSoup(html, "html.parser")
     data = _json_ld(soup)
-    published_body = normalize.clean(data.get("articleBody") or "")
     container = soup.select_one("article") or soup.select_one(".item-body") or soup.body
-    css_body = (
-        "\n".join(_text(p) for p in container.select("p") if len(_text(p)) > 20)
-        if container
-        else ""
-    )
-    content, tier = (
-        (published_body, "jsonld") if len(published_body) >= len(css_body) else (css_body, "css")
-    )
+    content, tier = _body(container, data, "p", min_length=20)
     published = normalize.clean(data.get("datePublished"))
     return RawArticle(
         source=source,
@@ -348,19 +345,28 @@ _MEHR_ARCHIVE_URL = "https://www.mehrnews.com/archive"
 _MEHR_ARCHIVE_CATEGORIES = {"economics": 25, "politics": 7, "society": 6}
 
 
-def _fetch_backfill_khabarfoori(
-    spec: SourceSpec, session: requests.Session, *, since_date: str, known_urls: set[str]
+def _paginate_backfill(
+    session: requests.Session,
+    *,
+    page_url: Callable[[int], str],
+    parse_listing: Callable[[str, str], list[str]],
+    listing_base_url: str,
+    parse_article: Callable[[str, str], RawArticle],
+    since_date: str,
+    seen: set[str],
 ) -> Iterator[RawArticle]:
-    seen = set(known_urls)
+    """Shared pagination shape: listing page -> new URLs -> detail fetch, until a stale
+    run of pages or a URL published before `since_date` is reached. `seen` is mutated in
+    place so callers can share dedup state across an outer loop (e.g. Mehr's categories).
+    """
     stale = 0
     for page in range(1, _MAX_BACKFILL_PAGES + 1):
-        page_url = spec.url if page == 1 else f"{spec.url}/?page={page}"
         try:
-            response = session.get(page_url, headers=USER_AGENT, timeout=20)
+            response = session.get(page_url(page), headers=USER_AGENT, timeout=20)
             response.raise_for_status()
         except requests.RequestException:
             break
-        new_urls = [u for u in parse_khabarfoori_listing(response.text, spec.url) if u not in seen]
+        new_urls = [u for u in parse_listing(response.text, listing_base_url) if u not in seen]
         if not new_urls:
             stale += 1
             if stale >= _STALE_PAGE_LIMIT:
@@ -375,7 +381,7 @@ def _fetch_backfill_khabarfoori(
                 detail.raise_for_status()
             except requests.RequestException:
                 continue
-            article = parse_khabarfoori_article(detail.text, url)
+            article = parse_article(detail.text, url)
             yield article
             if article.published_at and article.published_at < since_date:
                 reached_since = True
@@ -383,40 +389,34 @@ def _fetch_backfill_khabarfoori(
             break
 
 
+def _fetch_backfill_khabarfoori(
+    spec: SourceSpec, session: requests.Session, *, since_date: str, known_urls: set[str]
+) -> Iterator[RawArticle]:
+    yield from _paginate_backfill(
+        session,
+        page_url=lambda page: spec.url if page == 1 else f"{spec.url}/?page={page}",
+        parse_listing=parse_khabarfoori_listing,
+        listing_base_url=spec.url,
+        parse_article=parse_khabarfoori_article,
+        since_date=since_date,
+        seen=set(known_urls),
+    )
+
+
 def _fetch_backfill_mehr(
     spec: SourceSpec, session: requests.Session, *, since_date: str, known_urls: set[str]
 ) -> Iterator[RawArticle]:
     seen = set(known_urls)
     for tp in _MEHR_ARCHIVE_CATEGORIES.values():
-        stale = 0
-        for page in range(1, _MAX_BACKFILL_PAGES + 1):
-            page_url = f"{_MEHR_ARCHIVE_URL}?tp={tp}&pi={page}"
-            try:
-                response = session.get(page_url, headers=USER_AGENT, timeout=20)
-                response.raise_for_status()
-            except requests.RequestException:
-                break
-            new_urls = [u for u in parse_mehr_archive_listing(response.text, _MEHR_ARCHIVE_URL) if u not in seen]
-            if not new_urls:
-                stale += 1
-                if stale >= _STALE_PAGE_LIMIT:
-                    break
-                continue
-            stale = 0
-            reached_since = False
-            for url in new_urls:
-                seen.add(url)
-                try:
-                    detail = session.get(url, headers=USER_AGENT, timeout=20)
-                    detail.raise_for_status()
-                except requests.RequestException:
-                    continue
-                article = parse_generic_article(detail.text, "mehr", url, "مهر")
-                yield article
-                if article.published_at and article.published_at < since_date:
-                    reached_since = True
-            if reached_since:
-                break
+        yield from _paginate_backfill(
+            session,
+            page_url=lambda page, tp=tp: f"{_MEHR_ARCHIVE_URL}?tp={tp}&pi={page}",
+            parse_listing=parse_mehr_archive_listing,
+            listing_base_url=_MEHR_ARCHIVE_URL,
+            parse_article=lambda text, url: parse_generic_article(text, "mehr", url, "مهر"),
+            since_date=since_date,
+            seen=seen,
+        )
 
 
 _BACKFILL_STRATEGIES: dict[str, Callable[..., Iterator[RawArticle]]] = {

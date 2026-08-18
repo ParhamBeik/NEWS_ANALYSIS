@@ -41,7 +41,7 @@ def run_once(args: argparse.Namespace) -> dict[str, int]:
             pipeline.set_source_health(conn, name, ok=False, error=str(exc)[:2000])
     with conn:
         stats = pipeline.process(conn, collected, providers)
-    window_days = int(db.get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
+    window_days = db.window_days(conn)
     # Backfill always classifies on the free offline baseline, never the run's real
     # provider - a coverage gap can mean hundreds of articles, and paying to label all of
     # them as a silent side effect of a routine `run --provider gapgpt` is not something
@@ -129,7 +129,9 @@ def main() -> int:
     canary.add_argument("--sources", nargs="+", choices=source_names)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("cases")
-    evaluate_parser.add_argument("--provider", default="rule", choices=["rule", "gapgpt", "ollama"])
+    evaluate_parser.add_argument(
+        "--provider", default="rule", choices=[c for c in PROVIDER_CHOICES if c != "routed"]
+    )
     golden = commands.add_parser("golden", help="export approved reviews as the eval set")
     golden.add_argument("--out", default="config/golden.json")
     commands.add_parser("routes", help="show which provider answers which node")

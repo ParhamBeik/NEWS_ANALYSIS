@@ -276,6 +276,16 @@ def get_setting(conn: sqlite3.Connection, key: str, default: str) -> str:
     return row["value"] if row else default
 
 
+def window_days(conn: sqlite3.Connection) -> int:
+    """The dashboard's rolling-window setting, in days."""
+    return int(get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
+
+
+def day_floor(days: int) -> str:
+    """SQLite `date('now', ?)` offset string for a rolling N-day window."""
+    return f"-{max(days, 1) - 1} days"
+
+
 def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
         "INSERT INTO settings(key, value) VALUES(?, ?)"
