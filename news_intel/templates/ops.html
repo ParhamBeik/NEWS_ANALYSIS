@@ -83,7 +83,7 @@
 </div>
 
 <h2>Recent runs</h2>
-<div class="card" hx-get="/partials/runs" hx-trigger="load, every 30s">{{ runs_html | safe }}</div>
+<div class="card" hx-get="/partials/runs" hx-trigger="load, every 30s">{% include "_runs_table.html" %}</div>
 
 <h2>Dead letters ({{ dead_total }} open)</h2>
 <div class="card">
