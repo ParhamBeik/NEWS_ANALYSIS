@@ -135,7 +135,7 @@ def create_app(path: Path | None = None):
                 JOIN latest_evaluation e ON e.article_id = a.id
                 LEFT JOIN latest_summary s ON s.article_id = a.id
                 WHERE a.duplicate_of IS NULL AND a.fetched_at >= date('now', ?)
-                ORDER BY COALESCE(a.published_at_gregorian, a.fetched_at) DESC
+                ORDER BY COALESCE(a.published_at_gregorian, a.fetched_at) DESC, a.id DESC
                 """,
                 (f"-{max(days, 1) - 1} days",),
             ).fetchall()

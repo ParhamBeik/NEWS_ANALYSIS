@@ -164,14 +164,15 @@ class OpenAICompatibleProvider:
 
 @dataclass
 class FallbackProvider:
-    """Try `primary`; on exhausted retries or a non-budget Fatal, try `fallback`.
+    """Try `primary`; on exhausted retries, a bad response, or a non-budget Fatal, try `fallback`.
 
     `dag.BudgetExceeded` (a `Fatal` subclass, raised by both the run's dollar ceiling and
     a provider's own request-count cap) is deliberately NOT a fallback trigger and always
     propagates immediately - falling back to a second provider on a budget error would
-    just keep spending past the ceiling that error exists to enforce. Auth failures and
-    exhausted-retry Transient errors mean "this provider is unavailable right now", which
-    is exactly what a fallback should catch.
+    just keep spending past the ceiling that error exists to enforce. Auth failures,
+    exhausted-retry Transient errors, and Permanent errors (e.g. unparseable structured
+    output) all mean "this provider isn't answering usefully right now", which is exactly
+    what a fallback should catch.
     """
 
     primary: Provider
@@ -190,7 +191,7 @@ class FallbackProvider:
             return getattr(self.primary, method)(*args, **kwargs)
         except dag.BudgetExceeded:
             raise
-        except (dag.Transient, dag.Fatal):
+        except (dag.Transient, dag.Permanent, dag.Fatal):
             return getattr(self.fallback, method)(*args, **kwargs)
 
     def classify(self, article: RawArticle, examples=()):
@@ -201,6 +202,19 @@ class FallbackProvider:
 
     def summarize(self, article: RawArticle, examples=()):
         return self._try("summarize", article, examples)
+
+
+def provider_identities(provider: Provider) -> list[tuple[str, str]]:
+    """(name, model) pairs a provider's result rows can actually be stamped with.
+
+    A plain provider always answers as itself. A `FallbackProvider` answers as whichever
+    of primary/fallback actually served the call (see `Usage` in `_call`/`_response`),
+    never as its own composite `name`/`model` - callers checking "was this already done"
+    must match against both.
+    """
+    if isinstance(provider, FallbackProvider):
+        return provider_identities(provider.primary) + provider_identities(provider.fallback)
+    return [(provider.name, provider.model)]
 
 
 def make_provider(name: str, *, model: str | None = None) -> Provider:

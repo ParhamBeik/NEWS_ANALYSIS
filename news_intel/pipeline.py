@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Mapping
@@ -14,7 +15,7 @@ import jdatetime
 from . import dedupe, quality
 from .core import config, dag, db, normalize
 from .prompts import PROMPT_VERSION
-from .providers import Provider
+from .providers import Provider, provider_identities
 from .reviews import reviewed_examples
 from .sources import RawArticle
 
@@ -96,10 +97,16 @@ def upsert_article(conn: sqlite3.Connection, article: RawArticle, run_id: str) -
 
 
 def _exists(conn: sqlite3.Connection, table: str, article_id: int, version: str, provider: Provider) -> bool:
-    return bool(conn.execute(
-        f"SELECT 1 FROM {table} WHERE article_id=? AND prompt_version=? AND provider=? AND model=? LIMIT 1",
-        (article_id, version, provider.name, provider.model),
-    ).fetchone())
+    """True if this node already ran for this article/version under any identity `provider`
+    could have answered as - a `FallbackProvider` may have been served by either its primary
+    or its fallback, and rows are stamped with whichever one actually answered."""
+    return any(
+        conn.execute(
+            f"SELECT 1 FROM {table} WHERE article_id=? AND prompt_version=? AND provider=? AND model=? LIMIT 1",
+            (article_id, version, name, model),
+        ).fetchone()
+        for name, model in provider_identities(provider)
+    )
 
 
 def process(
@@ -134,43 +141,89 @@ def process(
         "classified": 0, "evaluated": 0, "summarized": 0,
     }
 
+    # Every conn access below this point may run from a worker thread (see `_process_one`),
+    # so each one is wrapped in `ctx.lock` - sqlite3 permits cross-thread use of a
+    # connection but does not serialize it for us (see `dag.Ctx`). The LLM calls
+    # themselves are deliberately left unlocked; that HTTP wait is the whole reason to
+    # parallelize across articles.
     @dag.node(name="classify", version=CLASSIFY_VERSION, cacheable=False)
     def classify(work: Work, _: dag.Ctx):
-        result = classifier.classify(work.article, reviewed_examples(conn, work.article, task="classify"))
-        db.insert(conn, "classifications", {
-            "article_id": work.article_id, "category": result.data.category,
-            "confidence": result.data.confidence, "rationale": result.data.rationale,
-            "memory_keywords": json.dumps(result.data.matched_economics_keywords + result.data.matched_security_keywords, ensure_ascii=False),
-            "method": classifier.name, "prompt_version": CLASSIFY_VERSION, "provider": result.usage.provider,
-            "model": result.usage.model, "run_id": run_id, "created_at": dag.utc_now(),
-        })
+        with ctx.lock:
+            examples = reviewed_examples(conn, work.article, task="classify")
+        result = classifier.classify(work.article, examples)
+        with ctx.lock:
+            db.insert(conn, "classifications", {
+                "article_id": work.article_id, "category": result.data.category,
+                "confidence": result.data.confidence, "rationale": result.data.rationale,
+                "memory_keywords": json.dumps(result.data.matched_economics_keywords + result.data.matched_security_keywords, ensure_ascii=False),
+                "method": classifier.name, "prompt_version": CLASSIFY_VERSION, "provider": result.usage.provider,
+                "model": result.usage.model, "run_id": run_id, "created_at": dag.utc_now(),
+            })
         return result
 
     @dag.node(name="evaluate", version=EVALUATE_VERSION, cacheable=False)
     def evaluate(work: Work, _: dag.Ctx):
-        category = conn.execute(
-            "SELECT category FROM latest_classification WHERE article_id=?", (work.article_id,)
-        ).fetchone()["category"]
-        result = evaluator.evaluate(work.article, category, reviewed_examples(conn, work.article, task="evaluate", category=category))
-        db.insert(conn, "evaluations", {
-            "article_id": work.article_id,
-            **{key: getattr(result.data, key) for key in ("confidence_occurrence", "gold_price_impact", "security_relevance", "gold_trend", "rationale")},
-            "prompt_version": EVALUATE_VERSION, "provider": result.usage.provider, "model": result.usage.model,
-            "run_id": run_id, "created_at": dag.utc_now(),
-        })
+        with ctx.lock:
+            category = conn.execute(
+                "SELECT category FROM latest_classification WHERE article_id=?", (work.article_id,)
+            ).fetchone()["category"]
+            examples = reviewed_examples(conn, work.article, task="evaluate", category=category)
+        result = evaluator.evaluate(work.article, category, examples)
+        with ctx.lock:
+            db.insert(conn, "evaluations", {
+                "article_id": work.article_id,
+                **{key: getattr(result.data, key) for key in ("confidence_occurrence", "gold_price_impact", "security_relevance", "gold_trend", "rationale")},
+                "prompt_version": EVALUATE_VERSION, "provider": result.usage.provider, "model": result.usage.model,
+                "run_id": run_id, "created_at": dag.utc_now(),
+            })
         return result
 
     @dag.node(name="summarize", version=SUMMARIZE_VERSION, cacheable=False)
     def summarize(work: Work, _: dag.Ctx):
-        result = summarizer.summarize(work.article, reviewed_examples(conn, work.article, task="summary"))
-        db.insert(conn, "summaries", {
-            "article_id": work.article_id, "optimized_title": result.data.optimized_title,
-            "one_line": result.data.one_line, "prompt_version": SUMMARIZE_VERSION,
-            "provider": result.usage.provider, "model": result.usage.model, "run_id": run_id, "created_at": dag.utc_now(),
-        })
+        with ctx.lock:
+            examples = reviewed_examples(conn, work.article, task="summary")
+        result = summarizer.summarize(work.article, examples)
+        with ctx.lock:
+            db.insert(conn, "summaries", {
+                "article_id": work.article_id, "optimized_title": result.data.optimized_title,
+                "one_line": result.data.one_line, "prompt_version": SUMMARIZE_VERSION,
+                "provider": result.usage.provider, "model": result.usage.model, "run_id": run_id, "created_at": dag.utc_now(),
+            })
         return result
 
+    def _process_one(work: Work) -> tuple[bool, bool, bool]:
+        """Run one article's classify -> evaluate -> summarize chain.
+
+        The three nodes are sequential *within* an article (evaluate/summarize need the
+        category classify just wrote), but this whole function is dispatched concurrently
+        *across* articles - the network wait per node is what parallelizing buys back.
+        """
+        classified = evaluated = summarized = False
+        with ctx.lock:
+            needs_classify = not _exists(conn, "classifications", work.article_id, CLASSIFY_VERSION, classifier)
+        if needs_classify:
+            classify(work, ctx, article_id=work.article_id)
+            classified = True
+        with ctx.lock:
+            category = conn.execute(
+                "SELECT category FROM latest_classification WHERE article_id=?", (work.article_id,)
+            ).fetchone()["category"]
+        if category == "other":
+            return classified, evaluated, summarized
+        with ctx.lock:
+            needs_evaluate = not _exists(conn, "evaluations", work.article_id, EVALUATE_VERSION, evaluator)
+        if needs_evaluate:
+            evaluate(work, ctx, article_id=work.article_id)
+            evaluated = True
+        with ctx.lock:
+            needs_summarize = not _exists(conn, "summaries", work.article_id, SUMMARIZE_VERSION, summarizer)
+        if needs_summarize:
+            summarize(work, ctx, article_id=work.article_id)
+            summarized = True
+        return classified, evaluated, summarized
+
     try:
+        work_items: list[Work] = []
         for article in articles:
             stats["fetched"] += 1
             verdict = quality.check(article)
@@ -195,19 +248,17 @@ def process(
             if duplicate:
                 stats["duplicate"] += 1
                 continue
-            work = Work(article_id, article, CLASSIFY_VERSION)
-            if not _exists(conn, "classifications", article_id, CLASSIFY_VERSION, classifier):
-                classify(work, ctx, article_id=article_id)
-                stats["classified"] += 1
-            category = conn.execute(
-                "SELECT category FROM latest_classification WHERE article_id=?", (article_id,)
-            ).fetchone()["category"]
-            if category != "other" and not _exists(conn, "evaluations", article_id, EVALUATE_VERSION, evaluator):
-                evaluate(work, ctx, article_id=article_id)
-                stats["evaluated"] += 1
-            if category != "other" and not _exists(conn, "summaries", article_id, SUMMARIZE_VERSION, summarizer):
-                summarize(work, ctx, article_id=article_id)
-                stats["summarized"] += 1
+            work_items.append(Work(article_id, article, CLASSIFY_VERSION))
+
+        # Ingest/dedup above is local and inherently sequential (identity_key and
+        # duplicate_of decisions for one article can depend on the article just before
+        # it); inference below is the network-bound part, so it is what gets parallelized.
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for classified, evaluated, summarized in pool.map(_process_one, work_items):
+                stats["classified"] += int(classified)
+                stats["evaluated"] += int(evaluated)
+                stats["summarized"] += int(summarized)
+
         dag.finish_run(conn, run_id, costs, fetched=stats["fetched"], processed=stats["classified"])
     except BaseException as exc:
         dag.finish_run(conn, run_id, costs, status="failed", fetched=stats["fetched"], error=str(exc))

@@ -140,13 +140,32 @@ def source_priority(conn: sqlite3.Connection, name: str) -> int:
     return int(row["priority"]) if row else DEFAULT_PRIORITY
 
 
-def _better_canonical(conn: sqlite3.Connection, left: sqlite3.Row, right: sqlite3.Row) -> bool:
-    """True when `left` is the better copy to keep: source priority, then more content.
+def _has_classification(conn: sqlite3.Connection, article_id: int) -> bool:
+    return bool(conn.execute(
+        "SELECT 1 FROM classifications WHERE article_id = ? LIMIT 1", (article_id,)
+    ).fetchone())
 
-    Content length is the tiebreak that matters in practice - Shahrekhabar's listing
+
+def _better_canonical(conn: sqlite3.Connection, left: sqlite3.Row, right: sqlite3.Row) -> bool:
+    """True when `left` is the better copy to keep: existing inference first, then source
+    priority, then more content.
+
+    An article already classified - possibly by a real paid provider - must never be
+    demoted in favor of an unclassified duplicate just because the duplicate's source
+    ranks higher or its body is longer. Demoting it detaches the inference from the
+    surviving canonical id; whatever run merges the duplicate (e.g. backfill, which always
+    classifies on the free rule provider) would then silently replace a real result with a
+    cruder one.
+
+    Content length is the next tiebreak that matters in practice - Shahrekhabar's listing
     entries frequently carry an empty body, and making one canonical would leave the
     workbook row with nothing to summarize.
     """
+    left_classified = _has_classification(conn, left["id"])
+    right_classified = _has_classification(conn, right["id"])
+    if left_classified != right_classified:
+        return left_classified
+
     left_rank = source_priority(conn, left["source"])
     right_rank = source_priority(conn, right["source"])
     if left_rank != right_rank:

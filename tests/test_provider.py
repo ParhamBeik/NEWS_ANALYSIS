@@ -109,6 +109,14 @@ def test_fallback_provider_reraises_when_the_backup_also_fails():
         wrapped.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
 
 
+def test_fallback_provider_tries_the_backup_after_a_permanent_error():
+    """Unparseable structured output from the primary is a Permanent error, not Transient
+    or Fatal - it must still trigger the fallback like the other two do."""
+    wrapped = FallbackProvider(Failing(dag.Permanent("bad json")), MeteredProvider())
+    response = wrapped.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
+    assert response.usage.provider == "fake"
+
+
 def test_fallback_provider_static_identity_is_a_composite_of_both_backends():
     wrapped = FallbackProvider(Failing(dag.Transient("x")), MeteredProvider())
     assert wrapped.name == "failing+fake"
@@ -130,6 +138,26 @@ def test_pipeline_records_the_backend_that_actually_answered_not_the_route_ident
         "(SELECT id FROM articles WHERE url=?)", (article.url,)
     ).fetchone()
     assert row["provider"] == "fake" and row["model"] == "fake-v1"
+
+
+def test_fallback_provider_route_reprocesses_only_once(conn):
+    """`_exists()` used to key on FallbackProvider's own composite name/model (e.g.
+    "failing+fake"), which never matches the actual backend recorded on a row - so a
+    route with a fallback configured re-classified (and re-billed) every article on every
+    run. It must match whichever of primary/fallback actually answered."""
+    wrapped = FallbackProvider(Failing(dag.Transient("down")), MeteredProvider())
+    article = RawArticle(
+        source="test", url="https://test/3", title="حمله موشکی به تاسیسات نفتی کشور",
+        lead="جزئیات حادثه", content="متن کامل خبر",
+        published_at="2026-08-16T10:00:00+03:30",
+    )
+    pipeline.process(conn, [article], wrapped, run_id="fallback-run-1")
+    pipeline.process(conn, [article], wrapped, run_id="fallback-run-2")
+    count = conn.execute(
+        "SELECT COUNT(*) c FROM classifications WHERE article_id="
+        "(SELECT id FROM articles WHERE url=?)", (article.url,)
+    ).fetchone()["c"]
+    assert count == 1
 
 
 def test_pipeline_persists_provider_usage_in_node_events(conn):

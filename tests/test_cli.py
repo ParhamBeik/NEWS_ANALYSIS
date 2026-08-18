@@ -19,7 +19,10 @@ def test_backfilled_articles_always_classify_on_rule_never_the_runs_real_provide
     monkeypatch.setattr(config, "ensure_dirs", lambda: None)
     monkeypatch.setattr(
         cli, "resolve_providers",
-        lambda choice: {node: Recording(name="real-provider", model="m1") for node in ("classify", "evaluate", "summarize")},
+        lambda choice: {
+            node: Recording(name="real-provider", model="m1") if choice != "rule" else RuleProvider()
+            for node in ("classify", "evaluate", "summarize")
+        },
     )
 
     def fake_fetch(spec, session=None, *, limit=25):

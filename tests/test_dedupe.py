@@ -146,6 +146,25 @@ class TestCanonicalSelection:
         assert rows[second] is None
         assert rows[first] == second
 
+    def test_already_classified_canonical_is_not_displaced(self, conn):
+        """A duplicate discovered later (e.g. by backfill) must not demote an article that
+        already carries a real classification, even if the duplicate outranks it on source
+        priority or content length - that would silently orphan the existing inference
+        behind a `duplicate_of` row that dashboard/export views never look at again."""
+        register_sources(conn)
+        first, _, _ = add(conn, article("https://sk.test/1", "حمله موشکی به تاسیسات نفتی",
+                                        source="shahrekhabar", content="کوتاه"))
+        db.insert(conn, "classifications", {
+            "article_id": first, "category": "security/economics", "confidence": "زیاد",
+            "method": "llm", "prompt_version": "v1", "provider": "gapgpt", "model": "m1",
+            "run_id": "r1", "created_at": "2026-08-16T10:00:00+00:00",
+        })
+        second, _, _ = add(conn, article("https://kf.test/2", "حمله موشکی به تاسیسات نفتی",
+                                         source="khabarfoori", content="متن کامل خبر بسیار طولانی تر"))
+        rows = {r["id"]: r["duplicate_of"] for r in conn.execute("SELECT id, duplicate_of FROM articles")}
+        assert rows[first] is None, "already-classified article must stay canonical"
+        assert rows[second] == first
+
     def test_duplicate_chain_never_exceeds_one_level(self, conn):
         """Demoting a canonical must repoint its followers, or `duplicate_of IS NULL`
         stops being a reliable "this is the story" filter."""

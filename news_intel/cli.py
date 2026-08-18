@@ -11,6 +11,7 @@ from .core import config, dag, db
 from .providers import Provider, make_provider
 
 PROVIDER_CHOICES = ["routed", "rule", "gapgpt", "ollama"]
+REPLAY_TABLES = {"classify": "classifications", "evaluate": "evaluations", "summarize": "summaries"}
 
 
 def resolve_providers(choice: str) -> dict[str, Provider]:
@@ -47,7 +48,7 @@ def run_once(args: argparse.Namespace) -> dict[str, int]:
     # a budget ceiling catching it after the fact makes acceptable. Re-run classification
     # at a real provider later (`cli replay --node classify`) if current-quality labels
     # matter for the backfilled window.
-    backfill_providers = {node: make_provider("rule") for node in ("classify", "evaluate", "summarize")}
+    backfill_providers = resolve_providers("rule")
     stats["backfilled"] = sum(
         backfill.ensure_window(conn, specs, backfill_providers, days=window_days).values()
     )
@@ -153,7 +154,17 @@ def main() -> int:
         run_loop(args)
     elif args.command == "replay":
         with db.init_db() as conn:
-            print(dag.invalidate(conn, args.node, version=args.version))
+            cache_cleared = dag.invalidate(conn, args.node, version=args.version)
+            # classify/evaluate/summarize run with cacheable=False (pipeline.py); the real
+            # "already done" gate `_exists()` checks these tables directly, not node_events,
+            # so invalidating the cache alone would not cause a re-run.
+            table = REPLAY_TABLES.get(args.node)
+            results_cleared = 0
+            if table:
+                query = f"DELETE FROM {table}" + (" WHERE prompt_version=?" if args.version else "")
+                params = (args.version,) if args.version else ()
+                results_cleared = conn.execute(query, params).rowcount
+            print(json.dumps({"cache_cleared": cache_cleared, "results_cleared": results_cleared}))
     elif args.command == "export":
         with db.connect() as conn:
             print({name: str(path) for name, path in exports.export_all(conn, config.OUTPUT_DIR).items()})
