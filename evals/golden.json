@@ -1,0 +1,28 @@
+[
+  {
+    "article": {
+      "source": "golden",
+      "url": "https://example.test/golden-security",
+      "title": "حمله و تاثیر آن بر طلا",
+      "lead": "نمونه ارزیابی انسانی",
+      "content": ""
+    },
+    "category": "security/economics",
+    "scores": {
+      "confidence_occurrence": "زیاد",
+      "gold_price_impact": "زیاد",
+      "security_relevance": "زیاد"
+    }
+  },
+  {
+    "article": {
+      "source": "golden",
+      "url": "https://example.test/golden-other",
+      "title": "مسابقه فوتبال",
+      "lead": "نمونه ارزیابی انسانی",
+      "content": ""
+    },
+    "category": "other",
+    "scores": {}
+  }
+]

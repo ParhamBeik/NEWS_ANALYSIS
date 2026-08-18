@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}A/B Diff{% endblock %}
+{% block head %}
+<style>
+  .picker { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-bottom: 20px; }
+  .picker .field { display: flex; flex-direction: column; gap: 5px; }
+  .picker label { font-size: 12px; color: var(--text-secondary); }
+  .picker select {
+    font-family: inherit; font-size: 13px; padding: 8px 10px; min-width: 260px;
+    border-radius: 7px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary);
+  }
+  .diff-row { padding: 16px 18px; margin-bottom: 10px; }
+  .diff-row .head { font-size: 15px; font-weight: 700; margin: 0 0 4px; }
+  .diff-row .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+  .diff-row .side { font-size: 12.5px; background: var(--page); border-radius: 8px; padding: 10px 12px; }
+  .diff-row .side b { display: block; margin-bottom: 4px; color: var(--text-secondary); }
+  details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 6px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>A/B Diff</h1>
+<p class="sub">Read-only comparison of two already-run prompt/provider variants over their shared articles.</p>
+
+<form class="picker" method="get" action="/compare">
+  <div class="field">
+    <label for="a">Variant A</label>
+    <select id="a" name="a" required>
+      <option value="" disabled {{ 'selected' if not selected.a }}>Choose a variant</option>
+      {% for o in options %}
+        <option value="{{ o.key }}" {{ 'selected' if o.key == selected.a }}>{{ o.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="b">Variant B</label>
+    <select id="b" name="b" required>
+      <option value="" disabled {{ 'selected' if not selected.b }}>Choose a variant</option>
+      {% for o in options %}
+        <option value="{{ o.key }}" {{ 'selected' if o.key == selected.b }}>{{ o.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit" class="primary">Compare</button>
+</form>
+
+{% if error %}
+  <div class="card"><p class="pill bad">{{ error }}</p></div>
+{% elif not selected.a or not selected.b %}
+  <div class="card empty"><p style="margin:0">Choose two variants to see where they agreed or disagreed.</p></div>
+{% else %}
+  <p class="sub">{{ same_count }} of {{ records | length }} shared articles judged the same.</p>
+
+  <h2>Disagreements ({{ records | length - same_count }})</h2>
+  {% set diffs = records | selectattr('agree', 'equalto', false) | list %}
+  {% if not diffs %}
+    <div class="card empty"><p style="margin:0">No disagreements between these two variants.</p></div>
+  {% else %}
+    {% for r in diffs %}
+      <div class="card diff-row">
+        <div class="head rtl">{{ r.title }}</div>
+        <a href="{{ r.url }}" target="_blank" rel="noopener" style="font-size:12px">{{ r.url | short_url }}</a>
+        <div class="sides">
+          <div class="side">
+            <b>A</b>
+            category: {{ r.a.category }} · confidence: {{ r.a.confidence }}<br>
+            occurrence: {{ r.a.confidence_occurrence or "—" }} · gold: {{ r.a.gold_price_impact or "—" }}
+            · security: {{ r.a.security_relevance or "—" }} · trend: {{ r.a.gold_trend or "—" }}
+          </div>
+          <div class="side">
+            <b>B</b>
+            category: {{ r.b.category }} · confidence: {{ r.b.confidence }}<br>
+            occurrence: {{ r.b.confidence_occurrence or "—" }} · gold: {{ r.b.gold_price_impact or "—" }}
+            · security: {{ r.b.security_relevance or "—" }} · trend: {{ r.b.gold_trend or "—" }}
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  {% endif %}
+
+  <details>
+    <summary>Agreements ({{ same_count }})</summary>
+    {% for r in records | selectattr('agree') | list %}
+      <div class="card diff-row">
+        <div class="head rtl">{{ r.title }}</div>
+        <a href="{{ r.url }}" target="_blank" rel="noopener" style="font-size:12px">{{ r.url | short_url }}</a>
+        <p class="sub" style="margin:6px 0 0">category: {{ r.a.category }} · both agree</p>
+      </div>
+    {% endfor %}
+  </details>
+{% endif %}
+{% endblock %}

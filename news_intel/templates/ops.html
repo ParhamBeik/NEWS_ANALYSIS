@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Pipeline Ops{% endblock %}
+{% block head %}
+<style>
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 6px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 15px 17px; }
+  .tile .label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 5px; }
+  .tile .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+  .dot.good { background: var(--good); } .dot.bad { background: var(--critical); }
+  .dot.unknown { background: var(--muted); }
+  code { font-size: 12px; background: var(--page); padding: 1px 6px; border-radius: 4px; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
+  .chart-card canvas { max-height: 240px; }
+  .coverage-badge { font-size: 11px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Pipeline Ops</h1>
+<p class="sub">Fetch health, LLM cost/success rate, and the article funnel for the last {{ window_days }} days. Read-only.</p>
+
+<h2>Funnel (last {{ window_days }} days)</h2>
+<div class="tiles">
+  <div class="tile"><div class="label">Fetched</div><div class="value">{{ funnel.fetched }}</div></div>
+  <div class="tile"><div class="label">Unique</div><div class="value">{{ funnel.unique }}</div></div>
+  <div class="tile"><div class="label">Classified</div><div class="value">{{ funnel.classified }}</div></div>
+  <div class="tile"><div class="label">Evaluated</div><div class="value">{{ funnel.evaluated }}</div></div>
+</div>
+
+<h2>Cost, tokens, LLM outcomes, fetch volume</h2>
+<div class="charts">
+  <div class="card chart-card"><canvas id="costChart"></canvas></div>
+  <div class="card chart-card"><canvas id="tokensChart"></canvas></div>
+  <div class="card chart-card"><canvas id="statusChart"></canvas></div>
+  <div class="card chart-card"><canvas id="fetchChart"></canvas></div>
+</div>
+
+<h2>Source coverage (rolling {{ window_days }}-day window)</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Source</th><th class="num">Days covered</th><th>Backfill</th></tr></thead>
+    <tbody>
+    {% for c in coverage %}
+      <tr>
+        <td>{{ c.source }}</td>
+        <td class="num">{{ c.total_days - c.missing_days }} / {{ c.total_days }}</td>
+        <td>
+          {% if c.backfill_supported %}
+            <span class="pill coverage-badge {{ 'good' if c.missing_days == 0 else 'warn' }}">supported</span>
+          {% else %}
+            <span class="pill coverage-badge">not available for this source</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Source health</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Source</th><th>Status</th><th class="num">Priority</th><th>Last success</th><th>Last error</th></tr></thead>
+    <tbody>
+    {% for s in sources %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td><span class="dot {{ 'good' if s.health_status == 'healthy' else 'bad' if s.health_status == 'degraded' else 'unknown' }}"></span>
+            {{ s.health_status }}</td>
+        <td class="num">{{ s.priority }}</td>
+        <td>{{ (s.last_success_at or '—')[:19] }}</td>
+        <td>{% if s.last_error %}<code title="{{ s.last_error }}">{{ s.last_error[:60] }}{% if s.last_error|length > 60 %}…{% endif %}</code>{% else %}—{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Recent runs</h2>
+<div class="card" hx-get="/partials/runs" hx-trigger="load, every 30s">{{ runs_html | safe }}</div>
+
+<h2>Dead letters ({{ dead_total }} open)</h2>
+<div class="card">
+  {% if dead_reasons %}
+  <table>
+    <thead><tr><th>Node</th><th>Reason</th><th class="num">Count</th></tr></thead>
+    <tbody>
+    {% for d in dead_reasons %}
+      <tr><td>{{ d.node }}</td><td><code>{{ d.error_class }}</code></td><td class="num">{{ d.n }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty" style="padding:20px">Nothing in quarantine.</p>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const days = {{ window_days }};
+  fetch(`/api/telemetry?days=${days}`).then(r => r.json()).then(data => {
+    const days_ = [...new Set(data.token_cost_by_day.map(r => r.day))].sort();
+
+    new Chart(document.getElementById('costChart'), {
+      type: 'line',
+      data: { labels: days_, datasets: [{
+        label: 'Cost (USD)',
+        data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).cost_usd || 0),
+        borderColor: '#2a78d6', tension: 0.2,
+      }] },
+      options: { plugins: { title: { display: true, text: 'Cost per day' } }, scales: { y: { beginAtZero: true } } },
+    });
+
+    new Chart(document.getElementById('tokensChart'), {
+      type: 'bar',
+      data: { labels: days_, datasets: [
+        { label: 'Tokens in', data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).tokens_in || 0), backgroundColor: '#86b6ef' },
+        { label: 'Tokens out', data: days_.map(d => (data.token_cost_by_day.find(r => r.day === d) || {}).tokens_out || 0), backgroundColor: '#1c5cab' },
+      ] },
+      options: { plugins: { title: { display: true, text: 'Tokens per day' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
+    });
+
+    const nodes = [...new Set(data.node_status_counts.map(r => r.node))];
+    const statuses = [...new Set(data.node_status_counts.map(r => r.status))];
+    const statusColors = { success: '#0ca30c', cache_hit: '#86b6ef', retry: '#fab219', exhausted: '#d03b3b', permanent: '#d03b3b', fatal: '#7a1f1f' };
+    new Chart(document.getElementById('statusChart'), {
+      type: 'bar',
+      data: { labels: nodes, datasets: statuses.map(status => ({
+        label: status,
+        data: nodes.map(node => (data.node_status_counts.find(r => r.node === node && r.status === status) || {}).n || 0),
+        backgroundColor: statusColors[status] || '#898781',
+      })) },
+      options: { plugins: { title: { display: true, text: 'LLM node outcomes' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
+    });
+
+    const sources = [...new Set(data.fetch_volume_by_source.map(r => r.source))];
+    const fetchDays = [...new Set(data.fetch_volume_by_source.map(r => r.day))].sort();
+    new Chart(document.getElementById('fetchChart'), {
+      type: 'bar',
+      data: { labels: fetchDays, datasets: sources.map((source, i) => ({
+        label: source,
+        data: fetchDays.map(d => (data.fetch_volume_by_source.find(r => r.source === source && r.day === d) || {}).n || 0),
+        backgroundColor: ['#2a78d6', '#0ca30c', '#fab219', '#d03b3b'][i % 4],
+      })) },
+      options: { plugins: { title: { display: true, text: 'Articles fetched per day' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
+    });
+  });
+})();
+</script>
+{% endblock %}

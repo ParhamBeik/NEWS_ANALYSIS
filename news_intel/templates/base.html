@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}News Intel{% endblock %}</title>
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  /* Palette roles from the validated reference instance. Only the slots used. */
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --seq-100: #cde2fb; --seq-250: #86b6ef; --seq-400: #3987e5; --seq-550: #1c5cab;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19; --page: #0d0d0d;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7;
+      --grid: #2c2c2a; --baseline: #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --seq-100: #104281; --seq-250: #184f95; --seq-400: #256abf; --seq-550: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+    line-height: 1.6;
+  }
+  header {
+    background: var(--surface-1); border-bottom: 1px solid var(--border);
+    padding: 0 24px; display: flex; align-items: center; gap: 28px;
+    position: sticky; top: 0; z-index: 10;
+  }
+  header .brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; padding: 16px 0; }
+  header nav { display: flex; gap: 4px; }
+  header nav a {
+    color: var(--text-secondary); text-decoration: none; font-size: 14px;
+    padding: 16px 14px; border-bottom: 2px solid transparent;
+  }
+  header nav a:hover { color: var(--text-primary); }
+  header nav a.active { color: var(--series-1); border-bottom-color: var(--series-1); }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 21px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 12px; color: var(--text-secondary); font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.num, th.num { font-variant-numeric: tabular-nums; text-align: right; }
+  td code { font-size: 12px; background: var(--surface-2, var(--surface-1)); padding: 2px 6px; border-radius: 5px; cursor: help; }
+  /* Scoped wrapper for the article content itself, which is Persian and reads RTL -
+     the page around it stays English/LTR. */
+  .rtl { direction: rtl; text-align: right; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+    padding: 2px 9px; border-radius: 99px; border: 1px solid var(--border);
+  }
+  .pill.good { color: var(--good); } .pill.warn { color: var(--warning); }
+  .pill.bad { color: var(--critical); }
+  .empty { color: var(--muted); text-align: center; padding: 48px 20px; }
+  a.btn, button {
+    font-family: inherit; font-size: 14px; cursor: pointer; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-primary); padding: 10px 18px; text-decoration: none;
+  }
+  button.primary { background: var(--series-1); color: #fff; border-color: transparent; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  a.btn.disabled { opacity: .5; pointer-events: none; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<header>
+  <span class="brand">News Intel</span>
+  <nav>
+    <a href="/" class="{{ 'active' if page == 'home' }}">Home</a>
+    <a href="/compare" class="{{ 'active' if page == 'compare' }}">A/B Diff</a>
+    <a href="/ops" class="{{ 'active' if page == 'ops' }}">Ops</a>
+    <a href="/review" class="{{ 'active' if page == 'review' }}">Review</a>
+    <a href="/kpi" class="{{ 'active' if page == 'kpi' }}">Quality</a>
+  </nav>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

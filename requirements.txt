@@ -1,4 +1,19 @@
+# Carried over from the legacy pipeline
 requests==2.34.2
-beautifulsoup4==4.14.3
+beautifulsoup4==4.15.0
 openpyxl==3.1.5
 jdatetime==5.3.0
+
+# Rebuild
+pydantic==2.12.4        # typed node boundaries and structured LLM output
+pyyaml==6.0.3           # declarative source definitions
+pytest==9.1.1
+
+# Dashboard
+fastapi==0.121.2
+uvicorn==0.42.0
+jinja2==3.1.6
+python-multipart==0.0.20  # FastAPI needs it to read the review form; without it
+                          # create_app() raises at import, not at request time
+httpx==0.28.1              # starlette's TestClient needs it; without it every dashboard
+                          # test silently skips instead of failing

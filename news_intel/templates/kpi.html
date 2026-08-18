@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Quality{% endblock %}
+{% block head %}
+<style>
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .tile .label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
+  .tile .value { font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
+  .tile .value small { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .tile .note { font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+  /* Sequential single-hue ramp, light -> dark, for magnitude. Never a rainbow. */
+  .matrix td.cell { text-align: center; font-variant-numeric: tabular-nums; position: relative; }
+  .matrix td.cell span { position: relative; z-index: 1; }
+  .matrix td.cell i {
+    position: absolute; inset: 2px; border-radius: 4px; display: block; z-index: 0;
+  }
+  .matrix th.rowhead { text-align: left; color: var(--text-secondary); font-weight: 600; }
+  .matrix caption { caption-side: top; text-align: left; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+  .diag { outline: 1px solid var(--good); outline-offset: -2px; border-radius: 4px; }
+
+  .barrow { display: flex; align-items: center; gap: 10px; }
+  .barrow .track { flex: 1; height: 8px; background: var(--grid); border-radius: 99px; overflow: hidden; }
+  .barrow .track > i { display: block; height: 100%; background: var(--series-1); border-radius: 99px; }
+  .barrow .pct { font-size: 12px; color: var(--text-secondary); width: 46px; font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Quality</h1>
+<p class="sub">Every number here compares the model's output against approved human labels.</p>
+
+{% if report.labelled == 0 %}
+  <div class="card empty">
+    <p style="font-size:15px;margin:0 0 8px">No approved labels recorded yet.</p>
+    <p style="margin:0 0 18px">Model accuracy can't be measured until cases are reviewed.</p>
+    <a class="btn" href="/review">Start reviewing</a>
+  </div>
+{% else %}
+  <div class="tiles">
+    <div class="tile">
+      <div class="label">Labelled cases</div>
+      <div class="value">{{ report.labelled }}<small> / {{ report.labelled + report.pending }}</small></div>
+      <div class="note">{{ (report.progress * 100) | round(0) | int }}% of the review queue</div>
+    </div>
+    <div class="tile">
+      <div class="label">Category accuracy</div>
+      <div class="value">{{ pct(report.category_accuracy) }}</div>
+      <div class="note">{{ report.category_correct }} of {{ report.category_compared }} cases</div>
+    </div>
+    <div class="tile">
+      <div class="label">Macro F1</div>
+      <div class="value">{{ pct(report.macro_f1) }}</div>
+      <div class="note">Average across four classes, unweighted by volume</div>
+    </div>
+    <div class="tile">
+      <div class="label">Notify precision</div>
+      <div class="value">{{ pct(report.notify_precision) }}</div>
+      <div class="note">Recall: {{ pct(report.notify_recall) }}</div>
+    </div>
+  </div>
+
+  <h2>Category confusion matrix</h2>
+  <div class="card">
+    <table class="matrix">
+      <caption>Row: human label · Column: model prediction · Green diagonal = correct</caption>
+      <thead>
+        <tr><th></th>{% for c in categories %}<th class="num">{{ c }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for truth in categories %}
+        <tr>
+          <th class="rowhead">{{ truth }}</th>
+          {% for pred in categories %}
+            {% set n = report.confusion[truth][pred] %}
+            <td class="cell {{ 'diag' if truth == pred }}">
+              <i style="background: {{ ramp(n) }}"></i><span>{{ n or '' }}</span>
+            </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Accuracy per category</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>Category</th><th class="num">Support</th><th class="num">Precision</th><th class="num">Recall</th><th class="num">F1</th></tr></thead>
+      <tbody>
+      {% for m in report.per_class %}
+        <tr>
+          <td>{{ m.label }}</td>
+          <td class="num">{{ m.support }}</td>
+          <td class="num">{{ pct(m.precision) }}</td>
+          <td class="num">{{ pct(m.recall) }}</td>
+          <td class="num">{{ pct(m.f1) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Score axis accuracy</h2>
+  <div class="card">
+    <p class="sub" style="margin-bottom:14px">
+      These axes are ordinal, so "within one level" is a more realistic match measure than exact.
+    </p>
+    <table>
+      <thead><tr><th>Axis</th><th class="num">Compared</th><th class="num">Exact match</th><th style="width:180px">Within one</th><th class="num">Mean abs. error</th><th class="num">Presence disagreement</th></tr></thead>
+      <tbody>
+      {% for a in report.axes %}
+        <tr>
+          <td>{{ axis_labels[a.axis] }}</td>
+          <td class="num">{{ a.compared }}</td>
+          <td class="num">{{ pct(a.exact_rate) }}</td>
+          <td>
+            <div class="barrow">
+              <span class="track"><i style="width: {{ ((a.within_one_rate or 0) * 100) | round(0) | int }}%"></i></span>
+              <span class="pct">{{ pct(a.within_one_rate) }}</span>
+            </div>
+          </td>
+          <td class="num">{{ '%.2f' % a.mae if a.mae is not none else '—' }}</td>
+          <td class="num">{{ a.disagreed_on_presence }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}
