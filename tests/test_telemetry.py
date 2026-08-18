@@ -1,12 +1,17 @@
 from news_intel import telemetry
-from news_intel.core import db
+from news_intel.core import dag, db
+
+# `days=1` windows filter on `date('now', ...)`, so fixtures must be timestamped against
+# the actual clock - a fixed literal here passes today and silently starts failing every
+# subsequent day once "now" moves past it.
+NOW = dag.utc_now()
 
 
 def _article(conn, *, source, url, duplicate_of=None):
     return db.insert(conn, "articles", {
         "url": url, "identity_key": f"id:{url}", "source": source,
         "original_title": "t", "lead": "l", "content": "c", "content_hash": url,
-        "fetched_at": "2026-08-17T10:00:00+00:00", "duplicate_of": duplicate_of,
+        "fetched_at": NOW, "duplicate_of": duplicate_of,
     })
 
 
@@ -14,7 +19,7 @@ def _event(conn, *, node, status, provider="gapgpt", model="m1", tokens_in=10, t
     db.insert(conn, "node_events", {
         "run_id": "r1", "node": node, "node_version": "v1", "cache_key": "k",
         "status": status, "attempt": 1, "tokens_in": tokens_in, "tokens_out": tokens_out,
-        "cost_usd": cost, "provider": provider, "model": model, "created_at": "2026-08-17T10:00:00+00:00",
+        "cost_usd": cost, "provider": provider, "model": model, "created_at": NOW,
     })
 
 
@@ -64,7 +69,7 @@ def test_funnel_counts_classified_and_evaluated_articles(conn):
     db.insert(conn, "classifications", {
         "article_id": article_id, "category": "economics", "confidence": "زیاد",
         "method": "llm", "prompt_version": "v1", "provider": "gapgpt", "model": "m1",
-        "run_id": "r1", "created_at": "2026-08-17T10:00:00+00:00",
+        "run_id": "r1", "created_at": NOW,
     })
     funnel = telemetry.funnel(conn, days=1)
     assert funnel["classified"] == 1 and funnel["evaluated"] == 0
