@@ -32,8 +32,8 @@ config/              checked in, human-edited
   prompts/*.md       policy text; editing one changes the prompt version
   routing.yaml       node -> provider/model
   workbook_template.xlsx
+  golden.json        labelled eval cases
 
-evals/golden.json    labelled cases
 migrations/          one-shot legacy import
 tests/               offline, no network, no API cost
 var/                 ALL generated state (gitignored) - db, logs, outputs
@@ -71,7 +71,7 @@ python -m news_intel.cli replay --node classify              # invalidate + reco
 python -m news_intel.cli review-queue --size 100             # build a labelling queue
 python -m news_intel.cli review-import <path>                # ingest human labels
 python -m news_intel.cli golden                              # approved reviews -> eval set
-python -m news_intel.cli evaluate evals/golden.json --provider gapgpt
+python -m news_intel.cli evaluate config/golden.json --provider gapgpt
 python -m news_intel.cli routes                              # which model answers what
 python -m news_intel.cli compare --a-provider gapgpt --a-version <hash> \
                                   --b-provider gapgpt --b-version <hash>  # A/B: diffs two

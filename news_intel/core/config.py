@@ -18,7 +18,6 @@ SOURCES_DIR = CONFIG_DIR / "sources"
 PROMPTS_DIR = CONFIG_DIR / "prompts"
 ROUTING_PATH = CONFIG_DIR / "routing.yaml"
 WORKBOOK_TEMPLATE_PATH = CONFIG_DIR / "workbook_template.xlsx"
-EVALS_DIR = ROOT / "evals"
 
 # Generated: everything the pipeline writes. One gitignored root, so "mine" versus
 # "generated" is obvious at a glance and the whole runtime state can be wiped with
