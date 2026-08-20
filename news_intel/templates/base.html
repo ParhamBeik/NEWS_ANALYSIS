@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}News Intel{% endblock %}</title>
-<script src="https://unpkg.com/htmx.org@2.0.4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-  /* Palette roles from the validated reference instance. Only the slots used. */
+  /* One stylesheet for all five pages. Palette roles from the validated reference
+     instance; only the slots actually used are defined. */
   :root {
     color-scheme: light;
     --surface-1: #fcfcfb;
@@ -35,11 +35,12 @@
       --seq-100: #104281; --seq-250: #184f95; --seq-400: #256abf; --seq-550: #3987e5;
     }
   }
+
+  /* ------------------------------------------------------------------ shell */
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--page); color: var(--text-primary);
-    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
-    line-height: 1.6;
+    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; line-height: 1.6;
   }
   header {
     background: var(--surface-1); border-bottom: 1px solid var(--border);
@@ -47,8 +48,8 @@
     position: sticky; top: 0; z-index: 10;
   }
   header .brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; padding: 16px 0; white-space: nowrap; }
-  /* Scrolls horizontally rather than wrapping mid-word once five tabs no longer fit
-     next to the brand - narrow phones (~390px) hit this on every page. */
+  /* Scrolls rather than wrapping mid-word once five tabs no longer fit next to the
+     brand - narrow phones (~390px) hit this on every page. */
   header nav { display: flex; gap: 4px; overflow-x: auto; max-width: 100%; }
   header nav a {
     color: var(--text-secondary); text-decoration: none; font-size: 14px;
@@ -57,28 +58,35 @@
   header nav a:hover { color: var(--text-primary); }
   header nav a.active { color: var(--series-1); border-bottom-color: var(--series-1); }
   main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+
   h1 { font-size: 21px; margin: 0 0 4px; }
   h2 { font-size: 15px; margin: 28px 0 12px; color: var(--text-secondary); font-weight: 600; }
   .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
-  .card {
-    background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 10px; padding: 20px;
-  }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 20px; }
+  .empty.tight { padding: 20px; }
+  code { font-size: 12px; background: var(--page); padding: 1px 6px; border-radius: 4px; }
+
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
   th { color: var(--muted); font-weight: 600; font-size: 12px; }
   td.num, th.num { font-variant-numeric: tabular-nums; text-align: right; }
-  td code { font-size: 12px; background: var(--surface-2, var(--surface-1)); padding: 2px 6px; border-radius: 5px; cursor: help; }
-  /* Scoped wrapper for the article content itself, which is Persian and reads RTL -
-     the page around it stays English/LTR. */
+
+  /* Scoped wrapper for the article text itself, which is Persian and reads RTL. The
+     page around it stays English/LTR. */
   .rtl { direction: rtl; text-align: right; unicode-bidi: isolate; }
+
   .pill {
     display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
     padding: 2px 9px; border-radius: 99px; border: 1px solid var(--border);
   }
-  .pill.good { color: var(--good); } .pill.warn { color: var(--warning); }
+  .pill.good { color: var(--good); }
+  .pill.warn { color: var(--warning); }
   .pill.bad { color: var(--critical); }
-  .empty { color: var(--muted); text-align: center; padding: 48px 20px; }
+  .dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; background: var(--muted); }
+  .dot.good { background: var(--good); }
+  .dot.bad { background: var(--critical); }
+
   a.btn, button {
     font-family: inherit; font-size: 14px; cursor: pointer; border-radius: 8px;
     border: 1px solid var(--border); background: var(--surface-1);
@@ -87,18 +95,129 @@
   button.primary { background: var(--series-1); color: #fff; border-color: transparent; font-weight: 600; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   a.btn.disabled { opacity: .5; pointer-events: none; }
+
+  input[type=number], input[type=text], select, textarea {
+    font-family: inherit; font-size: 14px; padding: 8px 10px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  textarea, input[type=text] { width: 100%; background: var(--page); resize: vertical; }
+
+  /* ------------------------------------------------------- stat tiles (ops, kpi) */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .tile .label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 5px; }
+  .tile .value { font-size: 28px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
+  .tile .value small { font-size: 14px; font-weight: 500; color: var(--muted); }
+  .tile .note { font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+  /* ------------------------------------------------------------------ home feed */
+  .window-form { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+  .window-form label { font-size: 13px; color: var(--text-secondary); }
+  .window-form input[type=number] { width: 70px; }
+  .feed { display: flex; flex-direction: column; gap: 12px; }
+  .story { padding: 18px 20px; }
+  .story .meta, .story .scores { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .story .scores { gap: 6px; }
+  .story .scores .pill { font-variant-numeric: tabular-nums; }
+  .story .title { font-size: 18px; font-weight: 700; line-height: 1.5; margin: 0 0 6px; }
+  .story .one-line { font-size: 14px; color: var(--text-secondary); margin: 0 0 10px; }
+  .story a.src { font-size: 12px; }
+  .pager { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 20px 0; }
+  .pager span { font-size: 13px; color: var(--text-secondary); }
+
+  /* ----------------------------------------------------------------------- ops */
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
+  .charts canvas { max-height: 240px; }
+
+  /* ----------------------------------------------------------- kpi: matrix, bars */
+  /* Sequential single-hue ramp, light -> dark, for magnitude. Never a rainbow. */
+  .matrix td.cell { text-align: center; font-variant-numeric: tabular-nums; position: relative; }
+  .matrix td.cell span { position: relative; z-index: 1; }
+  .matrix td.cell i { position: absolute; inset: 2px; border-radius: 4px; display: block; z-index: 0; }
+  .matrix th.rowhead { text-align: left; color: var(--text-secondary); font-weight: 600; }
+  .matrix caption { caption-side: top; text-align: left; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+  .diag { outline: 1px solid var(--good); outline-offset: -2px; border-radius: 4px; }
+  .barrow { display: flex; align-items: center; gap: 10px; }
+  .barrow .track { flex: 1; height: 8px; background: var(--grid); border-radius: 99px; overflow: hidden; }
+  .barrow .track > i { display: block; height: 100%; background: var(--series-1); border-radius: 99px; }
+  .barrow .pct { font-size: 12px; color: var(--text-secondary); width: 46px; font-variant-numeric: tabular-nums; }
+
+  /* -------------------------------------------------------------------- review */
+  .progress-row { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .progress-row .count { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .bar { flex: 1; height: 6px; background: var(--grid); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--series-1); border-radius: 99px; }
+  .split { display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 980px) { .split { grid-template-columns: 1fr; } }
+  /* Pin the article while the form scrolls - the reviewer needs the text visible the
+     whole time they are answering about it. */
+  .article { position: sticky; top: 76px; padding: 26px 28px; }
+  .article .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .article .title { font-size: 25px; line-height: 1.45; font-weight: 700; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .article .lead {
+    font-size: 16px; color: var(--text-secondary); margin: 0 0 18px;
+    padding-right: 14px; border-right: 3px solid var(--series-1);
+  }
+  .article .body {
+    font-size: 15px; max-height: 46vh; overflow-y: auto; padding-left: 8px;
+    white-space: pre-wrap; color: var(--text-primary);
+  }
+  .article .body::-webkit-scrollbar { width: 8px; }
+  .article .body::-webkit-scrollbar-thumb { background: var(--baseline); border-radius: 99px; }
+  .article .src { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--grid); font-size: 12px; direction: ltr; text-align: left; }
+  /* Percent-encoded Persian URLs run to 200+ characters; unconstrained they wrap over
+     five lines and visually outweigh the article itself. */
+  .article .src a {
+    color: var(--series-1); display: inline-block; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+  }
+  fieldset { border: none; margin: 0 0 14px; padding: 0 0 12px; border-bottom: 1px solid var(--grid); }
+  fieldset:last-of-type { border-bottom: none; }
+  legend { font-size: 13px; font-weight: 600; color: var(--text-secondary); padding: 0 0 7px; }
+  .hint { font-size: 12px; color: var(--muted); margin: -3px 0 7px; }
+  .choices { display: flex; flex-wrap: wrap; gap: 6px; }
+  .choices input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .choices label {
+    font-size: 13px; padding: 7px 13px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--page); color: var(--text-secondary);
+    user-select: none;
+  }
+  .choices label:hover { border-color: var(--baseline); color: var(--text-primary); }
+  .choices label.none { font-style: italic; }
+  .choices input:checked + label { background: var(--series-1); border-color: transparent; color: #fff; font-weight: 600; }
+  .choices input:focus-visible + label { outline: 2px solid var(--series-1); outline-offset: 2px; }
+  .model-said { font-size: 12px; color: var(--muted); margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+  .model-said b { color: var(--text-secondary); font-weight: 600; }
+  .rationale {
+    background: var(--page); border: 1px solid var(--grid); border-radius: 8px;
+    padding: 10px 12px; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 16px;
+  }
+  .rationale b { color: var(--text-primary); }
+  .actions { display: flex; gap: 10px; align-items: center; padding-top: 6px; }
+
+  /* ------------------------------------------------------------------- compare */
+  .picker { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-bottom: 20px; }
+  .picker .field { display: flex; flex-direction: column; gap: 5px; }
+  .picker label { font-size: 12px; color: var(--text-secondary); }
+  .picker select { font-size: 13px; min-width: 260px; }
+  .diff-row { padding: 16px 18px; margin-bottom: 10px; }
+  .diff-row .head { font-size: 15px; font-weight: 700; margin: 0 0 4px; }
+  .diff-row .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+  .diff-row .side { font-size: 12.5px; background: var(--page); border-radius: 8px; padding: 10px 12px; }
+  .diff-row .side b { display: block; margin-bottom: 4px; color: var(--text-secondary); }
+  .diff-row a { font-size: 12px; }
+  details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; padding: 6px 0; }
 </style>
-{% block head %}{% endblock %}
 </head>
 <body>
 <header>
   <span class="brand">News Intel</span>
   <nav>
-    <a href="/" class="{{ 'active' if page == 'home' }}">Home</a>
-    <a href="/compare" class="{{ 'active' if page == 'compare' }}">A/B Diff</a>
-    <a href="/ops" class="{{ 'active' if page == 'ops' }}">Ops</a>
-    <a href="/review" class="{{ 'active' if page == 'review' }}">Review</a>
-    <a href="/kpi" class="{{ 'active' if page == 'kpi' }}">Quality</a>
+    {% for href, key, label in [('/', 'home', 'Home'), ('/compare', 'compare', 'A/B Diff'),
+                                ('/ops', 'ops', 'Ops'), ('/review', 'review', 'Review'),
+                                ('/kpi', 'kpi', 'Quality')] %}
+      <a href="{{ href }}" class="{{ 'active' if page == key }}">{{ label }}</a>
+    {% endfor %}
   </nav>
 </header>
 <main>{% block content %}{% endblock %}</main>

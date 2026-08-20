@@ -6,52 +6,37 @@ import argparse
 import json
 import time
 
-from . import backfill, dashboard, dedupe, evals, exports, pipeline, reviews, routing, sources
-from .core import config, dag, db
-from .providers import Provider, make_provider
+from . import config, dag, db, dedupe, exports, pipeline, providers, reviews, sources
 
 PROVIDER_CHOICES = ["routed", "rule", "gapgpt", "ollama"]
-REPLAY_TABLES = {"classify": "classifications", "evaluate": "evaluations", "summarize": "summaries"}
-
-
-def resolve_providers(choice: str) -> dict[str, Provider]:
-    """`routed` reads config/routing.yaml; anything else pins every node to one provider."""
-    routes = routing.load(override=None if choice == "routed" else choice)
-    return routing.build(routes)
 
 
 def run_once(args: argparse.Namespace) -> dict[str, int]:
     config.ensure_dirs()
     conn = db.init_db()
-    specs = sources.load_specs(config.SOURCES_DIR)
+    specs = sources.load_specs()
     with conn:
         sources.register(conn, specs)
-    selected = args.sources or list(specs)
-    providers = resolve_providers(args.provider)
     collected = []
-    for name in selected:
-        spec = specs[name]
-        if not spec.enabled:
+    for name in getattr(args, "sources", None) or list(specs):
+        if not specs[name].enabled:
             continue
         try:
-            articles = sources.fetch(spec, limit=args.limit)
+            collected.extend(sources.fetch(specs[name], limit=args.limit))
             pipeline.set_source_health(conn, name, ok=True)
-            collected.extend(articles)
         except Exception as exc:  # one source cannot fail the cycle
             pipeline.set_source_health(conn, name, ok=False, error=str(exc)[:2000])
     with conn:
-        stats = pipeline.process(conn, collected, providers)
-    window_days = db.window_days(conn)
+        stats = pipeline.process(conn, collected, providers.resolve(args.provider))
+
     # Backfill always classifies on the free offline baseline, never the run's real
-    # provider - a coverage gap can mean hundreds of articles, and paying to label all of
-    # them as a silent side effect of a routine `run --provider gapgpt` is not something
-    # a budget ceiling catching it after the fact makes acceptable. Re-run classification
-    # at a real provider later (`cli replay --node classify`) if current-quality labels
-    # matter for the backfilled window.
-    backfill_providers = resolve_providers("rule")
-    stats["backfilled"] = sum(
-        backfill.ensure_window(conn, specs, backfill_providers, days=window_days).values()
-    )
+    # provider: a coverage gap can mean hundreds of articles, and paying to label all of
+    # them as a silent side effect of a routine `run --provider gapgpt` is not something a
+    # budget ceiling catching it afterwards makes acceptable. Re-run with `replay --node
+    # classify` if current-quality labels matter for the backfilled window.
+    stats["backfilled"] = sum(pipeline.ensure_window(
+        conn, specs, providers.resolve("rule"), days=db.window_days(conn)
+    ).values())
     if args.export:
         exports.export_all(conn, config.OUTPUT_DIR)
     conn.close()
@@ -61,17 +46,13 @@ def run_once(args: argparse.Namespace) -> dict[str, int]:
 def run_loop(args: argparse.Namespace, *, cycles: int | None = None) -> int:
     """Run cycles forever, surviving individual failures.
 
-    The previous version was a bare `while True: run_once()`, so the first unhandled
-    exception - one API timeout, one malformed page - killed the daemon permanently and
-    silently. A monitoring pipeline that stops monitoring is the failure this whole
-    rebuild is about, so a failed cycle is logged, backed off, and retried.
-
-    Fatal errors (rejected credentials, exhausted budget) still stop the loop: retrying
-    those just burns the clock, or the money, until someone intervenes.
+    A bare `while True: run_once()` let the first unhandled exception kill the daemon
+    permanently and silently - a monitoring pipeline that stops monitoring is the failure
+    this rebuild is about. Fatal errors (rejected credentials, exhausted budget) still stop
+    the loop: retrying those just burns the clock, or the money, until someone intervenes.
     """
     interval = max(1, args.interval_minutes) * 60
-    failures = 0
-    completed = 0
+    failures = completed = 0
     while cycles is None or completed < cycles:
         try:
             print(json.dumps(run_once(args), ensure_ascii=False), flush=True)
@@ -88,105 +69,121 @@ def run_loop(args: argparse.Namespace, *, cycles: int | None = None) -> int:
         completed += 1
         if cycles is not None and completed >= cycles:
             break
-        # Back off on repeated failure so a source outage does not hammer it every cycle.
-        time.sleep(interval * min(2 ** failures, 8) if failures else interval)
+        # Back off on repeated failure, so a source outage is not hammered every cycle.
+        time.sleep(interval * min(2**failures, 8) if failures else interval)
     return 0
+
+
+def _emit(payload) -> None:
+    print(json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def build_parser(source_names: list[str]) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="news-intel")
+    commands = parser.add_subparsers(dest="command", required=True)
+    provider_help = "`routed` uses config/routing.yaml; anything else pins all nodes"
+
+    commands.add_parser("init")
+    for name in ("run", "run-loop"):
+        command = commands.add_parser(name)
+        command.add_argument("--limit", type=int, default=25)
+        command.add_argument("--provider", default="rule", choices=PROVIDER_CHOICES, help=provider_help)
+        command.add_argument("--export", action="store_true")
+        if name == "run":
+            command.add_argument("--sources", nargs="+", choices=source_names)
+        else:
+            command.add_argument("--interval-minutes", type=int, default=30)
+
+    replay = commands.add_parser("replay", help="invalidate a node and recompute it next run")
+    replay.add_argument("--node", required=True, choices=list(pipeline.RESULT_TABLES))
+    replay.add_argument("--version")
+
+    commands.add_parser("export")
+    commands.add_parser("routes", help="show which provider answers which node")
+
+    dedupe_command = commands.add_parser("dedupe")
+    dedupe_command.add_argument("--apply", action="store_true", help="link the matches, not just report")
+
+    queue = commands.add_parser("review-queue")
+    queue.add_argument("--size", type=int, default=100)
+    queue.add_argument("--out", default="var/outputs/review_queue.xlsx")
+    commands.add_parser("review-import").add_argument("path")
+
+    canary = commands.add_parser("canary", help="is each source still alive?")
+    canary.add_argument("--sources", nargs="+", choices=source_names)
+
+    evaluate = commands.add_parser("evaluate")
+    evaluate.add_argument("cases")
+    evaluate.add_argument("--provider", default="rule",
+                          choices=[c for c in PROVIDER_CHOICES if c != "routed"])
+
+    golden = commands.add_parser("golden", help="export approved reviews as the eval set")
+    golden.add_argument("--out", default="config/golden.json")
+
+    compare = commands.add_parser("compare", help="diff two prompt/provider variants already run")
+    for side in "ab":
+        compare.add_argument(f"--{side}-provider", required=True)
+        compare.add_argument(f"--{side}-version", required=True, help=f"prompt_version for variant {side.upper()}")
+        compare.add_argument(f"--{side}-model", default=None)
+    compare.add_argument("--out", default="var/outputs/compare")
+
+    serve = commands.add_parser("serve", help="dashboard on :8000")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    return parser
 
 
 def main() -> int:
     config.load_dotenv()
-    # Read from config/sources/*.yaml rather than hardcoding names, so adding a source
-    # is a new yaml file only - no cli.py edit required.
-    source_names = sorted(sources.load_specs(config.SOURCES_DIR))
-    parser = argparse.ArgumentParser(prog="news-intel")
-    commands = parser.add_subparsers(dest="command", required=True)
-    init = commands.add_parser("init")
-    run = commands.add_parser("run")
-    run.add_argument("--sources", nargs="+", choices=source_names)
-    run.add_argument("--limit", type=int, default=25)
-    run.add_argument("--provider", default="rule", choices=PROVIDER_CHOICES,
-                     help="`routed` uses config/routing.yaml; anything else pins all nodes")
-    run.add_argument("--export", action="store_true")
-    loop = commands.add_parser("run-loop")
-    loop.add_argument("--interval-minutes", type=int, default=30)
-    loop.add_argument("--limit", type=int, default=25)
-    loop.add_argument("--provider", default="rule", choices=PROVIDER_CHOICES,
-                      help="`routed` uses config/routing.yaml; anything else pins all nodes")
-    loop.add_argument("--export", action="store_true")
-    replay = commands.add_parser("replay")
-    replay.add_argument("--node", required=True)
-    replay.add_argument("--version")
-    commands.add_parser("export")
-    dedupe_parser = commands.add_parser("dedupe")
-    dedupe_parser.add_argument("--apply", action="store_true",
-                               help="link the matches; without it, only report them")
-    review_queue = commands.add_parser("review-queue")
-    review_queue.add_argument("--size", type=int, default=100)
-    review_queue.add_argument("--out", default="var/outputs/review_queue.xlsx")
-    review_import = commands.add_parser("review-import")
-    review_import.add_argument("path")
-    canary = commands.add_parser("canary")
-    canary.add_argument("--sources", nargs="+", choices=source_names)
-    evaluate_parser = commands.add_parser("evaluate")
-    evaluate_parser.add_argument("cases")
-    evaluate_parser.add_argument(
-        "--provider", default="rule", choices=[c for c in PROVIDER_CHOICES if c != "routed"]
-    )
-    golden = commands.add_parser("golden", help="export approved reviews as the eval set")
-    golden.add_argument("--out", default="config/golden.json")
-    commands.add_parser("routes", help="show which provider answers which node")
-    compare = commands.add_parser("compare", help="diff two prompt/provider variants already run")
-    compare.add_argument("--a-provider", required=True)
-    compare.add_argument("--a-version", required=True, help="prompt_version for variant A")
-    compare.add_argument("--a-model", default=None)
-    compare.add_argument("--b-provider", required=True)
-    compare.add_argument("--b-version", required=True, help="prompt_version for variant B")
-    compare.add_argument("--b-model", default=None)
-    compare.add_argument("--out", default="var/outputs/compare")
-    serve = commands.add_parser("serve")
-    serve.add_argument("--host", default="127.0.0.1")
-    serve.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
+    # Read the source names from config so adding a source is a config edit only.
+    args = build_parser(sorted(sources.load_specs())).parse_args()
+
     if args.command == "init":
         config.ensure_dirs()
         db.init_db().close()
+
     elif args.command == "run":
-        print(json.dumps(run_once(args), ensure_ascii=False))
+        _emit(run_once(args))
+
     elif args.command == "run-loop":
-        run_loop(args)
+        return run_loop(args)
+
     elif args.command == "replay":
         with db.init_db() as conn:
-            cache_cleared = dag.invalidate(conn, args.node, version=args.version)
-            # classify/evaluate/summarize run with cacheable=False (pipeline.py); the real
-            # "already done" gate `_exists()` checks these tables directly, not node_events,
-            # so invalidating the cache alone would not cause a re-run.
-            table = REPLAY_TABLES.get(args.node)
-            results_cleared = 0
-            if table:
-                query = f"DELETE FROM {table}" + (" WHERE prompt_version=?" if args.version else "")
-                params = (args.version,) if args.version else ()
-                results_cleared = conn.execute(query, params).rowcount
-            print(json.dumps({"cache_cleared": cache_cleared, "results_cleared": results_cleared}))
+            # classify/evaluate/summarize run with cacheable=False, so the real "already
+            # done" gate reads the result tables directly, not node_events - invalidating
+            # the cache alone would not cause a re-run.
+            cleared = dag.invalidate(conn, args.node, version=args.version)
+            query = f"DELETE FROM {pipeline.RESULT_TABLES[args.node]}" + (
+                " WHERE prompt_version=?" if args.version else ""
+            )
+            rows = conn.execute(query, (args.version,) if args.version else ()).rowcount
+            _emit({"cache_cleared": cleared, "results_cleared": rows})
+
     elif args.command == "export":
         with db.connect() as conn:
-            print({name: str(path) for name, path in exports.export_all(conn, config.OUTPUT_DIR).items()})
+            _emit({name: str(path) for name, path in exports.export_all(conn, config.OUTPUT_DIR).items()})
+
     elif args.command == "dedupe":
         with db.init_db() as conn:
             merged = dedupe.backfill(conn, dry_run=not args.apply)
         for left, right, score in sorted(merged, key=lambda row: row[2]):
             print(f"{score:.3f}  {left}\n       {right}")
-        print(json.dumps({"pairs": len(merged), "applied": args.apply}))
+        _emit({"pairs": len(merged), "applied": args.apply})
+
     elif args.command == "review-queue":
         with db.init_db() as conn:
             count = reviews.create_queue(conn, size=args.size)
-            output = reviews.export_queue(conn, config.ROOT / args.out)
-            print(json.dumps({"queued": count, "path": str(output)}))
+            path = reviews.export_queue(conn, config.ROOT / args.out)
+        _emit({"queued": count, "path": str(path)})
+
     elif args.command == "review-import":
         with db.init_db() as conn:
-            print(reviews.import_queue(conn, config.ROOT / args.path))
+            _emit(reviews.import_queue(conn, config.ROOT / args.path))
+
     elif args.command == "canary":
         conn = db.init_db()
-        specs = sources.load_specs(config.SOURCES_DIR)
+        specs = sources.load_specs()
         report = {}
         for name in args.sources or list(specs):
             try:
@@ -197,29 +194,36 @@ def main() -> int:
                 pipeline.set_source_health(conn, name, ok=False, error=str(exc)[:2000])
         conn.commit()
         conn.close()
-        print(json.dumps(report, ensure_ascii=False))
+        _emit(report)
+
     elif args.command == "evaluate":
-        cases = evals.load_cases(config.ROOT / args.cases)
-        print(json.dumps(evals.evaluate(cases, make_provider(args.provider)), ensure_ascii=False))
+        cases = reviews.load_cases(config.ROOT / args.cases)
+        _emit(reviews.evaluate(cases, providers.make_provider(args.provider)))
+
     elif args.command == "golden":
+        path = config.ROOT / args.out
         with db.init_db() as conn:
-            path = config.ROOT / args.out
-            count = evals.build_golden(conn, path)
-        print(json.dumps({"cases": count, "path": str(path)}, ensure_ascii=False))
+            count = reviews.build_golden(conn, path)
+        _emit({"cases": count, "path": str(path)})
+
     elif args.command == "routes":
-        print(json.dumps(routing.describe(resolve_providers("routed")), ensure_ascii=False))
+        _emit(providers.describe(providers.resolve("routed")))
+
     elif args.command == "compare":
         with db.connect(readonly=True) as conn:
-            summary = evals.compare(
+            _emit(reviews.compare(
                 conn,
-                a=evals.Variant(args.a_provider, args.a_model, args.a_version),
-                b=evals.Variant(args.b_provider, args.b_model, args.b_version),
+                a=reviews.Variant(args.a_provider, args.a_model, args.a_version),
+                b=reviews.Variant(args.b_provider, args.b_model, args.b_version),
                 out_dir=config.ROOT / args.out,
-            )
-        print(json.dumps(summary, ensure_ascii=False))
+            ))
+
     else:
         import uvicorn
-        uvicorn.run(dashboard.create_app(), host=args.host, port=args.port)
+
+        from .dashboard import create_app
+
+        uvicorn.run(create_app(), host=args.host, port=args.port)
     return 0
 
 

@@ -3,17 +3,11 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .vscode/
+.pytest_cache/
 
 # Secrets
 .env
 
-# Runtime state: everything the pipeline generates lives under var/
+# Everything the pipeline generates
 var/
 graphify-out/
-.pytest_cache/
-
-# Large generated/news data (legacy)
-LEGACY/NEWS_AI_PROJECT/خبر فوری/
-LEGACY/NEWS_AI_PROJECT/TEST_OUTPUT/
-LEGACY/NEWS_AI_PROJECT_OTHERS/data/
-LEGACY/repomix-output.md

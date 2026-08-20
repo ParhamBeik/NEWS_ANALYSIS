@@ -1,32 +1,22 @@
 """SQLite storage.
 
-Replaces the legacy 41 MB JSON blob that had to be fully re-serialized to persist a
-single article. Two structural choices matter:
+Two structural choices matter:
 
 1. Inference results live in their own tables, not flattened onto the article. Re-running
-   classification with a new prompt or a different provider APPENDS a row instead of
-   destroying the previous answer. That is what makes prompt A/B testing, provider
-   comparison and evaluation possible at all.
-
-2. Ordinal score columns are NULLABLE and never defaulted. Legacy mapped a missing level
-   to "متوسط" (the middle value), so security articles carried a fabricated gold-impact
-   score on an axis no model had assessed - and that value fed the notify decision.
-   Here, missing means NULL and the scoring rule handles it explicitly.
+   with a new prompt or provider APPENDS a row. That is what makes A/B comparison and
+   provider evaluation possible at all.
+2. Ordinal score columns are NULLABLE and never defaulted. Missing means NULL; see
+   scoring.py for why substituting a level there is the bug this rebuild exists to fix.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from . import config
-
-SCHEMA_VERSION = 1
-
-# Ordinal scale, weakest to strongest. Kept in a table so SQL aggregations can join
-# against it rather than duplicating the mapping in queries.
-LEVELS: tuple[str, ...] = ("خیلی کم", "کم", "متوسط", "زیاد", "خیلی زیاد")
+from .scoring import LEVELS
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS levels (
@@ -34,8 +24,7 @@ CREATE TABLE IF NOT EXISTS levels (
     score INTEGER NOT NULL
 );
 
--- Small user-editable knobs (e.g. rolling_window_days) that need to change from the
--- dashboard without a restart. Not for anything derivable from code or env defaults.
+-- Small knobs the dashboard edits without a restart (e.g. rolling_window_days).
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -56,11 +45,9 @@ CREATE TABLE IF NOT EXISTS articles (
     id                      INTEGER PRIMARY KEY,
     url                     TEXT NOT NULL UNIQUE,
     identity_key            TEXT NOT NULL,
-    -- Which adapter fetched it (khabarfoori/mehr/...). The crawl origin.
-    source                  TEXT NOT NULL,
+    source                  TEXT NOT NULL,   -- which adapter fetched it
     -- The outlet credited by the page. Khabarfoori is an aggregator, so this is often a
-    -- different agency (فارس، ایسنا، مهر...). Keeping both separate is what makes dedup
-    -- possible once we crawl Mehr directly and meet its stories again via Khabarfoori.
+    -- different agency; keeping both separate is what makes cross-source dedup possible.
     original_outlet         TEXT,
     original_title          TEXT NOT NULL DEFAULT '',
     lead                    TEXT NOT NULL DEFAULT '',
@@ -149,7 +136,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at DESC);
 
--- One row per node execution. Doubles as the cache index and the dashboard's data source.
+-- One row per node execution: the cache index and the dashboard's data source at once.
 CREATE TABLE IF NOT EXISTS node_events (
     id           INTEGER PRIMARY KEY,
     run_id       TEXT NOT NULL,
@@ -169,7 +156,6 @@ CREATE TABLE IF NOT EXISTS node_events (
     error        TEXT,
     created_at   TEXT NOT NULL
 );
--- The cache lookup is the hottest query in the system; this index serves it directly.
 CREATE INDEX IF NOT EXISTS idx_events_cache
     ON node_events(node, node_version, cache_key, status);
 CREATE INDEX IF NOT EXISTS idx_events_run     ON node_events(run_id, created_at);
@@ -177,19 +163,19 @@ CREATE INDEX IF NOT EXISTS idx_events_article ON node_events(article_id);
 
 -- Human review is the only source eligible for prompt examples and evaluation truth.
 CREATE TABLE IF NOT EXISTS review_cases (
-    id                  INTEGER PRIMARY KEY,
-    article_id          INTEGER NOT NULL UNIQUE REFERENCES articles(id),
-    stratum             TEXT NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'pending',
-    reviewed_category   TEXT,
+    id                    INTEGER PRIMARY KEY,
+    article_id            INTEGER NOT NULL UNIQUE REFERENCES articles(id),
+    stratum               TEXT NOT NULL,
+    status                TEXT NOT NULL DEFAULT 'pending',
+    reviewed_category     TEXT,
     confidence_occurrence TEXT REFERENCES levels(level),
-    gold_price_impact   TEXT REFERENCES levels(level),
-    security_relevance  TEXT REFERENCES levels(level),
-    gold_trend          TEXT,
-    one_line            TEXT,
-    reviewer_notes      TEXT,
-    reviewed_at         TEXT,
-    created_at          TEXT NOT NULL
+    gold_price_impact     TEXT REFERENCES levels(level),
+    security_relevance    TEXT REFERENCES levels(level),
+    gold_trend            TEXT,
+    one_line              TEXT,
+    reviewer_notes        TEXT,
+    reviewed_at           TEXT,
+    created_at            TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_review_status ON review_cases(status, stratum);
 
@@ -206,7 +192,7 @@ CREATE TABLE IF NOT EXISTS dead_letters (
 );
 CREATE INDEX IF NOT EXISTS idx_dead_open ON dead_letters(resolved_at, node);
 
--- "Latest inference wins" without scattering max(created_at) through every query.
+-- "Latest inference wins", without max(created_at) scattered through every query.
 CREATE VIEW IF NOT EXISTS latest_classification AS
 SELECT c.* FROM classifications c
 WHERE c.id = (SELECT id FROM classifications
@@ -225,18 +211,15 @@ WHERE s.id = (SELECT id FROM summaries
 
 
 def connect(path: Path | None = None, *, readonly: bool = False) -> sqlite3.Connection:
-    """Open the database.
-
-    readonly=True is what the dashboard uses. A monitoring tool that can lock the thing
-    it monitors is worse than no monitoring tool.
-    """
+    """Open the database. readonly=True is what the dashboard uses - a monitoring tool
+    that can lock the thing it monitors is worse than no monitoring tool."""
     path = path or config.DB_PATH
     if readonly:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False because node workers run in a ThreadPoolExecutor.
-        # Writes are serialized by Ctx.lock in dag.py - sqlite3 will not do it for us.
+        # check_same_thread=False because node workers run in a ThreadPoolExecutor. Writes
+        # are serialized by dag.Ctx.lock - sqlite3 will not do it for us.
         conn = sqlite3.connect(path, timeout=30.0, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -253,37 +236,19 @@ def init_db(path: Path | None = None) -> sqlite3.Connection:
             "INSERT OR IGNORE INTO levels(level, score) VALUES (?, ?)",
             [(level, i + 1) for i, level in enumerate(LEVELS)],
         )
-        conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     return conn
 
 
-def level_score(level: str | None) -> int | None:
-    """Ordinal position of a level, or None if absent/unrecognised.
-
-    Returns None rather than a middle default - that substitution is the legacy bug
-    this module's docstring describes.
-    """
-    if not level:
-        return None
-    try:
-        return LEVELS.index(level) + 1
-    except ValueError:
-        return None
+def insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> int:
+    cols = ", ".join(row)
+    marks = ", ".join("?" for _ in row)
+    cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(row.values()))
+    return int(cur.lastrowid)
 
 
 def get_setting(conn: sqlite3.Connection, key: str, default: str) -> str:
     row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row["value"] if row else default
-
-
-def window_days(conn: sqlite3.Connection) -> int:
-    """The dashboard's rolling-window setting, in days."""
-    return int(get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
-
-
-def day_floor(days: int) -> str:
-    """SQLite `date('now', ?)` offset string for a rolling N-day window."""
-    return f"-{max(days, 1) - 1} days"
 
 
 def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -294,21 +259,11 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
-def insert(conn: sqlite3.Connection, table: str, row: dict[str, Any]) -> int:
-    cols = ", ".join(row)
-    marks = ", ".join("?" for _ in row)
-    cur = conn.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", tuple(row.values()))
-    return int(cur.lastrowid)
+def window_days(conn: sqlite3.Connection) -> int:
+    """The dashboard's rolling-window setting, in days."""
+    return int(get_setting(conn, "rolling_window_days", config.DEFAULT_WINDOW_DAYS))
 
 
-def insert_many(conn: sqlite3.Connection, table: str, rows: Iterable[dict[str, Any]]) -> int:
-    rows = list(rows)
-    if not rows:
-        return 0
-    cols = ", ".join(rows[0])
-    marks = ", ".join("?" for _ in rows[0])
-    conn.executemany(
-        f"INSERT INTO {table} ({cols}) VALUES ({marks})",
-        [tuple(r[c] for c in rows[0]) for r in rows],
-    )
-    return len(rows)
+def day_floor(days: int) -> str:
+    """SQLite `date('now', ?)` offset string for a rolling N-day window."""
+    return f"-{max(days, 1) - 1} days"
