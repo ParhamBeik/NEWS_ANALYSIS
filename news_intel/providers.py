@@ -111,6 +111,11 @@ class OpenAICompatibleProvider:
     api_key: str
     max_calls: int
     max_output_tokens: int
+    # (input, output) dollars per million tokens, used only when the provider does not
+    # report its own cost. Resolved at construction so a malformed price in .env fails at
+    # startup - reading it lazily inside _call() means a typo is only discovered after a
+    # request has already been paid for, or never, if the provider always reports cost.
+    token_prices: tuple[float, float] = (0.0, 0.0)
     supports_structured_output: bool = True
     session: requests.Session = field(default_factory=requests.Session, repr=False)
     _calls: int = field(default=0, init=False)
@@ -159,7 +164,7 @@ class OpenAICompatibleProvider:
             raise dag.Permanent("provider returned invalid usage values")
         reported = usage.get("cost_usd", body.get("cost_usd"))
         if reported is None:
-            per_in, per_out = config.provider_token_prices()
+            per_in, per_out = self.token_prices
             reported = (tokens_in * per_in + tokens_out * per_out) / 1_000_000
         return ProviderResponse(
             data, Usage(tokens_in, tokens_out, float(reported), self.name, self.model)
@@ -259,6 +264,7 @@ def make_provider(name: str, *, model: str | None = None) -> Provider:
         api_key=api_key(),
         max_calls=config.provider_max_calls(),
         max_output_tokens=config.provider_max_output_tokens(),
+        token_prices=config.provider_token_prices(),
         supports_structured_output=structured,
     )
 

@@ -254,3 +254,11 @@ class TestQualityGate:
         dedup's time window and the workbook's daily grouping."""
         ahead = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
         assert pipeline.quality_reason(article(published_at=ahead)) == "published_in_future"
+
+
+def test_backfill_dispatch_cannot_drift_from_the_supported_set():
+    """A name in BACKFILLABLE with no handler used to fall through to Mehr's archive,
+    silently paginating the wrong site. The set is now derived from the handler table."""
+    assert sources.BACKFILLABLE == set(sources._BACKFILL)
+    assert set(sources._BACKFILL) <= set(sources.load_specs()), \
+        "every backfillable name must be a real configured source"

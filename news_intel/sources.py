@@ -289,7 +289,6 @@ def fetch(spec: SourceSpec, session: requests.Session | None = None, *, limit: i
 # since_date and the stale-page counter. Each page costs one listing fetch plus one detail
 # fetch per new article, so a wide window against a busy source is slow; that is the price
 # of actually reaching the window's floor. 500 matches legacy's own HARD_MAX_PAGES.
-BACKFILLABLE = frozenset({"khabarfoori", "mehr"})
 _MAX_BACKFILL_PAGES = 500
 _STALE_PAGE_LIMIT = 2  # consecutive pages with zero new URLs before giving up
 _MEHR_ARCHIVE_URL = "https://www.mehrnews.com/archive"
@@ -335,33 +334,44 @@ def _paginate(
             return
 
 
+def _backfill_khabarfoori(spec, session, *, since_date, seen):
+    yield from _paginate(
+        session,
+        page_url=lambda page: spec.url if page == 1 else f"{spec.url}/?page={page}",
+        parse_listing=parse_khabarfoori_listing,
+        listing_base_url=spec.url,
+        parse_article=parse_khabarfoori_article,
+        since_date=since_date,
+        seen=seen,
+    )
+
+
+def _backfill_mehr(spec, session, *, since_date, seen):
+    for topic in _MEHR_ARCHIVE_CATEGORIES:
+        yield from _paginate(
+            session,
+            page_url=lambda page, topic=topic: f"{_MEHR_ARCHIVE_URL}?tp={topic}&pi={page}",
+            parse_listing=parse_mehr_archive_listing,
+            listing_base_url=_MEHR_ARCHIVE_URL,
+            parse_article=lambda html, url: parse_generic_article(html, "mehr", url, "مهر"),
+            since_date=since_date,
+            seen=seen,
+        )
+
+
+# Keyed by source NAME, so a source with no entry yields nothing rather than falling
+# through to another source's archive. BACKFILLABLE is derived from this table for the
+# same reason - the set and the dispatch cannot drift apart.
+_BACKFILL = {"khabarfoori": _backfill_khabarfoori, "mehr": _backfill_mehr}
+BACKFILLABLE = frozenset(_BACKFILL)
+
+
 def backfill_fetch(
     spec: SourceSpec, session: requests.Session | None = None, *, since_date: str, known_urls: set[str]
 ) -> Iterator[RawArticle]:
     """Paginate a source back to `since_date` (Gregorian 'YYYY-MM-DD'). Sources without a
     history mechanism yield nothing."""
-    if spec.name not in BACKFILLABLE:
-        return
-    session = session or requests.Session()
-    seen = set(known_urls)
-    if spec.name == "khabarfoori":
-        yield from _paginate(
-            session,
-            page_url=lambda page: spec.url if page == 1 else f"{spec.url}/?page={page}",
-            parse_listing=parse_khabarfoori_listing,
-            listing_base_url=spec.url,
-            parse_article=parse_khabarfoori_article,
-            since_date=since_date,
-            seen=seen,
-        )
-    else:
-        for topic in _MEHR_ARCHIVE_CATEGORIES:
-            yield from _paginate(
-                session,
-                page_url=lambda page, topic=topic: f"{_MEHR_ARCHIVE_URL}?tp={topic}&pi={page}",
-                parse_listing=parse_mehr_archive_listing,
-                listing_base_url=_MEHR_ARCHIVE_URL,
-                parse_article=lambda html, url: parse_generic_article(html, "mehr", url, "مهر"),
-                since_date=since_date,
-                seen=seen,
-            )
+    handler = _BACKFILL.get(spec.name)
+    if handler is not None:
+        yield from handler(spec, session or requests.Session(),
+                           since_date=since_date, seen=set(known_urls))

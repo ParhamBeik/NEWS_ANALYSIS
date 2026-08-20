@@ -19,9 +19,10 @@ from news_intel.sources import RawArticle
 ARTICLE = RawArticle(source="test", url="https://test/1", title="خبر")
 
 
-def build(session):
+def build(session, prices=(0.10, 0.40)):
     return OpenAICompatibleProvider(
-        "gapgpt", "test", "https://example.test/v1", "secret", 3, 100, session=session
+        "gapgpt", "test", "https://example.test/v1", "secret", 3, 100,
+        token_prices=prices, session=session,
     )
 
 
@@ -79,10 +80,19 @@ def test_http_status_maps_onto_the_error_taxonomy(status, expected):
     assert session.calls == 1, "one HTTP attempt per call; retry lives in dag.Node"
 
 
-def test_cost_falls_back_to_configured_token_prices_when_unreported():
+def test_cost_falls_back_to_the_providers_token_prices_when_unreported():
     session = Session(Response(CLASSIFICATION, {"prompt_tokens": 1_000_000, "completion_tokens": 0}))
-    per_in, _ = config.provider_token_prices()
-    assert build(session).classify(ARTICLE).usage.cost_usd == pytest.approx(per_in)
+    assert build(session, prices=(0.25, 0.75)).classify(ARTICLE).usage.cost_usd == \
+        pytest.approx(0.25)
+
+
+def test_a_malformed_token_price_fails_at_construction_not_mid_run(monkeypatch):
+    """Resolving prices lazily inside the request path meant a typo was only discovered
+    after money had already been spent - or never, if the provider reports its own cost."""
+    monkeypatch.setenv("GAPGPT_API_KEY", "x")
+    monkeypatch.setenv("GAPGPT_INPUT_USD_PER_MILLION", "ten cents")
+    with pytest.raises(config.ConfigError, match="token prices"):
+        providers.make_provider("gapgpt")
 
 
 # -------------------------------------------------------------------------- fallback
