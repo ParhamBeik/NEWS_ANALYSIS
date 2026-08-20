@@ -17,7 +17,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import db, pipeline, sources
+from . import db, sources
 from .prompts import CATEGORIES
 from .scoring import AXES, NOTIFY, decide, level_score
 
@@ -229,7 +229,7 @@ def source_coverage(conn: sqlite3.Connection, days: int) -> list[dict[str, Any]]
     return [
         {
             "source": row["name"],
-            "missing_days": len(pipeline.missing_days(conn, row["name"], days)),
+            "missing_days": len(db.missing_days(conn, row["name"], days)),
             "total_days": days,
             "backfill_supported": row["name"] in sources.BACKFILLABLE,
         }

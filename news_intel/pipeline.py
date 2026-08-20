@@ -301,26 +301,6 @@ def set_source_health(conn: sqlite3.Connection, name: str, *, ok: bool, error: s
 _RETRY_COOLDOWN_HOURS = 6
 
 
-def missing_days(conn: sqlite3.Connection, source: str, days: int) -> set[str]:
-    """Jalali dates in the window with no canonical, dated article for `source`.
-
-    Gap detection reads Jalali because that is what the team's workbook uses; the floor
-    handed to sources.backfill_fetch is Gregorian because that is what RawArticle carries.
-    """
-    today = jdatetime.date.today()
-    window = {text.jalali_str(today - timedelta(days=offset)) for offset in range(days)}
-    present = {
-        row["published_at_persian"]
-        for row in conn.execute(
-            "SELECT DISTINCT published_at_persian FROM articles"
-            " WHERE source=? AND date_uncertain=0 AND duplicate_of IS NULL"
-            " AND published_at_persian >= ?",
-            (source, min(window)),
-        )
-    }
-    return window - present
-
-
 def ensure_window(
     conn: sqlite3.Connection, specs: dict[str, sources.SourceSpec], providers, *, days: int
 ) -> dict[str, int]:
@@ -334,7 +314,7 @@ def ensure_window(
     since_date = (date.today() - timedelta(days=days - 1)).isoformat()
     now = datetime.now(timezone.utc)
     for name, spec in specs.items():
-        if not spec.enabled or name not in sources.BACKFILLABLE or not missing_days(conn, name, days):
+        if not spec.enabled or name not in sources.BACKFILLABLE or not db.missing_days(conn, name, days):
             continue
         last = db.get_setting(conn, f"backfill_last_run:{name}", "")
         if last and now - datetime.fromisoformat(last) < timedelta(hours=_RETRY_COOLDOWN_HOURS):

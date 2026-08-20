@@ -344,17 +344,17 @@ def dated_article(conn, *, source, persian_date, uncertain=0):
 class TestWindowBackfill:
     def test_missing_days_reports_every_gap_in_the_window(self, conn):
         dated_article(conn, source="khabarfoori", persian_date=jalali_today())
-        gaps = pipeline.missing_days(conn, "khabarfoori", days=3)
+        gaps = db.missing_days(conn, "khabarfoori", days=3)
         assert len(gaps) == 2 and jalali_today() not in gaps
 
     def test_uncertain_dates_do_not_count_as_coverage(self, conn):
         dated_article(conn, source="khabarfoori", persian_date=jalali_today(), uncertain=1)
-        assert jalali_today() in pipeline.missing_days(conn, "khabarfoori", days=1)
+        assert jalali_today() in db.missing_days(conn, "khabarfoori", days=1)
 
     def test_coverage_is_full_once_every_window_day_has_an_article(self, conn):
         for offset in range(3):
             dated_article(conn, source="mehr", persian_date=jalali_today(offset))
-        assert pipeline.missing_days(conn, "mehr", days=3) == set()
+        assert db.missing_days(conn, "mehr", days=3) == set()
 
     @pytest.mark.parametrize("spec,days", [
         # No gap -> never attempted, so no network or session was ever needed.

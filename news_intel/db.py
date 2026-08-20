@@ -12,10 +12,13 @@ Two structural choices matter:
 from __future__ import annotations
 
 import sqlite3
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from . import config
+import jdatetime
+
+from . import config, text
 from .scoring import LEVELS
 
 SCHEMA = """
@@ -267,3 +270,23 @@ def window_days(conn: sqlite3.Connection) -> int:
 def day_floor(days: int) -> str:
     """SQLite `date('now', ?)` offset string for a rolling N-day window."""
     return f"-{max(days, 1) - 1} days"
+
+
+def missing_days(conn: sqlite3.Connection, source: str, days: int) -> set[str]:
+    """Jalali dates in the window with no canonical, dated article for `source`.
+
+    Gap detection reads Jalali because that is what the team's workbook uses; the floor
+    handed to sources.backfill_fetch is Gregorian because that is what RawArticle carries.
+    """
+    today = jdatetime.date.today()
+    window = {text.jalali_str(today - timedelta(days=offset)) for offset in range(days)}
+    present = {
+        row["published_at_persian"]
+        for row in conn.execute(
+            "SELECT DISTINCT published_at_persian FROM articles"
+            " WHERE source=? AND date_uncertain=0 AND duplicate_of IS NULL"
+            " AND published_at_persian >= ?",
+            (source, min(window)),
+        )
+    }
+    return window - present

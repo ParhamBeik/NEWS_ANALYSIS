@@ -11,3 +11,8 @@ __pycache__/
 # Everything the pipeline generates
 var/
 graphify-out/
+
+# Generated topology artefacts; re-run analysis/news_intel/extract_topology.py
+analysis/**/topology.json
+analysis/**/TOPOLOGY.html
+analysis/**/*.mmd
