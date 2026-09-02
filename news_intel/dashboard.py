@@ -31,7 +31,6 @@ than widening the shared read connection.
 # With postponed evaluation, `Request` becomes an unresolvable string and every HTML
 # route answers 422.
 import sqlite3
-from html import escape
 from pathlib import Path
 
 from . import evals, metrics, prompts, telemetry
@@ -198,12 +197,12 @@ def create_app(path: Path | None = None):
             ]
             records: list[dict] = []
             error: str | None = None
-            variant_a, variant_b = _parse_variant(a), _parse_variant(b)
-            if variant_a and variant_b:
-                try:
+            try:
+                variant_a, variant_b = _parse_variant(a), _parse_variant(b)
+                if variant_a and variant_b:
                     records = evals.diff_variants(conn, variant_a, variant_b)
-                except ValueError as exc:
-                    error = str(exc)
+            except ValueError as exc:
+                error = str(exc)
         return templates.TemplateResponse(request, "compare.html", {
             "page": "compare",
             "options": options,
@@ -221,26 +220,20 @@ def create_app(path: Path | None = None):
             " FROM runs ORDER BY started_at DESC LIMIT 10"
         ).fetchall()
 
+    # `/partials/runs` returns this string directly as an HTMLResponse (HTMX polls it every
+    # 30s per open /ops tab), so it can't go through ops.html's own {% include %} - it has
+    # no parent template to include from. Fetching the compiled Template once up front
+    # (rather than calling get_template() per request) skips the mtime stat Jinja2 does on
+    # every lookup even when auto_reload finds nothing changed.
+    _runs_template = templates.get_template("_runs_table.html")
+
     def runs_html(conn: sqlite3.Connection | None = None) -> str:
         if conn is None:
             with read() as conn:
                 rows = _runs_rows(conn)
         else:
             rows = _runs_rows(conn)
-        if not rows:
-            return "<p class='empty' style='padding:20px'>No runs recorded yet.</p>"
-        body = "".join(
-            f"<tr><td>{escape(r['run_id'])}</td><td>{escape(r['status'])}</td>"
-            f"<td class='num'>{r['articles_fetched']}</td>"
-            f"<td class='num'>{r['articles_processed']}</td>"
-            f"<td class='num'>${r['cost_usd']:.4f}</td></tr>"
-            for r in rows
-        )
-        return (
-            "<table><thead><tr><th>Run ID</th><th>Status</th><th class='num'>Fetched</th>"
-            "<th class='num'>Processed</th><th class='num'>Cost</th></tr></thead>"
-            f"<tbody>{body}</tbody></table>"
-        )
+        return _runs_template.render(rows=rows)
 
     @app.get("/ops", response_class=HTMLResponse)
     def ops(request: Request):
@@ -262,7 +255,7 @@ def create_app(path: Path | None = None):
             first_fetch = conn.execute(
                 "SELECT MIN(fetched_at) f FROM articles"
             ).fetchone()["f"]
-            rendered_runs = runs_html(conn)
+            run_rows = _runs_rows(conn)
         return templates.TemplateResponse(request, "ops.html", {
             "page": "ops",
             "window_days": days,
@@ -271,7 +264,7 @@ def create_app(path: Path | None = None):
             "dead_total": dead_total,
             "coverage": coverage,
             "funnel": funnel,
-            "runs_html": rendered_runs,
+            "rows": run_rows,
             "first_fetch_date": (first_fetch or "")[:10],
         })
 
@@ -362,7 +355,7 @@ def create_app(path: Path | None = None):
         conn = write()
         try:
             if action == "skip":
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE review_cases SET status='skipped', reviewed_at=? WHERE id=?",
                     (dag.utc_now(), review_id),
                 )
@@ -371,7 +364,7 @@ def create_app(path: Path | None = None):
                     raise HTTPException(400, "reviewed_category is required")
                 # Empty string means "not assessed" and must land as NULL, never as a
                 # substituted level.
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE review_cases SET status='approved', reviewed_category=?,"
                     " confidence_occurrence=?, gold_price_impact=?, security_relevance=?,"
                     " gold_trend=?, one_line=?, reviewer_notes=?, reviewed_at=?"
@@ -388,6 +381,8 @@ def create_app(path: Path | None = None):
                         review_id,
                     ),
                 )
+            if cursor.rowcount == 0:
+                raise HTTPException(404, f"review case {review_id} not found")
             conn.commit()
         finally:
             conn.close()

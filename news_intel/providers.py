@@ -1,10 +1,10 @@
-"""Provider boundary with validated JSON, bounded retries, and real usage capture."""
+"""Provider boundary with validated JSON and real usage capture. Retry/backoff lives one
+layer up, in `core.dag.Node`."""
 
 from __future__ import annotations
 
 import json
 import threading
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Generic, Iterable, Protocol, TypeVar
 
@@ -93,7 +93,6 @@ class OpenAICompatibleProvider:
     max_output_tokens: int
     supports_structured_output: bool = True
     session: requests.Session = field(default_factory=requests.Session, repr=False)
-    retry_delay: float = 1.0
     _calls: int = field(default=0, init=False)
     # One instance is shared across nodes and across the node worker pool, so the
     # counter that enforces the cap has to be atomic or the cap silently under-counts.
@@ -106,51 +105,47 @@ class OpenAICompatibleProvider:
             self._calls += 1
 
     def _call(self, messages: list[dict[str, str]], schema: type[T]) -> ProviderResponse[T]:
+        """One HTTP attempt. Retry/backoff belongs to the caller (`dag.Node`), which also
+        owns dead-lettering - a second retry loop here would double the effective attempt
+        count (and the `max_calls` spend) for every transient failure without either layer
+        knowing about the other."""
         prices = config.provider_token_prices()
-        for attempt in range(1, 4):
-            self._reserve_call()
-            try:
-                response = self.session.post(
-                    f"{self.base_url.rstrip('/')}/chat/completions",
-                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "temperature": 0,
-                        "max_tokens": self.max_output_tokens,
-                        "response_format": {"type": "json_object"},
-                    },
-                    timeout=60,
-                )
-                if response.status_code in {401, 403}:
-                    raise dag.Fatal(f"provider authentication failed: HTTP {response.status_code}")
-                if response.status_code == 429 or response.status_code >= 500:
-                    raise requests.HTTPError(f"retryable HTTP {response.status_code}", response=response)
-                if response.status_code >= 400:
-                    raise dag.Permanent(f"provider rejected request: HTTP {response.status_code}")
-                try:
-                    body = response.json()
-                    content = body["choices"][0]["message"]["content"]
-                    data = schema.model_validate_json(content)
-                except (KeyError, json.JSONDecodeError, ValidationError) as exc:
-                    raise dag.Permanent(f"provider returned invalid structured output: {exc}") from exc
-                usage = body.get("usage") or {}
-                tokens_in = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)))
-                tokens_out = int(usage.get("completion_tokens", usage.get("output_tokens", 0)))
-                if tokens_in < 0 or tokens_out < 0:
-                    raise dag.Permanent("provider returned invalid usage values")
-                cost = usage.get("cost_usd", body.get("cost_usd"))
-                cost_usd = float(cost) if cost is not None else tokens_in * prices[0] / 1_000_000 + tokens_out * prices[1] / 1_000_000
-                return ProviderResponse(data, Usage(tokens_in, tokens_out, cost_usd, self.name, self.model))
-            except dag.Fatal:
-                raise
-            except dag.Permanent:
-                raise
-            except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as exc:
-                if attempt == 3:
-                    raise dag.Transient(f"provider request failed after {attempt} attempts: {exc}") from exc
-                time.sleep(self.retry_delay * attempt)
-        raise dag.Permanent("provider retry loop fell through")
+        self._reserve_call()
+        try:
+            response = self.session.post(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0,
+                    "max_tokens": self.max_output_tokens,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=60,
+            )
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            raise dag.Transient(f"provider request failed: {exc}") from exc
+        if response.status_code in {401, 403}:
+            raise dag.Fatal(f"provider authentication failed: HTTP {response.status_code}")
+        if response.status_code == 429 or response.status_code >= 500:
+            raise dag.Transient(f"retryable HTTP {response.status_code}")
+        if response.status_code >= 400:
+            raise dag.Permanent(f"provider rejected request: HTTP {response.status_code}")
+        try:
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            data = schema.model_validate_json(content)
+        except (KeyError, json.JSONDecodeError, ValidationError) as exc:
+            raise dag.Permanent(f"provider returned invalid structured output: {exc}") from exc
+        usage = body.get("usage") or {}
+        tokens_in = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)))
+        tokens_out = int(usage.get("completion_tokens", usage.get("output_tokens", 0)))
+        if tokens_in < 0 or tokens_out < 0:
+            raise dag.Permanent("provider returned invalid usage values")
+        cost = usage.get("cost_usd", body.get("cost_usd"))
+        cost_usd = float(cost) if cost is not None else tokens_in * prices[0] / 1_000_000 + tokens_out * prices[1] / 1_000_000
+        return ProviderResponse(data, Usage(tokens_in, tokens_out, cost_usd, self.name, self.model))
 
     def classify(self, article: RawArticle, examples=()):
         return self._call(classification_messages(article, examples), ClassificationOutput)
@@ -164,15 +159,21 @@ class OpenAICompatibleProvider:
 
 @dataclass
 class FallbackProvider:
-    """Try `primary`; on exhausted retries, a bad response, or a non-budget Fatal, try `fallback`.
+    """Try `primary`; on a Transient, Permanent, or non-budget Fatal error, try `fallback`.
 
     `dag.BudgetExceeded` (a `Fatal` subclass, raised by both the run's dollar ceiling and
     a provider's own request-count cap) is deliberately NOT a fallback trigger and always
     propagates immediately - falling back to a second provider on a budget error would
     just keep spending past the ceiling that error exists to enforce. Auth failures,
-    exhausted-retry Transient errors, and Permanent errors (e.g. unparseable structured
-    output) all mean "this provider isn't answering usefully right now", which is exactly
-    what a fallback should catch.
+    Transient errors, and Permanent errors (e.g. unparseable structured output) all mean
+    "this provider isn't answering usefully right now", which is exactly what a fallback
+    should catch.
+
+    A single Transient from `primary` triggers the fallback immediately - retry/backoff
+    happens one layer up, in `dag.Node`, which retries the whole primary-then-fallback pair
+    as a unit rather than exhausting primary's own attempts first. That is a deliberate
+    trade: it costs an earlier switch to `fallback` on a single blip, in exchange for
+    bounding the worst case (node retries x provider retries no longer compound).
     """
 
     primary: Provider

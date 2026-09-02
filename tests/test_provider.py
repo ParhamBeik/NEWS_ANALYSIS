@@ -28,7 +28,7 @@ class Session:
 
 
 def test_provider_validates_json_and_records_reported_usage():
-    provider = OpenAICompatibleProvider("gapgpt", "test", "https://example.test/v1", "secret", 3, 100, session=Session(), retry_delay=0)
+    provider = OpenAICompatibleProvider("gapgpt", "test", "https://example.test/v1", "secret", 3, 100, session=Session())
     response = provider.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
     assert response.data.category == "other"
     assert response.usage.tokens_in == 11
@@ -45,8 +45,27 @@ def test_provider_does_not_retry_invalid_structured_output():
             return Response({"category": "invalid", "confidence": "متوسط", "rationale": "ok"}, {})
 
     session = InvalidSession()
-    provider = OpenAICompatibleProvider("gapgpt", "test", "https://example.test/v1", "secret", 3, 100, session=session, retry_delay=0)
+    provider = OpenAICompatibleProvider("gapgpt", "test", "https://example.test/v1", "secret", 3, 100, session=session)
     with pytest.raises(dag.Permanent, match="invalid structured output"):
+        provider.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
+    assert session.calls == 1
+
+
+def test_retryable_http_error_raises_transient_after_a_single_attempt():
+    """Retry/backoff belongs to dag.Node, not this layer - a second internal retry loop
+    here would double the effective attempt count (and max_calls spend) for every
+    transient failure without either layer knowing about the other."""
+    class FlakySession:
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, *args, **kwargs):
+            self.calls += 1
+            return type("Response", (), {"status_code": 503})()
+
+    session = FlakySession()
+    provider = OpenAICompatibleProvider("gapgpt", "test", "https://example.test/v1", "secret", 3, 100, session=session)
+    with pytest.raises(dag.Transient):
         provider.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
     assert session.calls == 1
 
@@ -84,7 +103,7 @@ class Failing:
         raise self.exc
 
 
-def test_fallback_provider_tries_the_backup_after_exhausted_retries():
+def test_fallback_provider_tries_the_backup_after_a_transient_error():
     wrapped = FallbackProvider(Failing(dag.Transient("exhausted")), MeteredProvider())
     response = wrapped.classify(RawArticle(source="test", url="https://test/1", title="خبر"))
     assert response.usage.provider == "fake"

@@ -50,10 +50,10 @@
       <div class="title rtl">{{ a.title }}</div>
       {% if a.one_line %}<p class="one-line rtl">{{ a.one_line }}</p>{% endif %}
       <div class="scores">
-        <span class="pill">Occurrence: {{ a.confidence_occurrence or "—" }}</span>
-        <span class="pill">Gold impact: {{ a.gold_price_impact or "—" }}</span>
-        <span class="pill">Security: {{ a.security_relevance or "—" }}</span>
-        {% if a.gold_trend %}<span class="pill">Trend: {{ a.gold_trend }}</span>{% endif %}
+        <span class="pill">Occurrence: <bdi>{{ a.confidence_occurrence or "—" }}</bdi></span>
+        <span class="pill">Gold impact: <bdi>{{ a.gold_price_impact or "—" }}</bdi></span>
+        <span class="pill">Security: <bdi>{{ a.security_relevance or "—" }}</bdi></span>
+        {% if a.gold_trend %}<span class="pill">Trend: <bdi>{{ a.gold_trend }}</bdi></span>{% endif %}
       </div>
       <a class="src" href="{{ a.url }}" target="_blank" rel="noopener">{{ a.url | short_url }}</a>
     </div>

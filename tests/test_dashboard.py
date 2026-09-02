@@ -177,6 +177,13 @@ def test_skipping_records_no_label(client):
     assert row["reviewed_category"] is None
 
 
+def test_reviewing_a_nonexistent_case_id_returns_404_not_a_silent_noop(client):
+    """The `UPDATE ... WHERE id=?` used to match zero rows and still redirect as if the
+    review had been recorded - a stale or hand-typed review_id was accepted silently."""
+    response = client.post("/review/999999", data={"action": "skip"})
+    assert response.status_code == 404
+
+
 # --------------------------------------------------------------------- kpi
 
 
@@ -258,6 +265,25 @@ def test_saving_the_window_setting_persists_and_redirects_home(client):
         assert db.get_setting(conn, "rolling_window_days", "14") == "30"
 
 
+def test_saving_a_non_positive_window_clamps_to_one_day(client):
+    client.post("/settings/window", data={"days": "-5"}, follow_redirects=False)
+    with db.connect(client.db_path, readonly=True) as conn:
+        assert db.get_setting(conn, "rolling_window_days", "14") == "1"
+
+
+def test_saving_a_non_integer_window_is_rejected(client):
+    response = client.post("/settings/window", data={"days": "abc"}, follow_redirects=False)
+    assert response.status_code == 422
+
+
+def test_home_page_pagination_clamps_out_of_range_pages(client):
+    """`page = min(max(1, page), total_pages)` - pin the clamp for page=0, negative, and
+    past-the-end values rather than leaving the boundary implicit and untested."""
+    for page in (0, -1, 999):
+        response = client.get("/", params={"page": page})
+        assert response.status_code == 200
+
+
 # ----------------------------------------------------------------------- ops
 
 
@@ -271,6 +297,23 @@ def test_ops_page_shows_the_funnel_and_source_health(client):
     body = client.get("/ops").text
     assert "Pipeline Ops" in body
     assert "khabarfoori" in body  # from the source health table
+
+
+def test_a_run_status_containing_markup_is_escaped_not_rendered(client):
+    """`runs_html` used to hand-build this table with only partial `html.escape()`
+    coverage, injected into ops.html via `| safe`. Now it's a real Jinja2 partial, so
+    autoescaping covers every column by construction - pin that with a status value that
+    would show up as a live tag if escaping regressed."""
+    with db.connect(client.db_path) as conn:
+        conn.execute(
+            "INSERT INTO runs(run_id, mode, status, started_at) VALUES (?,?,?,?)",
+            ("probe-run", "live", "<script>alert(1)</script>", "2026-08-16T10:00:00+03:30"),
+        )
+        conn.commit()
+    for route in ("/ops", "/partials/runs"):
+        body = client.get(route).text
+        assert "<script>alert(1)</script>" not in body
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
 
 
 def test_api_telemetry_returns_the_four_aggregations(client):
@@ -287,6 +330,15 @@ def test_api_telemetry_returns_the_four_aggregations(client):
 def test_compare_page_without_a_selection_shows_the_picker_only(client):
     body = client.get("/compare").text
     assert "Choose two variants" in body
+
+
+def test_compare_with_a_malformed_variant_shows_an_error_not_a_500(client):
+    """`_parse_variant` unpacks `encoded.split('\\x1f')` into exactly three parts - a
+    hand-edited or malformed query string used to raise ValueError past the try/except
+    that was meant to catch it, turning a bad request into an unhandled 500."""
+    response = client.get("/compare", params={"a": "not-enough-parts", "b": ""})
+    assert response.status_code == 200
+    assert "pill bad" in response.text
 
 
 def test_compare_page_renders_a_real_diff_between_two_variants(client):

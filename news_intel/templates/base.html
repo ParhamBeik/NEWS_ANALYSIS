@@ -71,7 +71,7 @@
   td code { font-size: 12px; background: var(--surface-2, var(--surface-1)); padding: 2px 6px; border-radius: 5px; cursor: help; }
   /* Scoped wrapper for the article content itself, which is Persian and reads RTL -
      the page around it stays English/LTR. */
-  .rtl { direction: rtl; text-align: right; }
+  .rtl { direction: rtl; text-align: right; unicode-bidi: isolate; }
   .pill {
     display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
     padding: 2px 9px; border-radius: 99px; border: 1px solid var(--border);
