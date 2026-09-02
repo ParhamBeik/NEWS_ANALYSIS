@@ -7,6 +7,22 @@ __pycache__/
 
 # Secrets
 .env
+.env.local
+backend/.env
+deploy/.env
+
+# Backend
+backend/.venv/
+backend/staticfiles/
+backend/media/
+backend/.coverage
+htmlcov/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
 
 # Everything the pipeline generates
 var/

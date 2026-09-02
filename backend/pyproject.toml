@@ -1,0 +1,26 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py"]
+testpaths = ["core", "sources", "articles", "inference", "review", "market", "exports", "api"]
+addopts = "-q --strict-markers"
+markers = [
+    "network: hits a real external service; excluded from the default run",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "DJ", "RUF"]
+ignore = [
+    "RUF001",  # ambiguous unicode in strings: the Persian vocabulary is the point
+    "RUF002",
+    "RUF003",
+    "B008",    # DRF/Django idiom: callables in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"*/settings/*.py" = ["F403", "F405"]
+"*/tests/*.py" = ["E501"]
