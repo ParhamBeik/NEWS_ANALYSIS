@@ -284,6 +284,12 @@ class Evaluation(InferenceResult):
 
 
 class Summary(InferenceResult):
+    # Overridden purely for the accessor name: the abstract base's `%(class)ss` pattern
+    # yields `article.summarys`, and a misspelled relation gets copied into every query
+    # that touches it.
+    article = models.ForeignKey(
+        "articles.Article", on_delete=models.CASCADE, related_name="summaries"
+    )
     optimized_title = models.TextField(blank=True)
     one_line = models.TextField(blank=True)
 

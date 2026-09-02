@@ -81,10 +81,18 @@ def crawl_source(source_name: str, limit: int | None = None, run_id: str = "") -
         raise
 
     stats = {"source": source_name, "fetched": 0, "new": 0, "duplicate": 0, "rejected": 0,
-             "prefiltered": 0, "images_queued": 0}
+             "prefiltered": 0, "images_queued": 0, "failed": 0}
     for raw in raw_articles:
         stats["fetched"] += 1
-        article, created = upsert(raw, source, run_id)
+        try:
+            article, created = upsert(raw, source, run_id)
+        except Exception:
+            # One malformed row must not cost us the other 39. A single Khabarfoori URL
+            # 1,090 characters long once failed an entire source's crawl this way, and
+            # the loss looked exactly like the site being down.
+            stats["failed"] += 1
+            logger.warning("ingest failed for %s", raw.url[:200], exc_info=True)
+            continue
         if not created:
             continue
         stats["new"] += 1

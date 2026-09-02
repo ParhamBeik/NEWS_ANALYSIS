@@ -52,7 +52,11 @@ class ArticleQuerySet(models.QuerySet):
 
 
 class Article(models.Model):
-    url = models.URLField(max_length=1000, unique=True)
+    # 2048, not 1000. Khabarfoori percent-encodes Persian slugs, which triples their byte
+    # length: measured over one listing page the median URL is 367 characters and the
+    # longest is 1,090. A 1,000-character column silently held until a long headline
+    # appeared, then failed the entire source's crawl.
+    url = models.URLField(max_length=2048, unique=True)
     source = models.ForeignKey("sources.Source", on_delete=models.PROTECT, related_name="articles")
     # The outlet credited by the page. Khabarfoori is an aggregator, so this is often a
     # different agency; keeping both separate is what makes cross-source dedup possible.
@@ -130,7 +134,7 @@ class ArticleImage(models.Model):
     """
 
     article = models.OneToOneField(Article, on_delete=models.CASCADE, related_name="image")
-    source_url = models.URLField(max_length=1000)
+    source_url = models.URLField(max_length=2048, blank=True)
     file = models.ImageField(upload_to="articles/%Y/%m/", blank=True)
     thumbnail = models.ImageField(upload_to="articles/%Y/%m/thumbs/", blank=True)
     width = models.PositiveIntegerField(null=True, blank=True)

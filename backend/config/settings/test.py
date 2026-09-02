@@ -14,8 +14,12 @@ os.environ.setdefault("POSTGRES_PASSWORD", "postgres")
 os.environ.setdefault("POSTGRES_USER", "postgres")
 os.environ.setdefault("POSTGRES_DB", "newsintel_test")
 os.environ.setdefault("POSTGRES_HOST", "localhost")
-# No key: any test that reaches a real provider must fail loudly rather than spend money.
-os.environ.setdefault("GAPGPT_API_KEY", "")
+# A fake key: the provider refuses to construct without one, and every HTTP call in the
+# suite is mocked. A REAL key here would mean one un-mocked test spends money silently.
+os.environ.setdefault("GAPGPT_API_KEY", "test-key-not-real")
+# Redis DB 15, never 0: the budget tests deliberately write and delete counter keys, and
+# sharing a database with the dev environment would wipe a live run's ceiling.
+os.environ.setdefault("REDIS_URL", "redis://localhost:56379/15")
 
 from .base import *
 
