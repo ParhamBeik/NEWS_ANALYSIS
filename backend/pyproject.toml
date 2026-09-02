@@ -19,6 +19,12 @@ ignore = [
     "RUF002",
     "RUF003",
     "B008",    # DRF/Django idiom: callables in argument defaults
+    "RUF012",  # Model/Meta class attributes are Django's declarative idiom, not shared state
+    # DJ001 says "avoid null=True on string-based fields". For this codebase that advice is
+    # exactly backwards on the fields that matter. An unassessed score axis MUST be NULL:
+    # the empty string would be a sentinel, and substituting a sentinel for "not assessed"
+    # is the bug that suppressed 0 of 488 security alerts. See core/scoring.py.
+    "DJ001",
 ]
 
 [tool.ruff.lint.per-file-ignores]

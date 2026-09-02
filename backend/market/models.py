@@ -57,11 +57,11 @@ class PriceSnapshot(models.Model):
         return f"{self.symbol} {self.price} @ {self.observed_at:%Y-%m-%d %H:%M}"
 
     @classmethod
-    def last_before(cls, symbol: str, moment: datetime) -> "PriceSnapshot | None":
+    def last_before(cls, symbol: str, moment: datetime) -> PriceSnapshot | None:
         return cls.objects.filter(symbol=symbol, observed_at__lte=moment).first()
 
     @classmethod
-    def first_after(cls, symbol: str, moment: datetime) -> "PriceSnapshot | None":
+    def first_after(cls, symbol: str, moment: datetime) -> PriceSnapshot | None:
         return (
             cls.objects.filter(symbol=symbol, observed_at__gte=moment)
             .order_by("observed_at")

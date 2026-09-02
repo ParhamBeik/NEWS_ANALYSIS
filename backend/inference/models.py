@@ -152,6 +152,9 @@ class NodeEvent(models.Model):
             models.Index(fields=["node", "status"]),
         ]
 
+    def __str__(self) -> str:
+        return f"{self.node} {self.status} (article {self.article_id})"
+
 
 class DeadLetter(models.Model):
     """A permanently failed node, quarantined instead of retried forever."""
@@ -171,6 +174,9 @@ class DeadLetter(models.Model):
             models.UniqueConstraint(fields=["article", "node"], name="unique_dead_letter"),
         ]
         indexes = [models.Index(fields=["resolved_at", "node"])]
+
+    def __str__(self) -> str:
+        return f"{self.node} {self.error_class} (article {self.article_id})"
 
 
 # ------------------------------------------------------------------- inference results
@@ -219,6 +225,9 @@ class InferenceResult(models.Model):
     class Meta:
         abstract = True
         ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__} of article {self.article_id} by {self.provider}:{self.model}"
 
 
 class Classification(InferenceResult):

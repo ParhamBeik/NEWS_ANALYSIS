@@ -1,7 +1,7 @@
 """VPS settings. TLS is terminated by the shared Caddy edge, so the app trusts
 X-Forwarded-Proto and must never be exposed on a port directly."""
 
-from .base import *  # noqa: F403
+from .base import *
 from .base import ImproperlyConfigured, env_required  # noqa: F401
 
 DEBUG = False

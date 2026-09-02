@@ -1,0 +1,72 @@
+# The sites to crawl. Loaded by `manage.py seed_sources`, which upserts - editing a row
+# here and re-running updates it without touching health history or article foreign keys.
+#
+# strategy   rss_saba        Saba/Nastooh newsroom RSS. Mehr, IRNA and ISNA all run this
+#                            CMS and emit an identical item shape, including an
+#                            <enclosure> image and a <category domain> taxonomy slug.
+#            listing_detail  listing page -> detail page
+#            listing_relay   listing page -> interstitial -> the real article
+#
+# priority   lower wins when the same story arrives from several sources; ranks by how
+#            complete that source's copy tends to be. See articles.dedupe.
+#
+# archive_url  present only where a real history endpoint exists. Absent means the source
+#              cannot backfill, and /ops reports that instead of showing a permanent gap.
+#
+# Not included, and why:
+#   tasnimnews.com  refuses connections from the Frankfurt datacenter IP (curl exit 000 on
+#                   every endpoint tried, including the bare homepage). Needs a different
+#                   egress path, not a config change.
+#   farsnews.ir     /rss is 404 and redirects to a 404. No working feed endpoint found.
+
+khabarfoori:
+  display_name: خبرفوری
+  strategy: listing_detail
+  url: https://www.khabarfoori.com/بخش-اخبار-2
+  archive_url: https://www.khabarfoori.com/بخش-اخبار-2
+  tier: 2
+  priority: 1
+
+mehr:
+  display_name: مهر
+  strategy: rss_saba
+  url: https://www.mehrnews.com/rss
+  archive_url: https://www.mehrnews.com/archive
+  tier: 1
+  priority: 2
+
+# IRNA and ISNA share Mehr's CMS and their RSS feeds work, but everything behind the feed
+# is Cloudflare-gated - measured from both this laptop and the Frankfurt VPS, with a full
+# browser header set: /archive and every /news/ page return a ~6KB shell containing no
+# article markup at all. Retrying, changing User-Agent and sending complete Sec-Fetch
+# headers all produce the same shell (1.7-6.2KB, zero <p> elements).
+#
+# Consequences, both handled rather than hidden:
+#   - no archive_url, so supports_backfill() is False and /ops reports "cannot backfill"
+#     instead of chasing a gap it can never close
+#   - articles arrive at extraction_tier "feed" with a ~220 character description instead
+#     of a 1,500-3,000 character body. They still clear the evidence gate on title+lead,
+#     but they are THINNER EVIDENCE than Mehr or Khabarfoori and the tier records that, so
+#     /kpi can segment agreement by tier rather than averaging the two together.
+# Reaching their full text needs a headless browser or a residential egress, not a config
+# change. Until then these two buy breadth of headlines, not depth.
+irna:
+  display_name: ایرنا
+  strategy: rss_saba
+  url: https://www.irna.ir/rss
+  tier: 1
+  priority: 3
+
+isna:
+  display_name: ایسنا
+  strategy: rss_saba
+  url: https://www.isna.ir/rss
+  tier: 1
+  priority: 4
+
+shahrekhabar:
+  display_name: شهر خبر
+  strategy: listing_relay
+  url: https://www.shahrekhabar.com/آخرین-اخبار
+  tier: 2
+  priority: 5

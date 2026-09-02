@@ -44,8 +44,9 @@ class ArticleQuerySet(models.QuerySet):
         return self.canonical().filter(quality_flag="", prefilter_reason="")
 
     def in_window(self, days: int):
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
 
         return self.filter(fetched_at__gte=timezone.now() - timedelta(days=max(days, 1) - 1))
 

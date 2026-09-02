@@ -17,7 +17,7 @@ os.environ.setdefault("POSTGRES_HOST", "localhost")
 # No key: any test that reaches a real provider must fail loudly rather than spend money.
 os.environ.setdefault("GAPGPT_API_KEY", "")
 
-from .base import *  # noqa: E402, F403
+from .base import *
 
 DEBUG = False
 # Tasks run inline; no broker is available in the test environment.

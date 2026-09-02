@@ -72,3 +72,63 @@ class Source(models.Model):
         Source.objects.filter(pk=self.pk).update(
             health_status=HealthStatus.DEGRADED, last_error=str(error)[:2000]
         )
+
+
+class PrefilterRule(models.Model):
+    """A newsroom desk whose output is not worth a paid inference call.
+
+    The Saba CMS publishes its own taxonomy slug on every item (`<category domain="soccer">`),
+    and roughly 37% of everything crawled classifies as `other` - each one after paying for
+    it. Matching the slug skips the spend.
+
+    This is the one optimisation in the system that can silently lose a real story, so it
+    is built to be audited rather than trusted:
+
+    - the article is still fetched, extracted and STORED in full; only spending is withheld
+    - the reason is recorded on the article, and /ops reports counts per rule
+    - `enabled` is a switch, and `sources.prefilter.reapply` re-evaluates stored articles
+      when a rule changes, so turning one off actually releases what it held back
+    - rules are per-slug and explicit; there is no pattern matching and no default-deny
+
+    Rules are scoped PER SOURCE because the slug vocabularies are not shared. Measured
+    against the three live feeds: Mehr emits CamelCase desk names (`Hamedan`,
+    `OtherMagazine`), IRNA emits lowercase names plus opaque abbreviations (`sb`, `atf`,
+    `mfa`), and ISNA emits bare numeric ids (`8001`, `7001`) mixed with names. The same
+    string means different things at different newsrooms, so a global list would suppress
+    the wrong desk at two of the three.
+
+    Nothing is enabled by seed. A filter you have not measured is a guess with a cost
+    ceiling attached; `sources.prefilter.observed_slugs` exists so a rule can be switched
+    on against evidence that the desk really does produce only `other`.
+    """
+
+    source = models.ForeignKey(
+        Source, null=True, blank=True, on_delete=models.CASCADE, related_name="prefilter_rules",
+        help_text="Leave empty only for a slug you have verified means the same thing everywhere.",
+    )
+    native_category = models.SlugField(max_length=64)
+    label = models.CharField(max_length=128, blank=True)
+    enabled = models.BooleanField(default=False)
+    note = models.TextField(blank=True, help_text="Why this desk is not worth a paid call.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["source_id", "native_category"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "native_category"], name="unique_prefilter_rule"
+            ),
+            models.UniqueConstraint(
+                fields=["native_category"],
+                condition=models.Q(source__isnull=True),
+                name="unique_global_prefilter_rule",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        scope = self.source_id or "all sources"
+        return f"{scope}/{self.native_category} ({'on' if self.enabled else 'off'})"
+
+    @property
+    def reason(self) -> str:
+        return f"native_category:{self.native_category}"

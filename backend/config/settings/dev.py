@@ -1,6 +1,6 @@
 """Local development. Never used on the VPS."""
 
-from .base import *  # noqa: F403
+from .base import *
 from .base import env_bool, env_list
 
 DEBUG = True

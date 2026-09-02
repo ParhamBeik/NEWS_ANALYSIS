@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Iterable, Literal
+from typing import Literal
 
 from django.conf import settings
 from pydantic import BaseModel, ConfigDict, Field, model_validator
