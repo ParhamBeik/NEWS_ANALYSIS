@@ -210,6 +210,12 @@ NEWS_RUN_BUDGET_USD = env_float("NEWS_RUN_BUDGET_USD", 1.00)
 NEWS_DAILY_BUDGET_USD = env_float("NEWS_DAILY_BUDGET_USD", 3.00)
 # Runaway-loop breaker on request COUNT, not money. Belongs well above a normal cycle.
 NEWS_MAX_PROVIDER_CALLS_PER_RUN = env_int("NEWS_MAX_PROVIDER_CALLS_PER_RUN", 1000)
+# 350 is enough for every node's JSON (the winner uses 234) and is a real selection
+# criterion, not just a cost guard: it excludes models that spend their output budget on
+# internal reasoning tokens before emitting anything. gpt-5-nano produced NO content even
+# at 2000; gemini-3.5-flash needed ~240 reasoning tokens before its answer and so was
+# truncated here. GapGPT also pre-reserves the full max_tokens cost per request, so this
+# number is charged whether or not it is used.
 NEWS_MAX_OUTPUT_TOKENS = env_int("NEWS_MAX_OUTPUT_TOKENS", 350)
 NEWS_ROLLING_WINDOW_DAYS = env_int("NEWS_ROLLING_WINDOW_DAYS", 14)
 NEWS_CRAWL_LIMIT_PER_SOURCE = env_int("NEWS_CRAWL_LIMIT_PER_SOURCE", 40)
@@ -220,7 +226,10 @@ NEWS_USER_AGENT = env(
 
 GAPGPT_API_KEY = env("GAPGPT_API_KEY")
 GAPGPT_BASE_URL = env("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1")
-GAPGPT_MODEL = env("GAPGPT_MODEL", "gemini-2.5-flash-lite")
+# Chosen by `benchmark_models` over 60 real Persian articles, not by assertion: 97.1%
+# schema compliance against 80.3% for gemini-2.5-flash-lite, at $0.000175/article and
+# p95 2.8s. Re-run the command to challenge it.
+GAPGPT_MODEL = env("GAPGPT_MODEL", "gemini-3.1-flash-lite")
 GAPGPT_EMBEDDING_MODEL = env("GAPGPT_EMBEDDING_MODEL", "text-embedding-3-small")
 GAPGPT_EMBEDDING_DIM = env_int("GAPGPT_EMBEDDING_DIM", 1536)
 # Fallback pricing, used only when the provider does not report cost on a response.

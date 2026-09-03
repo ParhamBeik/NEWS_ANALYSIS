@@ -147,9 +147,28 @@ class GapGPTProvider:
         usage = self._usage(body)
         charge(run_id, usage)
         try:
-            content = body["choices"][0]["message"]["content"]
+            choice = body["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise Permanent(f"provider response has no message content: {exc}") from exc
+
+        # Truncation is NOT a schema failure, and conflating them costs real time.
+        #
+        # The bake-off scored gemini-3.5-flash at 13.7% and gpt-5-nano at 0%, both reported
+        # as "invalid structured output" - which reads as "this model cannot produce JSON".
+        # The truth was that both spend most of max_tokens on internal reasoning tokens
+        # before emitting anything, so the answer was cut off mid-object. One has a fix
+        # (raise the ceiling), the other does not (gpt-5-nano emitted no content even at
+        # 2000). An operator cannot tell those apart from a validation traceback.
+        if choice.get("finish_reason") == "length" or content is None:
+            reasoning = (usage.tokens_out or 0)
+            raise Permanent(
+                f"provider output truncated at max_tokens={self.max_output_tokens} "
+                f"(finish_reason=length, {reasoning} output tokens produced, "
+                f"content {'empty' if not content else 'incomplete'}). This model needs a "
+                f"higher NEWS_MAX_OUTPUT_TOKENS, or spends its budget on reasoning tokens."
+            )
+
         try:
             data = schema.model_validate_json(content)
         except (ValidationError, json.JSONDecodeError) as exc:

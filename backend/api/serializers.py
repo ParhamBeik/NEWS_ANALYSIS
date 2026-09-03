@@ -132,6 +132,9 @@ class ArticleListSerializer(serializers.ModelSerializer):
             "id", "url", "source", "outlet", "title", "lead", "image",
             "published_at", "published_at_jalali", "published_time", "date_uncertain",
             "extraction_tier", "native_category", "keywords",
+            # On the CARD, not just the detail page: an analysed-looking article with no
+            # scores needs to say why on the spot, or it reads as a pipeline failure.
+            "prefilter_reason", "quality_flag",
             "category", "scores", "decision",
         ]
 
@@ -178,7 +181,6 @@ class ArticleDetailSerializer(ArticleListSerializer):
         fields = [
             *ArticleListSerializer.Meta.fields,
             "content", "original_title", "content_hash", "fetched_at",
-            "quality_flag", "prefilter_reason",
             "classification", "evaluation", "summary", "duplicates",
         ]
 

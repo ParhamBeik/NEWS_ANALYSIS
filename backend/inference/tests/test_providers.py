@@ -239,3 +239,58 @@ class TestEmbeddings:
         )
         with pytest.raises(Permanent, match="count mismatch"):
             provider.embed(["a", "b"], RUN)
+
+
+class TestTruncationIsNotASchemaFailure:
+    """Two failures that look identical in a traceback and have different fixes.
+
+    The bake-off scored gemini-3.5-flash at 13.7% and gpt-5-nano at 0%, both reported as
+    "invalid structured output" - which reads as "this model cannot produce JSON". Both
+    were actually being cut off: they spend most of max_tokens on internal reasoning
+    tokens before emitting anything. One is fixable by raising the ceiling; the other is
+    not. A validation traceback cannot tell you which.
+    """
+
+    @responses.activate
+    def test_a_truncated_response_says_so(self, provider):
+        responses.add(
+            responses.POST, URL,
+            json={
+                "choices": [{"finish_reason": "length",
+                             "message": {"content": '{"category": "sec'}}],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 350},
+            },
+        )
+        with pytest.raises(Permanent, match="truncated at max_tokens"):
+            provider.complete(messages(), ClassificationOutput, RUN)
+
+    @responses.activate
+    def test_an_empty_content_body_is_reported_as_truncation_not_as_a_missing_field(
+        self, provider
+    ):
+        """A reasoning model that burns the whole budget thinking returns `content: null`
+        with a 200. Reporting that as "no message content" points at the wrong layer."""
+        responses.add(
+            responses.POST, URL,
+            json={
+                "choices": [{"finish_reason": "length", "message": {"content": None}}],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 350},
+            },
+        )
+        with pytest.raises(Permanent, match="reasoning tokens"):
+            provider.complete(messages(), ClassificationOutput, RUN)
+
+    @responses.activate
+    def test_a_genuinely_malformed_answer_is_still_a_schema_failure(self, provider):
+        """The distinction only helps if it does not swallow the real case."""
+        responses.add(
+            responses.POST, URL,
+            json={
+                "choices": [{"finish_reason": "stop",
+                             "message": {"content": json.dumps({**VALID_ANSWER,
+                                                                "confidence": "HIGH"})}}],
+                "usage": {"prompt_tokens": 900, "completion_tokens": 120},
+            },
+        )
+        with pytest.raises(Permanent, match="invalid structured output"):
+            provider.complete(messages(), ClassificationOutput, RUN)
