@@ -82,14 +82,24 @@ class PriceSnapshot(models.Model):
         movement scored as a one-day window - and `days=3` span about two calendar days.
         Every realised return was measured over less time than it claimed.
         """
+        from zoneinfo import ZoneInfo
+
+        from django.conf import settings
+        from django.utils import timezone
+
+        tz = ZoneInfo(getattr(settings, "TEHRAN_TZ", "Asia/Tehran"))
+
+        def _market_date(dt: datetime):
+            return dt.astimezone(tz).date() if timezone.is_aware(dt) else dt.date()
+
         seen: list[datetime] = []
-        start_day = start.date()
+        start_day = _market_date(start)
         rows = cls.objects.filter(symbol=symbol, observed_at__gt=start).order_by("observed_at")
         for observed_at in rows.values_list("observed_at", flat=True).iterator():
-            day = observed_at.date()
+            day = _market_date(observed_at)
             if day == start_day:
                 continue
-            if not seen or seen[-1].date() != day:
+            if not seen or _market_date(seen[-1]) != day:
                 seen.append(observed_at)
             if len(seen) >= days:
                 return seen[-1]

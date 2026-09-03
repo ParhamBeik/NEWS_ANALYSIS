@@ -48,7 +48,7 @@ class ArticleQuerySet(models.QuerySet):
 
         from django.utils import timezone
 
-        return self.filter(fetched_at__gte=timezone.now() - timedelta(days=max(days, 1) - 1))
+        return self.filter(fetched_at__gte=timezone.now() - timedelta(days=max(days, 1)))
 
 
 class Article(models.Model):
