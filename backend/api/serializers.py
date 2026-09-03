@@ -53,10 +53,18 @@ class ArticleImageSerializer(serializers.ModelSerializer):
         fields = ["file", "thumbnail", "width", "height", "status"]
 
     def _url(self, field):
-        if not field:
-            return None
-        request = self.context.get("request")
-        return request.build_absolute_uri(field.url) if request else field.url
+        """A RELATIVE path, deliberately.
+
+        `build_absolute_uri` would return the origin the API was reached on - which, for a
+        Next.js server component, is the internal `http://backend:8000`. The browser cannot
+        resolve that. A relative `/media/...` is served from whatever origin the page is on:
+        Caddy in production, the Next dev rewrite locally.
+
+        This is also what "images from the VPS" means in practice - the file is downloaded
+        during the crawl and served from our own domain, so a browser never fetches from an
+        Iranian CDN that may not answer it.
+        """
+        return field.url if field else None
 
     def get_file(self, obj):
         return self._url(obj.file)

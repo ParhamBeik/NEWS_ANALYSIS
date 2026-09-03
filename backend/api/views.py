@@ -605,7 +605,9 @@ class ExportListView(APIView):
                 "modified_at": timezone.datetime.fromtimestamp(
                     path.stat().st_mtime, tz=timezone.get_current_timezone()
                 ),
-                "download_url": request.build_absolute_uri(f"/api/exports/{path.name}/"),
+                # Relative for the same reason media URLs are: the caller may be a server
+                # component that reached this API on an internal hostname.
+                "download_url": f"/api/exports/{path.name}/",
             }
             for path in files
         ])
