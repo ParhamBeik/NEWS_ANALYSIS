@@ -139,6 +139,29 @@ class TestTradingDays:
             window_trading_days=2
         ).realized_price == Decimal("200.0000")
 
+    def test_publication_across_utc_midnight_respects_tehran_calendar_day(
+        self, price, evaluation
+    ):
+        """Articles published early morning Tehran time (e.g. 01:00 Tehran = 21:30 UTC
+        previous day) share the same Tehran market calendar day as the 11:00 morning trade.
+        The back-test must not treat the morning trade as trading day 1."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        tehran = ZoneInfo("Asia/Tehran")
+        pub = datetime(2026, 9, 3, 1, 0, tzinfo=tehran)
+        morning_trade = datetime(2026, 9, 3, 11, 0, tzinfo=tehran)
+        next_day_trade = datetime(2026, 9, 4, 11, 0, tzinfo=tehran)
+
+        price(100, pub - timedelta(hours=2))
+        evaluation(pub)
+        price(150, morning_trade)
+        price(200, next_day_trade)
+
+        backtest_predictions(windows=(1,))
+        outcome = PredictionOutcome.objects.get(window_trading_days=1)
+        assert outcome.realized_price == Decimal("200.0000")
+
 
 class TestDirection:
     def test_a_correct_up_call_is_scored_correct(self, price, evaluation):

@@ -153,6 +153,33 @@ class TestRunCycle:
         make_article(fetched_at=timezone.now() - timedelta(days=30))
         assert run_cycle()["dispatched"] == 0
 
+    def test_articles_within_one_day_window_are_included(
+        self, make_article, variant, dispatched, settings
+    ):
+        settings.NEWS_ROLLING_WINDOW_DAYS = 1
+        make_article(fetched_at=timezone.now() - timedelta(hours=2))
+        assert run_cycle()["dispatched"] == 1
+
+    def test_category_lookup_does_not_leak_across_variants(
+        self, make_article, variant, monkeypatch
+    ):
+        v2 = PromptVariant.objects.create(name="challenger", model="m2", is_active=True)
+        article = make_article()
+        _classify(article, variant, category="other")
+        _classify(article, v2, category="security")
+
+        recorded = []
+        def fake_run(node, art_id, var_id, run_id, attempt):
+            recorded.append((node, var_id))
+            return {"node": node, "status": "ok"}
+
+        monkeypatch.setattr("inference.tasks._run_node", fake_run)
+        from inference.tasks import process_article
+
+        res = process_article(article.id, v2.pk, "run-1")
+        assert res["category"] == "security"
+        assert [r[0] for r in recorded] == ["classify", "evaluate", "summarize"]
+
 
 class TestFinalizeStaleRuns:
     def _event(self, run, *, age_minutes: int, cost="0.002000"):

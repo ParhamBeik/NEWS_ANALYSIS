@@ -157,7 +157,7 @@ def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt:
     category = None
     if node in {"evaluate"}:
         latest = (
-            Classification.objects.filter(article_id=article_id)
+            Classification.objects.filter(article_id=article_id, variant=variant)
             .order_by("-created_at")
             .values_list("category", flat=True)
             .first()
@@ -289,7 +289,7 @@ def process_article(self, article_id: int, variant_id: int, run_id: str) -> dict
     attempt = self.request.retries + 1
     steps = [_run_node("classify", article_id, variant_id, run_id, attempt)]
     category = (
-        Classification.objects.filter(article_id=article_id)
+        Classification.objects.filter(article_id=article_id, variant_id=variant_id)
         .order_by("-created_at")
         .values_list("category", flat=True)
         .first()
