@@ -8,6 +8,14 @@ DEBUG = False
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = False  # Caddy already redirects; doing it twice loops.
+
+# The ONE deploy warning this deployment answers differently, silenced by name and only by
+# name. `check --deploy --fail-level WARNING` runs in CI with no fallback, so every other
+# W00x fails the build; silencing the whole check instead of this single id - or wrapping
+# the command in a `||` that falls back to a plain `check` - hides the next real one.
+# security.W008 is SECURE_SSL_REDIRECT: the shared Caddy edge terminates TLS and already
+# redirects, and doing it again behind the proxy is a loop.
+SILENCED_SYSTEM_CHECKS = ["security.W008"]
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True

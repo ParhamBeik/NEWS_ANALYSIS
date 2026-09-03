@@ -22,6 +22,16 @@ pytestmark = pytest.mark.django_db
 GOLD = Symbol.GOLD_18K
 
 
+def _at_ten():
+    """A publication time pinned to mid-morning UTC.
+
+    `timezone.now() + timedelta(hours=1)` is not reliably the same calendar day, so a test
+    that depends on "still day zero" would pass all day and fail for the hour before
+    midnight UTC. Pinning the hour removes the clock from the test.
+    """
+    return timezone.now().replace(hour=10, minute=0, second=0, microsecond=0)
+
+
 @pytest.fixture
 def price():
     def _price(value, when):
@@ -94,19 +104,40 @@ class TestTradingDays:
         assert result["scored"] == 0
         assert PredictionOutcome.objects.count() == 0
 
-    def test_multiple_observations_in_one_day_count_once(self, price, evaluation):
-        now = timezone.now()
-        price(100, now - timedelta(hours=2))
-        evaluation(now)
-        for hour in (1, 2, 3):
-            price(105 + hour, now + timedelta(hours=hour))
-        price(200, now + timedelta(days=2))
+    def test_the_publication_day_is_day_zero(self, price, evaluation):
+        """A one-day window must not resolve to the next poll.
+
+        Counting the publication day itself as day 1 meant an article published at 10:00
+        was scored against the 10:15 observation - fifteen minutes of movement reported as
+        a one-day return - and every window came out shorter than it claimed.
+        """
+        published = _at_ten()
+        price(100, published - timedelta(hours=2))
+        evaluation(published)
+        price(150, published + timedelta(hours=1))  # still day zero
+        price(200, published + timedelta(days=1))  # the first trading day AFTER
 
         backtest_predictions(windows=(1,))
         outcome = PredictionOutcome.objects.get(window_trading_days=1)
-        assert outcome.realized_price != Decimal("200.0000"), (
-            "day 1 must be the first day with observations, not the second"
-        )
+        assert outcome.realized_price == Decimal("200.0000")
+
+    def test_multiple_observations_in_one_day_count_once(self, price, evaluation):
+        """A day is a day however often the poller ran: day 1 is the FIRST observation of
+        the first trading day after publication, not the fifteenth of that morning."""
+        published = _at_ten()
+        price(100, published - timedelta(hours=2))
+        evaluation(published)
+        for hour in (0, 1, 2):
+            price(150 + hour, published + timedelta(days=1, hours=hour))
+        price(200, published + timedelta(days=2))
+
+        backtest_predictions(windows=(1, 2))
+        assert PredictionOutcome.objects.get(
+            window_trading_days=1
+        ).realized_price == Decimal("150.0000")
+        assert PredictionOutcome.objects.get(
+            window_trading_days=2
+        ).realized_price == Decimal("200.0000")
 
 
 class TestDirection:

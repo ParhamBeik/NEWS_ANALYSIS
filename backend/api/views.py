@@ -380,6 +380,13 @@ class OpsView(APIView):
         since = window_start(request)
         events = NodeEvent.objects.filter(created_at__gte=since)
         articles = Article.objects.filter(fetched_at__gte=since)
+        # `articles_with_decision` scans the LATEST evaluation of every article ever
+        # stored, so the notify counts have to be intersected back down to this window and
+        # to canonical rows. Without it the feed page renders an all-time, duplicate-
+        # inclusive total in a row labelled "(24h)", and it only ever grows.
+        canonical_ids = set(
+            articles.filter(duplicate_of__isnull=True).values_list("id", flat=True)
+        )
 
         by_node = list(
             events.values("node", "status")
@@ -407,7 +414,8 @@ class OpsView(APIView):
                 "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
             },
             "notify": {
-                state: len(articles_with_decision(state)) for state in NotifyStatus.values
+                state: len(articles_with_decision(state) & canonical_ids)
+                for state in NotifyStatus.values
             },
             "extraction_tiers": list(
                 articles.values("extraction_tier").annotate(count=Count("id")).order_by()
@@ -587,27 +595,35 @@ class MarketView(APIView):
 
 class ExportListView(APIView):
     """Workbooks are files on a volume, not rows. Listing the directory keeps the exporter
-    free to write whatever it writes without a second source of truth to keep in sync."""
+    free to write whatever it writes without a second source of truth to keep in sync.
+
+    RECURSIVE, because the exporter writes into subdirectories the team already files by:
+    the workbooks land in `Excel Files/` and the category feeds in `TXT Files/`. A flat
+    `iterdir()` listed the one loose file at the top level and silently omitted the nightly
+    workbook - the product of the entire pipeline - from the only page that offers it.
+    """
 
     def get(self, request):
         directory = Path(settings.EXPORT_DIR)
         if not directory.exists():
             return Response([])
         files = sorted(
-            (path for path in directory.iterdir() if path.is_file()),
+            (path for path in directory.rglob("*") if path.is_file()),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
         return Response([
             {
-                "name": path.name,
+                # Relative to EXPORT_DIR, so the subdirectory is part of the name and the
+                # download URL round-trips through the `<path:name>` route unchanged.
+                "name": path.relative_to(directory).as_posix(),
                 "size_bytes": path.stat().st_size,
                 "modified_at": timezone.datetime.fromtimestamp(
                     path.stat().st_mtime, tz=timezone.get_current_timezone()
                 ),
                 # Relative for the same reason media URLs are: the caller may be a server
                 # component that reached this API on an internal hostname.
-                "download_url": f"/api/exports/{path.name}/",
+                "download_url": f"/api/exports/{path.relative_to(directory).as_posix()}/",
             }
             for path in files
         ])

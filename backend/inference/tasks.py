@@ -19,9 +19,11 @@ one paid call at a time.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from articles.models import Article
@@ -52,22 +54,14 @@ RESULT_MODELS = {"classify": Classification, "evaluate": Evaluation, "summarize"
 
 
 def _already_answered(node: str, article_id: int, variant: PromptVariant) -> bool:
-    """Has this exact (article, node, provider, model, prompt) been answered already?
+    """Has THIS variant, under its current identity, already answered this node?
 
-    Keyed on the full identity rather than on the variant id, so re-pointing a variant at
-    a new model re-runs it while an unchanged variant costs nothing on a repeat cycle.
+    Keyed on the variant AND its identity (see `InferenceResultQuerySet.for_variant`), so
+    re-pointing a variant at a new model re-runs it, an unchanged variant costs nothing on
+    a repeat cycle, and a second arm that happens to share the first arm's model is still
+    asked its own question.
     """
-    provider, model, prompt_version = variant.identity
-    return (
-        RESULT_MODELS[node]
-        .objects.filter(
-            article_id=article_id,
-            provider=provider,
-            model=model,
-            prompt_version=prompt_version,
-        )
-        .exists()
-    )
+    return RESULT_MODELS[node].objects.for_variant(variant).filter(article_id=article_id).exists()
 
 
 def _record(
@@ -341,6 +335,47 @@ def embed_missing(limit: int = 200, run_id: str = "embeddings") -> dict:
     return {"queued": len(ids)}
 
 
+def _outstanding_for(variant: PromptVariant, article_ids: list[int]) -> list[int]:
+    """The subset of `article_ids` this variant still owes an answer for.
+
+    Computed BEFORE dispatch rather than discovered inside each task. Letting every task
+    find out for itself that it was already answered writes one SKIPPED NodeEvent per
+    article per node per variant on every cycle - tens of thousands of non-events a day on
+    a steady corpus - and every one of them lands in the `node_outcomes` counts on /ops.
+
+    An article is settled when it has this variant's classification AND either that
+    classification was `other` (the chain stops there by design) or this variant's summary
+    exists. Anything short of that is a chain that died mid-way - a worker killed between
+    two nodes - and re-dispatching it is how the cycle heals itself.
+    """
+    classified = dict(
+        Classification.objects.for_variant(variant)
+        .filter(article_id__in=article_ids)
+        .values_list("article_id", "category")
+    )
+    summarised = set(
+        Summary.objects.for_variant(variant)
+        .filter(article_id__in=article_ids)
+        .values_list("article_id", flat=True)
+    )
+    # A permanently failed node is quarantined, not retried forever. Without this the
+    # unfinished chain above would re-dispatch every dead letter on every cycle.
+    quarantined = set(
+        DeadLetter.objects.filter(
+            article_id__in=article_ids, resolved_at__isnull=True
+        ).values_list("article_id", flat=True)
+    )
+    return [
+        article_id
+        for article_id in article_ids
+        if article_id not in quarantined
+        and (
+            article_id not in classified
+            or (classified[article_id] != "other" and article_id not in summarised)
+        )
+    ]
+
+
 @shared_task(name="inference.run_cycle")
 def run_cycle(limit: int | None = None, variant_names: list[str] | None = None) -> dict:
     """One inference pass over everything eligible and not yet answered.
@@ -356,15 +391,36 @@ def run_cycle(limit: int | None = None, variant_names: list[str] | None = None) 
     if not variants:
         return {"error": "no active prompt variants"}
 
+    # Windowed, because an unbounded queryset re-offers the whole corpus forever: an old
+    # article nothing will ever answer (its source went away, its content is empty) would
+    # be re-examined on every cycle for the life of the deployment.
+    pending = (
+        Article.objects.eligible_for_inference()
+        .in_window(settings.NEWS_ROLLING_WINDOW_DAYS)
+        .order_by("-published_at")
+    )
+    article_ids = list(pending.values_list("id", flat=True)[: limit or 200])
+
+    work = [
+        (variant, outstanding)
+        for variant in variants
+        if (outstanding := _outstanding_for(variant, article_ids))
+    ]
+    if not work:
+        # No Run row either. A run that dispatched nothing is not a run, and one per
+        # 30 minutes forever is noise in the only table an operator reads for cost.
+        return {
+            "articles": len(article_ids),
+            "variants": [variant.name for variant in variants],
+            "dispatched": 0,
+        }
+
     run = Run.objects.create(mode="pipeline")
     budget.reset(run.run_id)
 
-    pending = Article.objects.eligible_for_inference().order_by("-published_at")
-    article_ids = list(pending.values_list("id", flat=True)[: limit or 200])
-
     dispatched = 0
-    for article_id in article_ids:
-        for variant in variants:
+    for variant, outstanding in work:
+        for article_id in outstanding:
             process_article.delay(article_id, variant.pk, run.run_id)
             dispatched += 1
 
@@ -380,8 +436,6 @@ def run_cycle(limit: int | None = None, variant_names: list[str] | None = None) 
 @shared_task(name="inference.finalize_run")
 def finalize_run(run_id: str) -> dict:
     """Roll per-event costs up onto the run row once its tasks have drained."""
-    from django.db.models import Sum
-
     run = Run.objects.filter(run_id=run_id).first()
     if run is None:
         return {"error": f"no run {run_id}"}
@@ -398,3 +452,27 @@ def finalize_run(run_id: str) -> dict:
     run.articles_processed = processed
     run.save()
     return {"run_id": run_id, "cost_usd": float(run.cost_usd), "processed": processed}
+
+
+@shared_task(name="inference.finalize_stale_runs")
+def finalize_stale_runs(idle_minutes: int = 10) -> dict:
+    """Close every run whose tasks have stopped writing events.
+
+    A periodic sweep rather than a Celery chord callback on `run_cycle`. A chord fires only
+    when EVERY task in its group completes, so one worker killed mid-article leaves the run
+    `running` with a $0 cost for the life of the deployment - which is the exact state this
+    exists to clear. "Nothing has written an event for ten minutes" is also true when the
+    worker died, and that is the point: this closes the books either way.
+
+    Idempotent: `finalize_run` moves the run out of RUNNING, so a run is only ever swept
+    once, and an ABORTED or FAILED run keeps the status that explains what happened.
+    """
+    cutoff = timezone.now() - timedelta(minutes=idle_minutes)
+    closed = []
+    for run in Run.objects.filter(status=RunStatus.RUNNING, started_at__lte=cutoff):
+        last_event = run.events.aggregate(last=Max("created_at"))["last"]
+        if last_event and last_event > cutoff:
+            continue  # still working
+        finalize_run(run.run_id)
+        closed.append(run.run_id)
+    return {"closed": len(closed), "run_ids": closed}

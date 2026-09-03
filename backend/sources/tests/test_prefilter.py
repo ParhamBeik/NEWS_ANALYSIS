@@ -29,6 +29,30 @@ def isna(db) -> Source:
     )
 
 
+class TestRuleCache:
+    """The rules are cached; the question is for how long, and who finds out.
+
+    An `lru_cache` here was effectively permanent. Every gunicorn worker, every Celery
+    child and beat hold their own copy, and `reload_rules()` only ever reaches the process
+    that calls it - so enabling a rule in the admin kept costing money in the four
+    processes that were not listening, and disabling one kept holding real articles back,
+    until the next redeploy.
+    """
+
+    def test_a_rule_added_elsewhere_is_picked_up_when_the_cache_expires(self, source):
+        assert prefilter.reason_for(source.name, "sports") == ""  # warms the cache
+        PrefilterRule.objects.create(source=source, native_category="sports", enabled=True)
+        # Still stale inside the TTL, which is the deliberate trade.
+        assert prefilter.reason_for(source.name, "sports") == ""
+
+        prefilter._cache["expires_at"] = 0.0  # as if CACHE_TTL_SECONDS had elapsed
+        assert prefilter.reason_for(source.name, "sports") == "native_category:sports"
+
+    def test_the_ttl_is_short_enough_to_be_an_operational_answer(self):
+        """A rule change has to take effect without a redeploy. Minutes is not that."""
+        assert 0 < prefilter.CACHE_TTL_SECONDS <= 300
+
+
 class TestScoping:
     def test_no_rules_means_nothing_is_suppressed(self, source):
         assert prefilter.reason_for(source.name, "sports") == ""

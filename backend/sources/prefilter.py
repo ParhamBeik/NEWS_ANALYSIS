@@ -17,25 +17,42 @@ local news" is exactly the assumption that would drop a security story.
 
 from __future__ import annotations
 
-from functools import lru_cache
+import time
 
 from .models import PrefilterRule
 
+# The rule set is cached for a MINUTE, not for the life of the process.
+#
+# An `lru_cache` here was effectively permanent: every gunicorn worker, every Celery child
+# and beat each hold their own copy, and `reload_rules()` only ever reaches the one process
+# that called it. Enabling a rule in the admin therefore appeared to work and kept costing
+# money, and disabling one kept holding real articles back until the next redeploy - on the
+# single component this codebase calls out as able to silently lose a story.
+#
+# A minute of staleness in exchange for one query a minute is the trade; dropping the cache
+# entirely would put a query on every ingested article for a table with a handful of rows.
+CACHE_TTL_SECONDS = 60
+_cache: dict[str, object] = {"rules": None, "expires_at": 0.0}
 
-@lru_cache(maxsize=1)
+
 def _enabled_rules() -> frozenset[tuple[str | None, str]]:
     """(source_id, slug) pairs currently suppressing spend. None means every source."""
-    return frozenset(
-        (source_id, slug.lower())
-        for source_id, slug in PrefilterRule.objects.filter(enabled=True).values_list(
-            "source_id", "native_category"
+    now = time.monotonic()
+    if _cache["rules"] is None or now >= _cache["expires_at"]:
+        _cache["rules"] = frozenset(
+            (source_id, slug.lower())
+            for source_id, slug in PrefilterRule.objects.filter(enabled=True).values_list(
+                "source_id", "native_category"
+            )
         )
-    )
+        _cache["expires_at"] = now + CACHE_TTL_SECONDS
+    return _cache["rules"]
 
 
 def reload_rules() -> None:
-    """Call after editing rules; the crawl path reads this on every article."""
-    _enabled_rules.cache_clear()
+    """Drop this process's copy immediately, for the path that just edited a rule. Every
+    other process picks the change up within CACHE_TTL_SECONDS on its own."""
+    _cache["rules"] = None
 
 
 def reason_for(source_name: str, native_category: str) -> str:

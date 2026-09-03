@@ -196,8 +196,19 @@ class InferenceResultQuerySet(models.QuerySet):
         return self.latest_per_article().values("pk")
 
     def for_variant(self, variant: PromptVariant):
+        """Rows this exact variant produced under its CURRENT identity.
+
+        Both halves are load-bearing. Without `variant`, two arms that share a provider,
+        a model and a prompt - which is exactly what an A/B run of `control` against
+        `semantic-memory` is - are indistinguishable, and the already-answered gate lets
+        the first arm's answer stand in for the second's, so the experiment collects one
+        answer per article instead of two. Without the identity columns, re-pointing a
+        variant at a new model would keep matching its old rows and never re-run.
+        """
         provider, model, prompt_version = variant.identity
-        return self.filter(provider=provider, model=model, prompt_version=prompt_version)
+        return self.filter(
+            variant=variant, provider=provider, model=model, prompt_version=prompt_version
+        )
 
 
 class InferenceResult(models.Model):

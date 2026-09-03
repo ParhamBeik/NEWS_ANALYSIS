@@ -6,6 +6,21 @@ import { redirect } from "next/navigation";
 const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 
 /**
+ * The post-login destination, or "/" if it is not one of ours.
+ *
+ * `startsWith("/")` alone is not enough. `//evil.com` and `/\evil.com` both begin with a
+ * slash and both are PROTOCOL-RELATIVE URLs: the browser resolves them against the current
+ * scheme and lands on another origin, which turns the login screen into an open redirect
+ * even though nothing that looks like a scheme was ever supplied.
+ */
+function safeNext(next) {
+  const target = typeof next === "string" ? next : "";
+  if (!target.startsWith("/")) return "/";
+  if (target.startsWith("//") || target.startsWith("/\\")) return "/";
+  return target;
+}
+
+/**
  * Exchange a username/password for a DRF token and store it httpOnly.
  *
  * The credentials never reach the browser's JavaScript and the token never leaves the
@@ -43,7 +58,5 @@ export async function login(_previous, formData) {
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
-  // Only relative paths: an attacker-supplied `?next=https://elsewhere` would turn the
-  // login screen into an open redirect.
-  redirect(next.startsWith("/") ? next : "/");
+  redirect(safeNext(next));
 }

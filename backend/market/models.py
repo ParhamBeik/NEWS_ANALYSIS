@@ -76,11 +76,19 @@ class PriceSnapshot(models.Model):
         A trading day is one on which this symbol actually produced a new observation. That
         definition needs no holiday calendar and stays correct when the market closes for a
         reason nobody encoded.
+
+        The publication day is day ZERO and is skipped. Counting it made `days=1` resolve
+        to the next observation - with a 15-minute poller, fifteen minutes of price
+        movement scored as a one-day window - and `days=3` span about two calendar days.
+        Every realised return was measured over less time than it claimed.
         """
         seen: list[datetime] = []
+        start_day = start.date()
         rows = cls.objects.filter(symbol=symbol, observed_at__gt=start).order_by("observed_at")
         for observed_at in rows.values_list("observed_at", flat=True).iterator():
             day = observed_at.date()
+            if day == start_day:
+                continue
             if not seen or seen[-1].date() != day:
                 seen.append(observed_at)
             if len(seen) >= days:

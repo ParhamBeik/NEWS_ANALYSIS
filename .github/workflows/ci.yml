@@ -52,7 +52,23 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: System checks
-        run: python manage.py check --deploy --fail-level WARNING || python manage.py check
+        run: python manage.py check
+
+      # Against the PROD settings module, because that is the one that ships - the deploy
+      # checks say nothing useful about config.settings.test. No `|| python manage.py check`
+      # fallback either: that made the strict run advisory, so a real W00x (a missing
+      # SECURE_* setting, a weak SECRET_KEY) was reported and then swallowed by a plain
+      # check that passes. Settings this deployment answers differently are silenced by id
+      # in config/settings/prod.py, where the reason is written down.
+      - name: Deploy checks
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.prod
+          DJANGO_SECRET_KEY: ci-only-not-a-real-secret-4f8a2c9e1b7d3056a9c4e8f2b1d7
+          DJANGO_DEBUG: "0"
+          DJANGO_ALLOWED_HOSTS: ci.invalid
+          POSTGRES_PASSWORD: postgres
+          GAPGPT_API_KEY: ci-key-not-real
+        run: python manage.py check --deploy --fail-level WARNING
 
       # Migration drift is the classic silent breakage: a model field edited without a
       # migration passes every test locally against an already-migrated database, then

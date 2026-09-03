@@ -120,7 +120,7 @@ export default function ABLab({ initialPair, initialStandings }) {
         <p className="text-slate-300">No pairs left to judge.</p>
         <p className="mt-2 text-sm text-slate-500">
           Activate a second prompt variant so both arms answer the same articles, then run a
-          cycle. Pairs are generated from articles that have an answer from two variants.
+          cycle. Pairs are built hourly from articles both variants have evaluated.
         </p>
         {revealed && (
           <p className="mt-4 text-xs text-slate-500">

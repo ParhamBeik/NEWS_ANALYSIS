@@ -36,7 +36,7 @@ import jdatetime
 from django.conf import settings
 from openpyxl import load_workbook
 
-from core.scoring import FLOOR, HIGH_BAR, HIGH_COUNT_REQUIRED, decide
+from core.scoring import FLOOR, HIGH_BAR, HIGH_COUNT_REQUIRED, MIN_AXES_ASSESSED, decide
 from core.vocabulary import GOLD_TRENDS, LEVELS, NotifyStatus
 
 HEADERS = [
@@ -79,13 +79,29 @@ def _time_value(value: str | None) -> time | str:
 
 def _formula(row: int) -> str:
     """The in-sheet notify formula, built from core.scoring's own thresholds and
-    vocabulary so the workbook cannot drift into voting differently from decide()."""
+    vocabulary so the workbook cannot drift into voting differently from decide().
+
+    The INSUFFICIENT branch is the whole point of the first IF. `decide()` returns a third
+    state when fewer than two axes were assessed, and a formula that could only say notify
+    or do-not-notify silently reported a row with blank scores as "do not notify" - the
+    same collapse of "not assessed" into "not notable" that this system was rebuilt to
+    remove, reintroduced in the artifact the analyst actually reads.
+
+    Assessed axes are counted by matching the vocabulary rather than with COUNTA, mirroring
+    `level_score`: a cell holding something that is not a level was not an assessment.
+    """
     axes = f"F{row}:H{row}"
-    high = "+".join(f'COUNTIF({axes},"{level}")' for level in LEVELS[HIGH_BAR - 1:])
-    below_floor = "+".join(f'COUNTIF({axes},"{level}")' for level in LEVELS[: FLOOR - 1])
+
+    def count(levels) -> str:
+        return "+".join(f'COUNTIF({axes},"{level}")' for level in levels)
+
+    assessed = count(LEVELS)
+    high = count(LEVELS[HIGH_BAR - 1:])
+    below_floor = count(LEVELS[: FLOOR - 1])
     return (
-        f'=IF(AND({high}>={HIGH_COUNT_REQUIRED},{below_floor}=0),'
-        f'"{NotifyStatus.NOTIFY}","{NotifyStatus.NO_NOTIFY}")'
+        f'=IF({assessed}<{MIN_AXES_ASSESSED},"{NotifyStatus.INSUFFICIENT}",'
+        f'IF(AND({high}>={HIGH_COUNT_REQUIRED},{below_floor}=0),'
+        f'"{NotifyStatus.NOTIFY}","{NotifyStatus.NO_NOTIFY}"))'
     )
 
 

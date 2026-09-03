@@ -17,10 +17,13 @@ const CATEGORIES = [
   ["other", "Other"],
 ];
 
+// The VALUES here are `core.vocabulary.NotifyStatus`, character for character. `notify` is
+// a ChoiceFilter, so a near-miss is not a filter that quietly matches nothing - it is a
+// 400 from django-filter, and the feed page renders its error boundary instead.
 const NOTIFY_STATES = [
   ["اطلاع‌رسانی شود", "Notify"],
   ["اطلاع‌رسانی نشود", "Quiet"],
-  ["اطلاعات ناکافی", "Insufficient"],
+  ["ارزیابی ناکافی", "Insufficient"],
 ];
 
 export default async function FeedPage({ searchParams }) {
