@@ -1,14 +1,18 @@
 @import "tailwindcss";
 
 /* Vazirmatn is the standard open Persian UI face; without it a system fallback renders
-   Persian at a different optical size than the Latin chrome and the two never line up. */
+   Persian at a different optical size than the Latin chrome and the two never line up.
+
+   Self-hosted, not loaded from a CDN, for two reasons: the shared Caddy edge sends
+   `font-src 'self'`, which would simply block a jsdelivr URL and silently fall back to
+   Tahoma - and an Iranian reader may not be able to reach a foreign CDN at all. One
+   variable file covers every weight. */
 @font-face {
   font-family: "Vazirmatn";
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/fonts/webfonts/Vazirmatn[wght].woff2")
-    format("woff2");
+  src: url("/fonts/Vazirmatn.woff2") format("woff2");
 }
 
 @theme {

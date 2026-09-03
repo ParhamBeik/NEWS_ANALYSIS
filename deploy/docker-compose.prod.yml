@@ -1,52 +1,208 @@
+# Production stack for the VPS, joined to the shared Caddy edge.
+#
+#   cd /opt/apps/news-intel/deploy
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Images come from GHCR, built by CI. Nothing is built on the VPS: a `docker build` here
+# would compete for the same 8 GB of RAM the four running apps need, and a failed build
+# would leave the site down instead of leaving the previous image serving.
+#
+# Two networks per service, deliberately:
+#   `internal` - db, redis and the app talking to each other. Not reachable from the edge.
+#   `vps-edge` - only `frontend` and `backend` join it, because only they are proxied.
+# db and redis are on `internal` ONLY, so nothing on the shared edge network (including the
+# other three apps) can reach this database.
+
 name: newsintel
+
+x-django: &django
+  image: ${BACKEND_IMAGE:-ghcr.io/parhambeik/news_analysis-backend:latest}
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.prod
+    POSTGRES_HOST: db
+    REDIS_URL: redis://redis:6379/0
+  volumes:
+    # One media volume. Exports live at media/exports inside it - a second volume nested
+    # under the first works but hides which mount a file actually landed on.
+    - media:/app/media
+    # Shared with `migrate`, which is the container that runs collectstatic. Without this
+    # the assets would be written into a container that is then thrown away, and the admin
+    # would serve unstyled with a manifest error on every static file.
+    - static:/app/staticfiles
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+  networks: [internal]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
 
 services:
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     env_file: .env
-    volumes: [dbdata:/var/lib/postgresql/data]
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      # `-U $POSTGRES_USER`, not the default: pg_isready against the wrong role reports
+      # ready while every application connection is still being refused.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [internal]
+    deploy:
+      resources:
+        limits: {memory: 1g}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Redis holds the budget counters, not just the queue. `appendonly` so a restart does
+    # not reset today's spend to zero and hand the pipeline a fresh daily allowance.
+    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy noeviction
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+    deploy:
+      resources:
+        limits: {memory: 256m}
+
+  # Migrations run ONCE, in their own container, before anything serves. Putting them in
+  # the web command means every worker restart re-runs them, and two containers starting
+  # together race on the same lock.
+  migrate:
+    <<: *django
+    restart: "no"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             python manage.py setup_schedule"
+    healthcheck:
+      disable: true
+
   backend:
-    build: ../backend
-    restart: unless-stopped
-    env_file: .env
-    environment: { DJANGO_SETTINGS_MODULE: config.settings.prod, POSTGRES_HOST: db, REDIS_URL: redis://redis:6379/0 }
-    command: sh -c "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --access-logfile -"
-    depends_on: [db, redis]
-    volumes: [media:/app/media]
+    <<: *django
+    command: >
+      gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers 3
+      --timeout 60
+      --access-logfile -
+      --error-logfile -
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    # On the edge network so Caddy can proxy /media and /admin straight to it.
+    networks: [internal, vps-edge]
+    deploy:
+      resources:
+        limits: {memory: 768m}
+
+  # Two worker pools, not one. A slow crawl must never block inference, and a budget abort
+  # must never kill in-flight crawling. `-Ofair` because our tasks vary wildly in duration
+  # and the default prefetch would park long articles behind one busy child.
   worker-crawl:
-    build: ../backend
-    restart: unless-stopped
-    command: celery -A config.celery.app worker -Q crawl,default --loglevel=INFO --concurrency=4
-    env_file: .env
-    environment: { DJANGO_SETTINGS_MODULE: config.settings.prod, POSTGRES_HOST: db, REDIS_URL: redis://redis:6379/0 }
-    depends_on: [db, redis]
-    volumes: [media:/app/media]
+    <<: *django
+    command: celery -A config.celery.app worker -Q crawl,default -Ofair --loglevel=INFO --concurrency=4
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config.celery.app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits: {memory: 640m}
+
   worker-inference:
-    build: ../backend
-    restart: unless-stopped
-    command: celery -A config.celery.app worker -Q inference --loglevel=INFO --concurrency=2
-    env_file: .env
-    environment: { DJANGO_SETTINGS_MODULE: config.settings.prod, POSTGRES_HOST: db, REDIS_URL: redis://redis:6379/0 }
-    depends_on: [db, redis]
-    volumes: [media:/app/media]
+    <<: *django
+    command: celery -A config.celery.app worker -Q inference -Ofair --loglevel=INFO --concurrency=2
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config.celery.app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits: {memory: 768m}
+
   beat:
-    build: ../backend
-    restart: unless-stopped
-    command: celery -A config.celery.app beat --loglevel=INFO
-    env_file: .env
-    environment: { DJANGO_SETTINGS_MODULE: config.settings.prod, POSTGRES_HOST: db, REDIS_URL: redis://redis:6379/0 }
-    depends_on: [db, redis]
+    <<: *django
+    # `--pidfile=` (empty) so a container killed uncleanly does not leave a stale pid file
+    # that stops beat from ever starting again.
+    command: celery -A config.celery.app beat --loglevel=INFO --pidfile=
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    deploy:
+      resources:
+        limits: {memory: 256m}
+
   frontend:
-    build: ../frontend
+    image: ${FRONTEND_IMAGE:-ghcr.io/parhambeik/news_analysis-frontend:latest}
     restart: unless-stopped
-    environment: { API_ORIGIN: http://backend:8000 }
-    depends_on: [backend]
-    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      NODE_ENV: production
+      # Internal hostname: the frontend reaches Django over the private network, never
+      # back out through the public edge.
+      API_ORIGIN: http://backend:8000
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks: [internal, vps-edge]
+    deploy:
+      resources:
+        limits: {memory: 512m}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
 
 volumes:
   dbdata:
+  redisdata:
   media:
+  static:
+
+networks:
+  internal:
+  vps-edge:
+    # Created by /opt/apps/vps-edge. `external` so `docker compose down` here can never
+    # delete the network the other three apps are sitting on.
+    external: true
+    name: vps-edge
