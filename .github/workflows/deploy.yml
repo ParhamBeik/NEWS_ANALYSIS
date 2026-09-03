@@ -17,7 +17,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_BASE: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
@@ -27,6 +26,7 @@ jobs:
       packages: write
     outputs:
       tag: ${{ steps.tag.outputs.value }}
+      image_base: ${{ steps.tag.outputs.image_base }}
     strategy:
       # Backend and frontend build in parallel; a failure in one should still surface the
       # other's result rather than hiding it behind a cancelled job.
@@ -41,7 +41,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: tag
-        run: echo "value=${{ github.event.inputs.tag || github.sha }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "value=${{ github.event.inputs.tag || github.sha }}" >> "$GITHUB_OUTPUT"
+          # Docker refuses a repository name containing uppercase, and this repository is
+          # `ParhamBeik/NEWS_ANALYSIS`. `github.repository` cannot be lowercased in an
+          # expression, so it has to happen in the shell.
+          echo "image_base=ghcr.io/$(echo '${{ github.repository }}' | tr 'A-Z' 'a-z')" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -61,8 +66,8 @@ jobs:
           # and what a rollback re-pins to; `latest` exists only so a manual
           # `docker compose pull` on the VPS does something reasonable.
           tags: |
-            ${{ env.IMAGE_BASE }}-${{ matrix.name }}:${{ steps.tag.outputs.value }}
-            ${{ env.IMAGE_BASE }}-${{ matrix.name }}:latest
+            ${{ steps.tag.outputs.image_base }}-${{ matrix.name }}:${{ steps.tag.outputs.value }}
+            ${{ steps.tag.outputs.image_base }}-${{ matrix.name }}:latest
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           provenance: false
@@ -103,8 +108,8 @@ jobs:
             # passing them inline means a later manual 'docker compose up -d' on the box
             # brings up the SAME version, instead of silently drifting to :latest.
             sed -i '/^BACKEND_IMAGE=/d;/^FRONTEND_IMAGE=/d' .env
-            echo "BACKEND_IMAGE=${{ env.IMAGE_BASE }}-backend:${{ needs.build.outputs.tag }}" >> .env
-            echo "FRONTEND_IMAGE=${{ env.IMAGE_BASE }}-frontend:${{ needs.build.outputs.tag }}" >> .env
+            echo "BACKEND_IMAGE=${{ needs.build.outputs.image_base }}-backend:${{ needs.build.outputs.tag }}" >> .env
+            echo "FRONTEND_IMAGE=${{ needs.build.outputs.image_base }}-frontend:${{ needs.build.outputs.tag }}" >> .env
 
             docker compose -f docker-compose.prod.yml pull
             # 'up -d' recreates only what changed. The 'migrate' service is a one-shot that
