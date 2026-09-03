@@ -32,9 +32,12 @@ STAGES = {
     "prefilter": ("articles.tasks", "reapply_prefilter"),
     "embed": ("inference.tasks", "embed_missing"),
     "inference": ("inference.tasks", "run_cycle"),
+    "finalize": ("inference.tasks", "finalize_stale_runs"),
     "prices": ("market.tasks", "poll_prices"),
     "backtest": ("market.tasks", "backtest_predictions"),
     "workbook": ("exports.tasks", "build_daily_workbook"),
+    "sample-review": ("review.tasks", "sample_review_cases"),
+    "ab-pairs": ("review.tasks", "build_ab_pairs"),
 }
 
 

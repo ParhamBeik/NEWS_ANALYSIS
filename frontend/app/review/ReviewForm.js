@@ -109,7 +109,7 @@ export default function ReviewForm({ initialCase }) {
         <p className="mt-2 text-sm text-slate-500">
           {done > 0
             ? `You labelled ${done} article${done === 1 ? "" : "s"} this session.`
-            : "Run the sampler to queue articles: disagreements, `other` verdicts and a category round-robin."}
+            : "The sampler queues articles hourly — disagreements, `other` verdicts, unscored chains and a category round-robin. Run one now with manage.py run_pipeline sample-review."}
         </p>
       </Card>
     );

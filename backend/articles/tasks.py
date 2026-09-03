@@ -40,6 +40,25 @@ def _encode(image: Image.Image, size: tuple[int, int]) -> ContentFile:
     return ContentFile(buffer.getvalue())
 
 
+def _read_capped(response: requests.Response) -> bytes:
+    """Read at most MAX_BYTES + 1 and hang up.
+
+    `response.content` materialises the WHOLE body even on a streamed response, so slicing
+    it afterwards trims a buffer that has already been read into memory - a CDN serving a
+    500 MB response would be downloaded in full inside a worker capped at 640 MB, four
+    concurrent children at a time. The extra byte is what makes "too large" detectable
+    without reading the rest to find out how much larger.
+    """
+    chunks, size = [], 0
+    for chunk in response.iter_content(64 * 1024):
+        chunks.append(chunk)
+        size += len(chunk)
+        if size > MAX_BYTES:
+            response.close()
+            break
+    return b"".join(chunks)[: MAX_BYTES + 1]
+
+
 @shared_task(
     name="articles.tasks.download_image",
     autoretry_for=(Transient,),
@@ -62,7 +81,7 @@ def download_image(article_id: int) -> dict:
     try:
         response = session.get(record.source_url, timeout=20, stream=True)
         response.raise_for_status()
-        payload = response.content[: MAX_BYTES + 1]
+        payload = _read_capped(response)
     except requests.RequestException as exc:
         raise Transient(f"image fetch failed: {exc}") from exc
 

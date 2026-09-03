@@ -17,6 +17,11 @@ Cadences and their reasons:
 - workbook nightly at 23:50 Tehran, so the file covers the whole Jalali day it is named for.
 - canary hourly: a source returning 200 with zero parsed articles is a redesign, and the
   sooner that is visible the fewer empty cycles get filed as normal.
+- run finalisation every 10 minutes. A run whose books are never closed reports $0 spent
+  forever, so the one table an operator reads for cost is the one that would lie.
+- review sampling and A/B pairing hourly. Both queues are consumed by a human at their own
+  pace; the cost of queueing a little ahead is a row, and the cost of queueing nothing is
+  that every agreement metric on /kpi stays null.
 """
 
 from __future__ import annotations
@@ -37,6 +42,12 @@ INTERVAL_TASKS = [
     ("source-canary", "sources.canary", 1, IntervalSchedule.HOURS, {}),
     ("download-pending-images", "articles.tasks.download_pending_images", 1,
      IntervalSchedule.HOURS, {}),
+    # Offset from the 30-minute inference cycle by its own cadence: a run is finalised once
+    # its tasks stop writing events, so sweeping more often than that just re-reads runs
+    # that are still working.
+    ("finalize-stale-runs", "inference.finalize_stale_runs", 10, IntervalSchedule.MINUTES, {}),
+    ("sample-review-cases", "review.sample_review_cases", 1, IntervalSchedule.HOURS, {}),
+    ("build-ab-pairs", "review.build_ab_pairs", 1, IntervalSchedule.HOURS, {}),
 ]
 
 CRON_TASKS = [

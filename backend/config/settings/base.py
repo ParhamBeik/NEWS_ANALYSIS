@@ -238,7 +238,13 @@ GAPGPT_OUTPUT_USD_PER_MILLION = env_float("GAPGPT_OUTPUT_USD_PER_MILLION", 0.40)
 
 PROMPTS_DIR = BASE_DIR / "inference" / "prompts"
 WORKBOOK_TEMPLATE_PATH = BASE_DIR / "exports" / "assets" / "workbook_template.xlsx"
-EXPORT_DIR = Path(env("EXPORT_DIR", str(BASE_DIR / "media" / "exports")))
+# OUTSIDE MEDIA_ROOT, deliberately. The edge file-serves the whole media volume at /media/*
+# so that images do not tie up a gunicorn worker each - which means anything under
+# MEDIA_ROOT is world-readable to anyone who can guess a filename, and workbook names are
+# deterministic («ثبت و تحلیل خبر - <persian date>.xlsx»). Exports go out through
+# ExportDownloadView, which requires a login; keeping them off that volume is what makes
+# that the only way in.
+EXPORT_DIR = Path(env("EXPORT_DIR", str(BASE_DIR / "var" / "exports")))
 
 LOGGING = {
     "version": 1,

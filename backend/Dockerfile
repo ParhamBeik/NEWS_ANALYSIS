@@ -34,7 +34,13 @@ COPY --from=builder /install /usr/local
 RUN useradd --create-home --uid 10001 app
 WORKDIR /app
 COPY --chown=app:app . .
-RUN mkdir -p /app/media /app/staticfiles && chown -R app:app /app/media /app/staticfiles
+# Every path a named volume gets mounted on has to exist here and be owned by `app`.
+# Docker seeds a fresh volume from the image directory underneath it; where that directory
+# does not exist it creates the mount point as root, and the nightly export then fails with
+# a permission error inside a Celery worker nobody is watching. /app/var/exports is
+# deliberately NOT under /app/media - the edge file-serves that volume with no auth.
+RUN mkdir -p /app/media /app/staticfiles /app/var/exports \
+    && chown -R app:app /app/media /app/staticfiles /app/var
 USER app
 
 EXPOSE 8000

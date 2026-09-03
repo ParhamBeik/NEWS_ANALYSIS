@@ -27,7 +27,7 @@ export default async function ExportsPage() {
       {files.length === 0 ? (
         <EmptyState title="No workbooks yet.">
           The exporter runs nightly. Trigger one manually with{" "}
-          <code>manage.py build_workbook</code>.
+          <code>manage.py run_pipeline workbook</code>.
         </EmptyState>
       ) : (
         <Card className="p-4">
@@ -42,7 +42,10 @@ export default async function ExportsPage() {
                     {/* A plain anchor, not next/link: this is a file download that must go
                         through the browser's own handling, not the client router. */}
                     <a
-                      href={`/exports/download/${encodeURIComponent(file.name)}`}
+                      href={`/exports/download/${file.name
+                        .split("/")
+                        .map(encodeURIComponent)
+                        .join("/")}`}
                       className="text-emerald-400 hover:underline"
                       download
                     >

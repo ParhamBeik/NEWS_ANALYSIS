@@ -34,8 +34,15 @@
 	encode gzip zstd
 	import security_headers
 
-	# Article images and nightly workbooks, straight off the shared volume.
+	# Article images, straight off the shared volume. NOT the workbooks: those live on
+	# their own volume that is never mounted here, and go out through /api/exports/, which
+	# requires a login. This block file-serves whatever is under the root with no auth, so
+	# the refusal below is belt-and-braces for a deployment upgraded from the layout that
+	# did keep exports at media/exports.
 	handle_path /media/* {
+		@exports path /exports/*
+		respond @exports 404
+
 		root * /srv/news-media
 		file_server
 		header Cache-Control "public, max-age=604800, immutable"

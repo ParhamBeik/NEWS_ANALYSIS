@@ -24,10 +24,15 @@ x-django: &django
     DJANGO_SETTINGS_MODULE: config.settings.prod
     POSTGRES_HOST: db
     REDIS_URL: redis://redis:6379/0
+    EXPORT_DIR: /app/var/exports
   volumes:
-    # One media volume. Exports live at media/exports inside it - a second volume nested
-    # under the first works but hides which mount a file actually landed on.
     - media:/app/media
+    # A SEPARATE volume, not media/exports. Caddy file-serves the whole media volume at
+    # /media/* so images do not each occupy a gunicorn worker, and workbook filenames are
+    # deterministic - so an export sitting inside that volume is downloadable by anyone who
+    # can guess its name, with no login. Two sibling mounts keep that structurally
+    # impossible instead of relying on the edge to carve out an exception.
+    - exports:/app/var/exports
     # Shared with `migrate`, which is the container that runs collectstatic. Without this
     # the assets would be written into a container that is then thrown away, and the admin
     # would serve unstyled with a manifest error on every static file.
@@ -197,6 +202,7 @@ volumes:
   dbdata:
   redisdata:
   media:
+  exports:
   static:
 
 networks:
