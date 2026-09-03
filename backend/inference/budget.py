@@ -153,6 +153,15 @@ def abort(run_id: str, reason: str) -> None:
     logger.error("run %s aborted: %s", run_id, reason)
 
 
+def day_spend() -> float:
+    """Today's total, independent of any run. What /ops displays against the ceiling.
+
+    Separate from `current()` because a dashboard has no run id, and inventing one would
+    read (and TTL-touch) a key that never corresponded to a real run.
+    """
+    return float(client().get(_day_key("usd")) or 0)
+
+
 def abort_reason(run_id: str) -> str:
     return client().get(_run_key(run_id, "aborted")) or ""
 

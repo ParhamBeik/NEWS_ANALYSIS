@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-02T12:05:53.976856+00:00",
-  "run_id": "benchmark_20260902_120331",
+  "generated_at": "2026-09-02T12:15:44.039224+00:00",
+  "run_id": "benchmark_20260902_121541",
   "articles": [
     105,
     26,
@@ -69,155 +69,179 @@
     "summarize"
   ],
   "models": {
-    "gemini-3.1-flash-lite": {
-      "model": "gemini-3.1-flash-lite",
-      "ok": 27,
-      "schema_failures": 0,
-      "transient": 1,
-      "fatal": 1,
-      "cost_usd": 0.0050490000000000005,
-      "tokens_in": 36362,
-      "tokens_out": 3532,
-      "latency_p50_ms": 1925,
-      "latency_p95_ms": 2828
-    },
-    "gemini-3.5-flash": {
-      "model": "gemini-3.5-flash",
-      "ok": 2,
-      "schema_failures": 18,
-      "transient": 1,
-      "fatal": 1,
-      "cost_usd": 0.0004523,
-      "tokens_in": 2679,
-      "tokens_out": 461,
-      "latency_p50_ms": 3548,
-      "latency_p95_ms": 2752
-    },
-    "gemini-2.5-flash-lite": {
-      "model": "gemini-2.5-flash-lite",
-      "ok": 27,
-      "schema_failures": 6,
-      "transient": 1,
-      "fatal": 1,
-      "cost_usd": 0.0046972,
-      "tokens_in": 34396,
-      "tokens_out": 3144,
-      "latency_p50_ms": 1587,
-      "latency_p95_ms": 2183
-    },
-    "gapgpt-qwen-3.6": {
-      "model": "gapgpt-qwen-3.6",
-      "ok": 22,
-      "schema_failures": 3,
-      "transient": 1,
-      "fatal": 1,
-      "cost_usd": 0.004261900000000001,
-      "tokens_in": 30791,
-      "tokens_out": 2957,
-      "latency_p50_ms": 2807,
-      "latency_p95_ms": 4734
-    },
-    "deepseek-v4-flash": {
-      "model": "deepseek-v4-flash",
-      "ok": 14,
-      "schema_failures": 3,
-      "transient": 1,
-      "fatal": 1,
-      "cost_usd": 0.0028505,
-      "tokens_in": 21469,
-      "tokens_out": 1759,
-      "latency_p50_ms": 4748,
-      "latency_p95_ms": 6840
-    },
     "gpt-5-nano": {
       "model": "gpt-5-nano",
       "ok": 0,
-      "schema_failures": 21,
-      "transient": 1,
-      "fatal": 1,
+      "schema_failures": 0,
+      "transient": 0,
+      "fatal": 0,
       "cost_usd": 0.0,
       "tokens_in": 0,
       "tokens_out": 0,
+      "stopped_early": "provider quota exhausted (HTTP 403): {\"error\":{\"message\":\"pre-consume quota failed, remaining user quota: ＄0.000176, required pre-consume quota: ＄0.000272 (request id: 202609021215429648292308268d9d6w",
+      "schema_compliance": null,
+      "cost_per_call": 0.0,
+      "cost_per_article": null,
+      "latency_p50_ms": null,
+      "latency_p95_ms": null
+    },
+    "gemini-3.1-flash-lite": {
+      "model": "gemini-3.1-flash-lite",
+      "ok": 0,
+      "schema_failures": 0,
+      "transient": 0,
+      "fatal": 0,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "stopped_early": "provider quota exhausted (HTTP 403): {\"error\":{\"message\":\"pre-consume quota failed, remaining user quota: ＄0.000176, required pre-consume quota: ＄0.001008 (request id: 202609021215429541604188268d9d6y",
+      "schema_compliance": null,
+      "cost_per_call": 0.0,
+      "cost_per_article": null,
+      "latency_p50_ms": null,
+      "latency_p95_ms": null
+    },
+    "gapgpt-qwen-3.6": {
+      "model": "gapgpt-qwen-3.6",
+      "ok": 0,
+      "schema_failures": 0,
+      "transient": 0,
+      "fatal": 0,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "stopped_early": "provider quota exhausted (HTTP 403): {\"error\":{\"message\":\"pre-consume quota failed, remaining user quota: ＄0.000176, required pre-consume quota: ＄0.001364 (request id: 202609021215429813158238268d9d6A",
+      "schema_compliance": null,
+      "cost_per_call": 0.0,
+      "cost_per_article": null,
+      "latency_p50_ms": null,
+      "latency_p95_ms": null
+    },
+    "deepseek-v4-flash": {
+      "model": "deepseek-v4-flash",
+      "ok": 0,
+      "schema_failures": 0,
+      "transient": 0,
+      "fatal": 0,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "stopped_early": "provider quota exhausted (HTTP 403): {\"error\":{\"message\":\"pre-consume quota failed, remaining user quota: ＄0.000176, required pre-consume quota: ＄0.000284 (request id: 202609021215429837433908268d9d6h",
+      "schema_compliance": null,
+      "cost_per_call": 0.0,
+      "cost_per_article": null,
+      "latency_p50_ms": null,
+      "latency_p95_ms": null
+    },
+    "gemini-2.5-flash-lite": {
+      "model": "gemini-2.5-flash-lite",
+      "ok": 0,
+      "schema_failures": 0,
+      "transient": 0,
+      "fatal": 0,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "stopped_early": "provider quota exhausted (HTTP 403): {\"error\":{\"message\":\"pre-consume quota failed, remaining user quota: ＄0.000176, required pre-consume quota: ＄0.000302 (request id: 202609021215430879437208268d9d6i",
+      "schema_compliance": null,
+      "cost_per_call": 0.0,
+      "cost_per_article": null,
+      "latency_p50_ms": null,
+      "latency_p95_ms": null
+    },
+    "gemini-3.5-flash": {
+      "model": "gemini-3.5-flash",
+      "ok": 0,
+      "schema_failures": 0,
+      "transient": 0,
+      "fatal": 0,
+      "cost_usd": 0.0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "stopped_early": "provider quota exhausted (HTTP 403): {\"error\":{\"message\":\"pre-consume quota failed, remaining user quota: ＄0.000176, required pre-consume quota: ＄0.006054 (request id: 202609021215439992258628268d9d63",
+      "schema_compliance": null,
+      "cost_per_call": 0.0,
+      "cost_per_article": null,
       "latency_p50_ms": null,
       "latency_p95_ms": null
     }
   },
   "agreement": {
     "deepseek-v4-flash vs gapgpt-qwen-3.6": {
-      "articles": 6,
-      "category_agreement": 0.8333,
-      "axis_exact_agreement": 0.4286
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "deepseek-v4-flash vs gemini-2.5-flash-lite": {
-      "articles": 6,
-      "category_agreement": 0.6667,
-      "axis_exact_agreement": 0.375
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "deepseek-v4-flash vs gemini-3.1-flash-lite": {
-      "articles": 6,
-      "category_agreement": 0.6667,
-      "axis_exact_agreement": 0.3333
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "deepseek-v4-flash vs gemini-3.5-flash": {
-      "articles": 6,
-      "category_agreement": 1.0,
-      "axis_exact_agreement": 0.0
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "deepseek-v4-flash vs gpt-5-nano": {
-      "articles": 6,
+      "articles": 0,
       "category_agreement": null,
       "axis_exact_agreement": null
     },
     "gapgpt-qwen-3.6 vs gemini-2.5-flash-lite": {
-      "articles": 8,
-      "category_agreement": 0.75,
-      "axis_exact_agreement": 0.2727
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "gapgpt-qwen-3.6 vs gemini-3.1-flash-lite": {
-      "articles": 8,
-      "category_agreement": 0.625,
-      "axis_exact_agreement": 0.3529
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "gapgpt-qwen-3.6 vs gemini-3.5-flash": {
-      "articles": 8,
-      "category_agreement": 1.0,
-      "axis_exact_agreement": 0.0
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "gapgpt-qwen-3.6 vs gpt-5-nano": {
-      "articles": 8,
+      "articles": 0,
       "category_agreement": null,
       "axis_exact_agreement": null
     },
     "gemini-2.5-flash-lite vs gemini-3.1-flash-lite": {
-      "articles": 9,
-      "category_agreement": 0.6667,
-      "axis_exact_agreement": 0.3636
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "gemini-2.5-flash-lite vs gemini-3.5-flash": {
-      "articles": 9,
-      "category_agreement": 1.0,
-      "axis_exact_agreement": 0.0
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "gemini-2.5-flash-lite vs gpt-5-nano": {
-      "articles": 11,
+      "articles": 0,
       "category_agreement": null,
       "axis_exact_agreement": null
     },
     "gemini-3.1-flash-lite vs gemini-3.5-flash": {
-      "articles": 9,
-      "category_agreement": 1.0,
-      "axis_exact_agreement": 0.0
+      "articles": 0,
+      "category_agreement": null,
+      "axis_exact_agreement": null
     },
     "gemini-3.1-flash-lite vs gpt-5-nano": {
-      "articles": 9,
+      "articles": 0,
       "category_agreement": null,
       "axis_exact_agreement": null
     },
     "gemini-3.5-flash vs gpt-5-nano": {
-      "articles": 9,
+      "articles": 0,
       "category_agreement": null,
       "axis_exact_agreement": null
     }
   },
-  "total_cost_usd": 0.029402
+  "total_cost_usd": 0.0
 }
