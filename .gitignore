@@ -3,17 +3,32 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .vscode/
+.pytest_cache/
 
 # Secrets
 .env
+.env.local
+backend/.env
+deploy/.env
 
-# Runtime state: everything the pipeline generates lives under var/
+# Backend
+backend/.venv/
+backend/staticfiles/
+backend/media/
+backend/.coverage
+htmlcov/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+
+# Everything the pipeline generates
 var/
 graphify-out/
-.pytest_cache/
 
-# Large generated/news data (legacy)
-LEGACY/NEWS_AI_PROJECT/خبر فوری/
-LEGACY/NEWS_AI_PROJECT/TEST_OUTPUT/
-LEGACY/NEWS_AI_PROJECT_OTHERS/data/
-LEGACY/repomix-output.md
+# Generated topology artefacts; re-run analysis/news_intel/extract_topology.py
+analysis/**/topology.json
+analysis/**/TOPOLOGY.html
+analysis/**/*.mmd

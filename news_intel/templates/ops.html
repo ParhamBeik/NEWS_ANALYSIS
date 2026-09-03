@@ -1,39 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Pipeline Ops{% endblock %}
-{% block head %}
-<style>
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 6px; }
-  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 15px 17px; }
-  .tile .label { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 5px; }
-  .tile .value { font-size: 26px; font-weight: 700; line-height: 1.1; }
-  .dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
-  .dot.good { background: var(--good); } .dot.bad { background: var(--critical); }
-  .dot.unknown { background: var(--muted); }
-  code { font-size: 12px; background: var(--page); padding: 1px 6px; border-radius: 4px; }
-  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
-  .chart-card canvas { max-height: 240px; }
-  .coverage-badge { font-size: 11px; }
-</style>
-{% endblock %}
-
 {% block content %}
 <h1>Pipeline Ops</h1>
 <p class="sub">Fetch health, LLM cost/success rate, and the article funnel for the last {{ window_days }} days. Read-only.</p>
 
 <h2>Funnel (last {{ window_days }} days)</h2>
 <div class="tiles">
-  <div class="tile"><div class="label">Fetched</div><div class="value">{{ funnel.fetched }}</div></div>
-  <div class="tile"><div class="label">Unique</div><div class="value">{{ funnel.unique }}</div></div>
-  <div class="tile"><div class="label">Classified</div><div class="value">{{ funnel.classified }}</div></div>
-  <div class="tile"><div class="label">Evaluated</div><div class="value">{{ funnel.evaluated }}</div></div>
+  {% for label in ['fetched', 'unique', 'classified', 'evaluated'] %}
+    <div class="tile"><div class="label">{{ label | capitalize }}</div><div class="value">{{ funnel[label] }}</div></div>
+  {% endfor %}
 </div>
 
 <h2>Cost, tokens, LLM outcomes, fetch volume</h2>
 <div class="charts">
-  <div class="card chart-card"><canvas id="costChart"></canvas></div>
-  <div class="card chart-card"><canvas id="tokensChart"></canvas></div>
-  <div class="card chart-card"><canvas id="statusChart"></canvas></div>
-  <div class="card chart-card"><canvas id="fetchChart"></canvas></div>
+  {% for id in ['costChart', 'tokensChart', 'statusChart', 'fetchChart'] %}
+    <div class="card"><canvas id="{{ id }}"></canvas></div>
+  {% endfor %}
 </div>
 
 <h2>Source coverage (rolling {{ window_days }}-day window)</h2>
@@ -52,9 +34,9 @@
         <td class="num">{{ c.total_days - c.missing_days }} / {{ c.total_days }}</td>
         <td>
           {% if c.backfill_supported %}
-            <span class="pill coverage-badge {{ 'good' if c.missing_days == 0 else 'warn' }}">supported</span>
+            <span class="pill {{ 'good' if c.missing_days == 0 else 'warn' }}">supported</span>
           {% else %}
-            <span class="pill coverage-badge">not available for this source</span>
+            <span class="pill">not available for this source</span>
           {% endif %}
         </td>
       </tr>
@@ -71,7 +53,7 @@
     {% for s in sources %}
       <tr>
         <td>{{ s.name }}</td>
-        <td><span class="dot {{ 'good' if s.health_status == 'healthy' else 'bad' if s.health_status == 'degraded' else 'unknown' }}"></span>
+        <td><span class="dot {{ 'good' if s.health_status == 'healthy' else 'bad' if s.health_status == 'degraded' }}"></span>
             {{ s.health_status }}</td>
         <td class="num">{{ s.priority }}</td>
         <td>{{ (s.last_success_at or '—')[:19] }}</td>
@@ -83,11 +65,31 @@
 </div>
 
 <h2>Recent runs</h2>
-<div class="card" hx-get="/partials/runs" hx-trigger="load, every 30s">{% include "_runs_table.html" %}</div>
+<div class="card">
+  {% if not runs %}
+    <p class="empty tight">No runs recorded yet.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Run ID</th><th>Status</th><th class="num">Fetched</th><th class="num">Processed</th><th class="num">Cost</th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      <tr>
+        <td>{{ r.run_id }}</td><td>{{ r.status }}</td>
+        <td class="num">{{ r.articles_fetched }}</td>
+        <td class="num">{{ r.articles_processed }}</td>
+        <td class="num">${{ "%.4f"|format(r.cost_usd) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
 
 <h2>Dead letters ({{ dead_total }} open)</h2>
 <div class="card">
-  {% if dead_reasons %}
+  {% if not dead_reasons %}
+    <p class="empty tight">Nothing in quarantine.</p>
+  {% else %}
   <table>
     <thead><tr><th>Node</th><th>Reason</th><th class="num">Count</th></tr></thead>
     <tbody>
@@ -96,65 +98,50 @@
     {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <p class="empty" style="padding:20px">Nothing in quarantine.</p>
   {% endif %}
 </div>
 
 <script>
 (function () {
-  const days = {{ window_days }};
   // Look up one field for one key combination in an API row array, defaulting to 0.
-  // `match` is {field: value, ...} - every listed field must match the row.
+  // `match` is {field: value, ...}; every listed field must match the row.
   const valueFor = (rows, match, field) =>
     (rows.find(r => Object.entries(match).every(([k, v]) => r[k] === v)) || {})[field] || 0;
+  const unique = (rows, key) => [...new Set(rows.map(r => r[key]))];
+  const draw = (id, type, labels, datasets, title) => new Chart(document.getElementById(id), {
+    type, data: { labels, datasets },
+    options: {
+      plugins: { title: { display: true, text: title } },
+      scales: { x: { stacked: type === 'bar' }, y: { stacked: type === 'bar', beginAtZero: true } },
+    },
+  });
 
-  fetch(`/api/telemetry?days=${days}`).then(r => r.json()).then(data => {
-    const days_ = [...new Set(data.token_cost_by_day.map(r => r.day))].sort();
+  fetch(`/api/telemetry?days={{ window_days }}`).then(r => r.json()).then(data => {
+    const days = unique(data.token_cost_by_day, 'day').sort();
+    draw('costChart', 'line', days, [{
+      label: 'Cost (USD)', borderColor: '#2a78d6', tension: 0.2,
+      data: days.map(d => valueFor(data.token_cost_by_day, { day: d }, 'cost_usd')),
+    }], 'Cost per day');
 
-    new Chart(document.getElementById('costChart'), {
-      type: 'line',
-      data: { labels: days_, datasets: [{
-        label: 'Cost (USD)',
-        data: days_.map(d => valueFor(data.token_cost_by_day, { day: d }, 'cost_usd')),
-        borderColor: '#2a78d6', tension: 0.2,
-      }] },
-      options: { plugins: { title: { display: true, text: 'Cost per day' } }, scales: { y: { beginAtZero: true } } },
-    });
+    draw('tokensChart', 'bar', days, ['tokens_in', 'tokens_out'].map((field, i) => ({
+      label: field === 'tokens_in' ? 'Tokens in' : 'Tokens out',
+      backgroundColor: ['#86b6ef', '#1c5cab'][i],
+      data: days.map(d => valueFor(data.token_cost_by_day, { day: d }, field)),
+    })), 'Tokens per day');
 
-    new Chart(document.getElementById('tokensChart'), {
-      type: 'bar',
-      data: { labels: days_, datasets: [
-        { label: 'Tokens in', data: days_.map(d => valueFor(data.token_cost_by_day, { day: d }, 'tokens_in')), backgroundColor: '#86b6ef' },
-        { label: 'Tokens out', data: days_.map(d => valueFor(data.token_cost_by_day, { day: d }, 'tokens_out')), backgroundColor: '#1c5cab' },
-      ] },
-      options: { plugins: { title: { display: true, text: 'Tokens per day' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
-    });
+    const nodes = unique(data.node_status_counts, 'node');
+    const statusColors = { success: '#0ca30c', cache_hit: '#86b6ef', retry: '#fab219',
+                           exhausted: '#d03b3b', permanent: '#d03b3b', fatal: '#7a1f1f' };
+    draw('statusChart', 'bar', nodes, unique(data.node_status_counts, 'status').map(status => ({
+      label: status, backgroundColor: statusColors[status] || '#898781',
+      data: nodes.map(node => valueFor(data.node_status_counts, { node, status }, 'n')),
+    })), 'LLM node outcomes');
 
-    const nodes = [...new Set(data.node_status_counts.map(r => r.node))];
-    const statuses = [...new Set(data.node_status_counts.map(r => r.status))];
-    const statusColors = { success: '#0ca30c', cache_hit: '#86b6ef', retry: '#fab219', exhausted: '#d03b3b', permanent: '#d03b3b', fatal: '#7a1f1f' };
-    new Chart(document.getElementById('statusChart'), {
-      type: 'bar',
-      data: { labels: nodes, datasets: statuses.map(status => ({
-        label: status,
-        data: nodes.map(node => valueFor(data.node_status_counts, { node, status }, 'n')),
-        backgroundColor: statusColors[status] || '#898781',
-      })) },
-      options: { plugins: { title: { display: true, text: 'LLM node outcomes' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
-    });
-
-    const sources = [...new Set(data.fetch_volume_by_source.map(r => r.source))];
-    const fetchDays = [...new Set(data.fetch_volume_by_source.map(r => r.day))].sort();
-    new Chart(document.getElementById('fetchChart'), {
-      type: 'bar',
-      data: { labels: fetchDays, datasets: sources.map((source, i) => ({
-        label: source,
-        data: fetchDays.map(d => valueFor(data.fetch_volume_by_source, { source, day: d }, 'n')),
-        backgroundColor: ['#2a78d6', '#0ca30c', '#fab219', '#d03b3b'][i % 4],
-      })) },
-      options: { plugins: { title: { display: true, text: 'Articles fetched per day' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
-    });
+    const fetchDays = unique(data.fetch_volume_by_source, 'day').sort();
+    draw('fetchChart', 'bar', fetchDays, unique(data.fetch_volume_by_source, 'source').map((source, i) => ({
+      label: source, backgroundColor: ['#2a78d6', '#0ca30c', '#fab219', '#d03b3b'][i % 4],
+      data: fetchDays.map(d => valueFor(data.fetch_volume_by_source, { source, day: d }, 'n')),
+    })), 'Articles fetched per day');
   });
 })();
 </script>

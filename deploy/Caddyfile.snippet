@@ -1,0 +1,61 @@
+# Edge configuration for news-intel.
+#
+# TWO changes to /opt/apps/vps-edge, both required:
+#
+# 1. Append the site block below to /opt/apps/vps-edge/Caddyfile.
+#
+# 2. Give the edge container read-only access to this app's media volume and set the
+#    hostname, in /opt/apps/vps-edge/docker-compose.yml:
+#
+#        services:
+#          edge:
+#            environment:
+#              NEWS_DOMAIN: ${NEWS_DOMAIN:?set NEWS_DOMAIN}
+#            volumes:
+#              - newsintel_media:/srv/news-media:ro
+#        volumes:
+#          newsintel_media:
+#            external: true
+#
+#    then in /opt/apps/vps-edge/.env:  NEWS_DOMAIN=news-89-106-206-4.sslip.io
+#
+# Why Caddy reads the volume instead of proxying /media to Django: with DEBUG=False,
+# Django does not serve MEDIA_URL at all - that is a development-only URL pattern. The
+# alternatives are serving images through gunicorn (which ties up a worker per image on a
+# page with twenty of them) or through Node (which wakes a JavaScript runtime to move
+# bytes). Caddy already has the volume one bind-mount away and streams it with sendfile.
+#
+# The existing strict `security_headers` snippet works here unchanged: every image is
+# same-origin because it was downloaded during the crawl, and the Persian font is in the
+# repo rather than on a CDN. Both of those were decisions made to keep this true.
+
+{$NEWS_DOMAIN} {
+	tls {$LE_EMAIL}
+	encode gzip zstd
+	import security_headers
+
+	# Article images and nightly workbooks, straight off the shared volume.
+	handle_path /media/* {
+		root * /srv/news-media
+		file_server
+		header Cache-Control "public, max-age=604800, immutable"
+	}
+
+	# Django admin and DRF's browsable API, for the operator only. The Next app has no
+	# route for these and would render its own 404.
+	handle /admin/* {
+		reverse_proxy backend:8000
+	}
+	handle /static/* {
+		reverse_proxy backend:8000
+	}
+
+	# Everything else is the Next.js app. `flush_interval -1` disables response buffering,
+	# which streaming server components need - without it the whole page is withheld until
+	# the last suspense boundary resolves.
+	handle {
+		reverse_proxy frontend:3000 {
+			flush_interval -1
+		}
+	}
+}
