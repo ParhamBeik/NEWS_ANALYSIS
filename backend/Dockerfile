@@ -3,7 +3,11 @@
 # process - separate images drift, and the drift shows up as a task that works locally and
 # dead-letters in production.
 
-FROM python:3.11-slim AS base
+# `-bookworm` explicitly, not bare `-slim`. The bare tag follows Debian's stable pointer,
+# so the interpreter bump would silently drag a distro bump along with it and the apt
+# package names below (libjpeg62-turbo, libwebp7) are exactly the sort of thing that gets
+# renamed across a Debian release. One variable at a time.
+FROM python:3.13-slim-bookworm AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

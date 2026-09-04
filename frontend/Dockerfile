@@ -2,21 +2,21 @@
 # the full node_modules tree. That is the difference between a ~180 MB image and a ~1 GB
 # one, and on a VPS with four other apps the disk is a real constraint.
 
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
 # `npm ci` when a lockfile exists: an install that silently resolves a different minor
 # version than the one CI tested is a deploy that differs from the build that passed.
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

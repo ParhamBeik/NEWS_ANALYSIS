@@ -1,6 +1,9 @@
 {
   "name": "news-intel-dashboard",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -8,18 +11,25 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "^15.5.21",
-    "postcss": "^8.5.26",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "sharp": "^0.35.4"
-  },
-  "overrides": {
-    "postcss": "^8.5.26",
-    "sharp": "^0.35.4"
+    "next": "15.5.25",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.3",
-    "tailwindcss": "^4.3.3"
+    "@tailwindcss/postcss": "4.3.3",
+    "tailwindcss": "4.3.3"
+  },
+  "//overrides": [
+    "next 15.5 pins postcss 8.4.31 internally, which carries four open advisories",
+    "(GHSA-qx2v-qp2m-jg93 and three sourceMappingURL path-traversal issues). npm's own",
+    "suggested fix is 'upgrade to next 16', a major jump this project is not taking yet.",
+    "postcss 8.5.x is semver-compatible, so forcing it across the tree patches Next's copy",
+    "at zero risk. Remove this the moment next ships a patched postcss - `npm audit` after",
+    "deleting it is the check.",
+    "sharp needs no override: next resolves 0.35.4 unaided, and images.unoptimized in",
+    "next.config.mjs means it is never actually invoked."
+  ],
+  "overrides": {
+    "postcss": "8.5.28"
   }
 }

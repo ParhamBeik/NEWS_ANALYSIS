@@ -43,10 +43,10 @@ jobs:
       POSTGRES_PORT: "5432"
       REDIS_URL: redis://127.0.0.1:6379/15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt
@@ -85,10 +85,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       # `npm ci` installs exactly the lockfile. `npm install` may resolve a different
@@ -96,3 +96,29 @@ jobs:
       # artifact that is not the artifact being deployed.
       - run: npm ci
       - run: npm run build
+
+  # The Dockerfiles were previously validated for the first time by `deploy.yml`, which
+  # only runs on a push to main - so a broken base image or a missing system library was
+  # discovered during a production deploy, by the deploy failing. Building here (without
+  # pushing) moves that discovery to the pull request. The cache scopes match deploy.yml's,
+  # so the real build afterwards is warm rather than repeated.
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+          - name: frontend
+            context: ./frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          load: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
