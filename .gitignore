@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 .vscode/
 .pytest_cache/
+.ruff_cache/
 
 # Secrets
 .env
@@ -15,6 +16,10 @@ deploy/.env
 backend/.venv/
 backend/staticfiles/
 backend/media/
+# Workbooks and text feeds the exporter writes. Deliberately outside media/ - see
+# EXPORT_DIR in backend/config/settings/base.py. The bare pattern matches any depth, so it
+# also covers the orphaned root var/ left behind by the pre-Django pipeline.
+var/
 backend/.coverage
 htmlcov/
 
@@ -24,11 +29,4 @@ frontend/.next/
 frontend/out/
 frontend/.env*.local
 
-# Everything the pipeline generates
-var/
 graphify-out/
-
-# Generated topology artefacts; re-run analysis/news_intel/extract_topology.py
-analysis/**/topology.json
-analysis/**/TOPOLOGY.html
-analysis/**/*.mmd
