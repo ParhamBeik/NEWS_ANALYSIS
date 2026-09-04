@@ -59,17 +59,25 @@ a public git history. `config/settings/base.py` raises at import time on a missi
 python manage.py check --deploy --fail-level WARNING   # what CI runs against prod settings
 python manage.py setup_schedule            # install the beat schedule (idempotent)
 python manage.py check_provider            # which key is in effect, and does it have money
-python manage.py run_pipeline crawl        # --queue (default) or --now
+python manage.py seed_sources              # load sources/fixtures/sources.yaml (upsert)
+python manage.py run_pipeline crawl        # queues to Celery; --now runs it inline
 python manage.py run_pipeline inference --limit 20
-python manage.py run_pipeline export
+python manage.py run_pipeline workbook     # --rebuild-all ignores the rolling window
 python manage.py benchmark_models          # bake off candidate models on real articles
-pytest -q                                  # offline; every provider call is mocked
+pytest                                     # offline; every provider call is mocked
 ruff check .
 ```
 
 Celery does the real work on a schedule; `run_pipeline` exists for the abnormal paths —
 proving a fresh deployment, backfilling after an outage, and answering "is it the crawler
-or the model?" without waiting for the next tick.
+or the model?" without waiting for the next tick. `manage.py run_pipeline --help` lists
+every stage.
+
+The nightly workbook export only rebuilds days that could still have changed — a day can
+only change if one of its articles was fetched inside the rolling window, because that is
+the only set the inference cycle will re-answer. After a `manage.py import_legacy`, or on a
+fresh deployment with an existing corpus, `run_pipeline workbook --rebuild-all` is the way
+to produce the back catalogue once.
 
 ## Pages
 

@@ -11,11 +11,10 @@ traceback rather than an error message when they guess wrong.
 
 Two modes, and the distinction matters:
 
-  --queue  (default)  hand the task to Celery and return. This is what production looks
-                      like, so it is what you want when proving the workers are wired up.
-  --now               run it inline in this process. Use when the workers are the thing
-                      you suspect - an inline run cannot be silently swallowed by a queue
-                      nobody is consuming.
+  (default)  hand the task to Celery and return. This is what production looks like, so it
+             is what you want when proving the workers are wired up.
+  --now      run it inline in this process. Use when the workers are the thing you suspect
+             - an inline run cannot be silently swallowed by a queue nobody is consuming.
 """
 
 from __future__ import annotations

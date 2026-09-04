@@ -31,9 +31,20 @@ Level = Literal["خیلی کم", "کم", "متوسط", "زیاد", "خیلی ز�
 Category = Literal["security", "economics", "security/economics", "other"]
 GoldTrend = Literal["↑", "↓", "خنثی", "نامطمئن"]
 
-assert set(Level.__args__) == set(LEVELS), "prompt Level must match the stored scale"
-assert set(Category.__args__) == set(CATEGORIES), "prompt Category must match storage"
-assert set(GoldTrend.__args__) == set(GOLD_TRENDS), "prompt GoldTrend must match storage"
+for _literal, _stored, _what in (
+    (Level, LEVELS, "Level"),
+    (Category, CATEGORIES, "Category"),
+    (GoldTrend, GOLD_TRENDS, "GoldTrend"),
+):
+    # `raise`, not `assert`. These were asserts, which `python -O` strips - and the guard
+    # that vanishes under an optimisation flag is exactly the one whose whole purpose is to
+    # fail at startup. A drift here means every answer the model gives is rejected at
+    # validation, one paid call at a time.
+    if set(_literal.__args__) != set(_stored):
+        raise RuntimeError(
+            f"prompt {_what} {sorted(_literal.__args__)} does not match "
+            f"core.vocabulary {sorted(_stored)}"
+        )
 
 
 class ClassificationOutput(BaseModel):
