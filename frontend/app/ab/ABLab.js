@@ -76,7 +76,7 @@ function Side({ label, data, hotkey, onPick, disabled }) {
   );
 }
 
-export default function ABLab({ initialPair, initialStandings }) {
+export default function ABLab({ initialPair }) {
   const [pair, setPair] = useState(initialPair);
   const [reasoning, setReasoning] = useState("");
   const [revealed, setRevealed] = useState(null);
