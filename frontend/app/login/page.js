@@ -1,4 +1,5 @@
 import LoginForm from "./LoginForm";
+import Link from "next/link";
 
 export const metadata = { title: "Sign in · News Intelligence" };
 
@@ -11,6 +12,12 @@ export default async function LoginPage({ searchParams }) {
         Persian security and macroeconomic news analysis.
       </p>
       <LoginForm next={params?.next || "/"} />
+      <p className="mt-4 text-center text-sm text-slate-500">
+        No account?{" "}
+        <Link href="/signup" className="text-emerald-400 hover:underline">
+          Create one
+        </Link>
+      </p>
     </div>
   );
 }

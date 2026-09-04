@@ -14,6 +14,9 @@ Two rules run through all of these:
 
 from __future__ import annotations
 
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.validators import UnicodeUsernameValidator
 from rest_framework import serializers
 
 from articles.models import Article, ArticleImage
@@ -26,6 +29,22 @@ from sources.models import Source
 # One place to build the English gloss for a Persian value, so every endpoint agrees.
 LEVEL_LABELS = dict(Level.choices)
 TREND_LABELS = dict(GoldTrend.choices)
+
+
+class SignupSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150, validators=[UnicodeUsernameValidator()])
+    email = serializers.EmailField(required=False, allow_blank=True)
+    password = serializers.CharField(
+        max_length=128, write_only=True, validators=[validate_password]
+    )
+
+    def validate_username(self, value):
+        if get_user_model().objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("This username is already in use.")
+        return value
+
+    def create(self, validated_data):
+        return get_user_model().objects.create_user(**validated_data)
 
 
 def labelled(value: str | None, labels: dict[str, str]) -> dict | None:
@@ -389,5 +408,3 @@ class RunSerializer(serializers.ModelSerializer):
             "articles_fetched", "articles_processed", "cost_usd", "tokens_in", "tokens_out",
             "error",
         ]
-
-

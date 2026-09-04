@@ -64,6 +64,28 @@ class TestAuthentication:
         """The container healthcheck and the edge proxy hit this before any login exists."""
         assert APIClient().get("/api/health/").status_code == 200
 
+    def test_signup_creates_a_regular_user_and_returns_a_working_token(self, db):
+        api = APIClient()
+        response = api.post(
+            "/api/auth/signup/",
+            {"username": "new-analyst", "email": "analyst@example.com", "password": "Mango-River-47-Orbit"},
+            format="json",
+        )
+        assert response.status_code == 201
+        user = get_user_model().objects.get(username="new-analyst")
+        assert not user.is_staff and not user.is_superuser
+        api.credentials(HTTP_AUTHORIZATION=f"Token {response.json()['token']}")
+        assert api.get("/api/auth/me/").status_code == 200
+
+    def test_signup_rejects_weak_passwords(self, db):
+        response = APIClient().post(
+            "/api/auth/signup/",
+            {"username": "weak-user", "password": "password"},
+            format="json",
+        )
+        assert response.status_code == 400
+        assert not get_user_model().objects.filter(username="weak-user").exists()
+
     @pytest.mark.parametrize(
         "path",
         ["/api/articles/", "/api/ops/", "/api/kpi/", "/api/market/",

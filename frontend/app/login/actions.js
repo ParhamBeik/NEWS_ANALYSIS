@@ -20,6 +20,16 @@ function safeNext(next) {
   return target;
 }
 
+async function storeToken(token) {
+  (await cookies()).set("news_token", token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+  });
+}
+
 /**
  * Exchange a username/password for a DRF token and store it httpOnly.
  *
@@ -49,14 +59,36 @@ export async function login(_previous, formData) {
   if (!response.ok) return { error: "Incorrect username or password." };
 
   const { token } = await response.json();
-  (await cookies()).set("news_token", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    // Set over plain HTTP in development, hardened behind TLS in production. Hardcoding
-    // `secure: true` would make local development silently fail to log in.
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+  await storeToken(token);
   redirect(safeNext(next));
+}
+
+export async function signup(_previous, formData) {
+  const username = formData.get("username");
+  const email = formData.get("email");
+  const password = formData.get("password");
+  if (password !== formData.get("passwordConfirm")) {
+    return { error: "Passwords do not match." };
+  }
+
+  let response;
+  try {
+    response = await fetch(`${API_ORIGIN}/api/auth/signup/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, password }),
+      cache: "no-store",
+    });
+  } catch {
+    return { error: "Cannot reach the API. Is the backend running?" };
+  }
+
+  const body = await response.json();
+  if (!response.ok) {
+    const message = Object.values(body).flat().find(Boolean);
+    return { error: message || "Could not create the account." };
+  }
+
+  await storeToken(body.token);
+  redirect("/");
 }

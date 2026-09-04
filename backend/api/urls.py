@@ -21,6 +21,7 @@ from .views import (
     OpsView,
     ReviewViewSet,
     RunViewSet,
+    SignupView,
     SourceViewSet,
     VariantViewSet,
 )
@@ -36,6 +37,7 @@ router.register("ab/pairs", ABPairViewSet, basename="ab-pair")
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
     path("auth/token/", obtain_auth_token, name="auth-token"),
+    path("auth/signup/", SignupView.as_view(), name="auth-signup"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("ops/", OpsView.as_view(), name="ops"),
     path("kpi/", KPIView.as_view(), name="kpi"),

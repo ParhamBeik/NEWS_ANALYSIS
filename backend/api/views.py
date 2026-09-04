@@ -26,10 +26,12 @@ from django.db.models.functions import Coalesce, TruncDate
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from rest_framework import status, viewsets
+from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from articles.models import Article
@@ -58,6 +60,7 @@ from .serializers import (
     ReviewCaseSerializer,
     ReviewSubmitSerializer,
     RunSerializer,
+    SignupSerializer,
     SourceSerializer,
     VariantSerializer,
 )
@@ -118,6 +121,22 @@ class MeView(APIView):
             "username": request.user.get_username(),
             "is_staff": request.user.is_staff,
         })
+
+
+class SignupThrottle(AnonRateThrottle):
+    rate = "5/hour"
+
+
+class SignupView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [SignupThrottle]
+
+    def post(self, request):
+        serializer = SignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        token = Token.objects.create(user=user)
+        return Response({"token": token.key, "username": user.get_username()}, status=201)
 
 
 class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
