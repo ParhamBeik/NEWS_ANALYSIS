@@ -93,9 +93,12 @@ def fetch_text(session: requests.Session, url: str) -> str:
         response.close()
     if len(payload) > MAX_BODY_BYTES:
         raise Permanent(f"response from {url[:200]} exceeds {MAX_BODY_BYTES} bytes")
-    # `apparent_encoding` is chardet-slow and these pages all declare UTF-8; `response.
-    # encoding` carries whatever the header said, which is the same thing requests would
-    # have used for `.text`.
+    # The header charset, which is what `.text` uses whenever it is present. Measured
+    # against the live sources rather than assumed: mehrnews.com/rss answers
+    # `application/rss+xml; charset=UTF-8` and khabarfoori.com answers
+    # `text/html; charset=UTF-8`, so the fallback below is unreachable for every configured
+    # source. `.text` would fall back to chardet, which cannot run here anyway - the body
+    # has already been streamed and `response.content` is spent.
     return payload.decode(response.encoding or "utf-8", errors="replace")
 
 
