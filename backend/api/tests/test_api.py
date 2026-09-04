@@ -169,6 +169,33 @@ class TestNoNPlusOne:
             response = client.get("/api/articles/?limit=20")
         assert len(response.json()["results"]) == 20
 
+    def test_review_queue_query_count_does_not_grow_with_the_page(
+        self, client, django_assert_max_num_queries, make_article, variant
+    ):
+        """The review list prefetches the same three relations the feed does, and then the
+        serializer has to actually READ them.
+
+        `get_model_answer` reached for `article.classifications.first()`. A `Prefetch` with
+        `to_attr` does not populate the related manager, so every one of those went back to
+        the database - three per case, plus one more for `duplicates` - which made the
+        viewset's prefetches pure cost with none of the benefit. Same shape as the feed
+        regression above, one layer further in, and equally invisible in the payload.
+        """
+        for _ in range(20):
+            article = make_article()
+            classify(article, variant)
+            evaluate(article, variant)
+            Summary.objects.create(
+                article=article, variant=variant, optimized_title="ت", one_line="خ",
+                prompt_version="ptest", provider="gapgpt", model=variant.model,
+            )
+            ReviewCase.objects.create(article=article, stratum="round_robin")
+        # Six today. The bound is what matters, not the number: a regression here is
+        # 80 extra queries on this page, not one.
+        with django_assert_max_num_queries(8):
+            response = client.get("/api/reviews/?limit=20")
+        assert len(response.json()["results"]) == 20
+
 
 class TestNotifyFilterMatchesTheRule:
     def test_the_sql_filter_returns_exactly_what_decide_returns(

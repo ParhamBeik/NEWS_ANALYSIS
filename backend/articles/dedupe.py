@@ -54,7 +54,12 @@ def candidates(article):
         Article.objects.canonical()
         .exclude(pk=article.pk)
         .exclude(original_title="")
-        .only("id", "original_title", "source_id", "content")
+        # Titles only. `find_duplicate` reads nothing else off these rows, and `content` is
+        # the full article body: loading it for every candidate moved megabytes per article
+        # across the connection to compute a trigram set over the headline. The nightly
+        # `backfill_dedupe` sweep runs this once per stored article, so the waste multiplied
+        # by the size of the corpus. `link()` re-fetches the one row that actually matched.
+        .only("id", "original_title")
     )
     if article.published_at is None:
         return base.order_by("-id")[:UNDATED_CANDIDATE_LIMIT]

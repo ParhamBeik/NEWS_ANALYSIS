@@ -238,7 +238,13 @@ class ReviewViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         queryset = ReviewCase.objects.select_related(
             "article", "article__source", "article__image"
-        ).prefetch_related(*latest_inference_prefetches("article__"))
+        ).prefetch_related(
+            *latest_inference_prefetches("article__"),
+            # The review form renders ArticleDetailSerializer, which lists the other copies
+            # of the story so a reviewer can see the dedup decision rather than wondering
+            # where a headline went. Unprefetched that is one more query per case.
+            "article__duplicates",
+        )
         if state := self.request.query_params.get("status"):
             queryset = queryset.filter(status=state)
         return queryset

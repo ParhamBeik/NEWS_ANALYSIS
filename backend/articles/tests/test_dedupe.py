@@ -195,3 +195,34 @@ class TestBackfillSweep:
         dedupe.backfill(dry_run=True)
         second.refresh_from_db()
         assert second.duplicate_of_id is None
+
+
+class TestCandidateCost:
+    """The dedup sweep runs once per stored article, so anything loaded per candidate is
+    multiplied by the size of the corpus."""
+
+    def test_candidates_do_not_carry_the_article_body(self, make_article):
+        """`find_duplicate` reads nothing off a candidate but its title.
+
+        `content` was in the deferred-field list, so every candidate in a 36-hour window
+        arrived with its full body attached - megabytes across the connection to compute a
+        trigram set over a headline, once per article in the nightly backfill. Nothing in
+        the response or in any other assertion would ever show it.
+        """
+        subject = make_article(original_title="عنوان اول")
+        make_article(original_title="عنوان دوم", content="ب" * 5000)
+
+        candidate = dedupe.candidates(subject).first()
+        assert candidate is not None
+        assert "content" in candidate.get_deferred_fields()
+
+    def test_the_matched_row_is_still_compared_on_content_length(self, make_article):
+        """The tiebreak that DOES need the body still works: `link()` re-fetches the one
+        row that matched, rather than relying on the candidate scan to have carried it."""
+        long_copy = make_article(original_title="حمله به تاسیسات نفتی", content="ب" * 4000)
+        short_copy = make_article(original_title="حمله به تاسیسات نفتی", content="ب" * 10)
+
+        assert dedupe.better_canonical(long_copy, short_copy)
+        dedupe.resolve(short_copy)
+        short_copy.refresh_from_db()
+        assert short_copy.duplicate_of_id == long_copy.pk

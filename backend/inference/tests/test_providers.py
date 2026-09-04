@@ -172,6 +172,31 @@ class TestCostAccounting:
             provider.complete(messages(), ClassificationOutput, RUN)
 
     @responses.activate
+    def test_a_negative_reported_cost_is_rejected_rather_than_credited(self, provider):
+        """`charge` is an INCRBYFLOAT, so a negative cost does not just mis-report - it
+        drives the run total DOWN and hands the pipeline an unlimited budget. The ceiling
+        would fail open on a number nobody would think to look at."""
+        responses.add(
+            responses.POST, URL,
+            json=body(usage={"prompt_tokens": 900, "completion_tokens": 120, "cost_usd": -5.0}),
+        )
+        with pytest.raises(Permanent, match="negative cost"):
+            provider.complete(messages(), ClassificationOutput, RUN)
+        assert budget.current(RUN).run_usd == 0.0
+
+    @responses.activate
+    def test_a_non_numeric_cost_stays_inside_the_taxonomy(self, provider):
+        """`float("free")` raised a bare ValueError, which is none of Transient, Permanent
+        or Fatal - so the task died with no NodeEvent and no dead letter, and /ops showed
+        nothing at all rather than a classified failure."""
+        responses.add(
+            responses.POST, URL,
+            json=body(usage={"prompt_tokens": 900, "completion_tokens": 120, "cost_usd": "free"}),
+        )
+        with pytest.raises(Permanent, match="non-numeric cost"):
+            provider.complete(messages(), ClassificationOutput, RUN)
+
+    @responses.activate
     def test_a_rejected_answer_is_still_charged(self, provider):
         """The call really did cost money. Not charging it would make the budget
         under-report exactly when a model is misbehaving and burning the most."""

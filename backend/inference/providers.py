@@ -115,16 +115,37 @@ class GapGPTProvider:
             raise Permanent(f"provider returned non-JSON body: {exc}") from exc
 
     def _usage(self, body: dict) -> Usage:
+        """What the call cost, from the provider's own reported figures.
+
+        Every number here is untrusted JSON that feeds straight into the spend counter, so
+        each one is checked before it gets there. A NEGATIVE cost is the case worth naming:
+        `charge` does an INCRBYFLOAT, so one would drive the run total back down and hand
+        the pipeline an unlimited budget - the ceiling failing open, silently, on a value
+        nobody would think to look at. A non-numeric one used to raise a bare ValueError
+        that escaped the three-class taxonomy entirely, so the task died with no NodeEvent
+        and no dead letter to explain it.
+        """
         usage = body.get("usage") or {}
-        tokens_in = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)))
-        tokens_out = int(usage.get("completion_tokens", usage.get("output_tokens", 0)))
+        try:
+            tokens_in = int(usage.get("prompt_tokens", usage.get("input_tokens", 0)) or 0)
+            tokens_out = int(usage.get("completion_tokens", usage.get("output_tokens", 0)) or 0)
+        except (TypeError, ValueError) as exc:
+            raise Permanent(f"provider returned unparseable token counts: {exc}") from exc
         if tokens_in < 0 or tokens_out < 0:
             raise Permanent("provider returned invalid usage values")
+
         reported = usage.get("cost_usd", body.get("cost_usd"))
         if reported is None:
             per_in, per_out = self.token_prices
-            reported = (tokens_in * per_in + tokens_out * per_out) / 1_000_000
-        return Usage(tokens_in, tokens_out, float(reported), self.name, self.model)
+            cost = (tokens_in * per_in + tokens_out * per_out) / 1_000_000
+        else:
+            try:
+                cost = float(reported)
+            except (TypeError, ValueError) as exc:
+                raise Permanent(f"provider reported a non-numeric cost {reported!r}") from exc
+        if cost < 0:
+            raise Permanent(f"provider reported a negative cost {cost!r}")
+        return Usage(tokens_in, tokens_out, cost, self.name, self.model)
 
     # ---------------------------------------------------------------------- inference
 

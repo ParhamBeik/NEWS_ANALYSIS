@@ -52,6 +52,22 @@ def labelled(value: str | None, labels: dict[str, str]) -> dict | None:
     return {"value": value, "label": labels.get(value, value)} if value else None
 
 
+def latest_of(article, attr: str):
+    """The newest classification/evaluation/summary, read from the viewset's prefetch.
+
+    `Prefetch(..., to_attr=...)` puts a LIST on the instance and leaves the related manager
+    untouched, so `article.classifications.first()` looks equivalent and silently issues a
+    query per article instead. Every serializer that wants "the latest answer" goes through
+    here so there is one place that knows which of the two it is.
+
+    Returns None rather than falling back to a query when the attribute is absent: a
+    fallback would hide a dropped `Prefetch` behind an N+1 that no assertion on the response
+    body could ever catch. `api.views.latest_inference_prefetches` is what populates it.
+    """
+    rows = getattr(article, attr, None)
+    return rows[0] if rows else None
+
+
 class SourceSerializer(serializers.ModelSerializer):
     supports_backfill = serializers.BooleanField(read_only=True)
 
@@ -166,10 +182,7 @@ class ArticleListSerializer(serializers.ModelSerializer):
         ]
 
     def _latest(self, obj, attr):
-        """Prefetched by the viewset; falling back to a query here would be an N+1 on a
-        30-card page."""
-        rows = getattr(obj, attr, None)
-        return rows[0] if rows else None
+        return latest_of(obj, attr)
 
     def get_title(self, obj):
         summary = self._latest(obj, "latest_summary")
@@ -257,9 +270,12 @@ class ReviewCaseSerializer(serializers.ModelSerializer):
         return ArticleDetailSerializer(obj.article, context=self.context).data
 
     def get_model_answer(self, obj):
-        classification = obj.article.classifications.first()
-        evaluation = obj.article.evaluations.first()
-        summary = obj.article.summaries.first()
+        # Through `latest_of`, not `obj.article.classifications.first()`: the viewset
+        # prefetches these three with `to_attr`, and the manager call ignores that and goes
+        # back to the database once per case per relation.
+        classification = latest_of(obj.article, "latest_classification")
+        evaluation = latest_of(obj.article, "latest_evaluation")
+        summary = latest_of(obj.article, "latest_summary")
         return {
             "category": classification.category if classification else None,
             "rationale": classification.rationale if classification else None,
