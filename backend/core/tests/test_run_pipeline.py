@@ -34,3 +34,22 @@ def test_limit_is_rejected_for_a_stage_that_cannot_take_it(db):
 def test_an_unknown_stage_is_rejected_by_argparse(db):
     with pytest.raises((CommandError, SystemExit)):
         call_command("run_pipeline", "not-a-stage")
+
+
+class TestRebuildAll:
+    def test_rebuild_all_reaches_the_workbook_task(self, monkeypatch):
+        """The scheduled export is bounded to the rolling window, so the operator needs a
+        documented way past it after an import - not a `manage.py shell` incantation."""
+        seen = {}
+        monkeypatch.setattr(
+            "exports.tasks.build_daily_workbook.delay",
+            lambda **kwargs: seen.update(kwargs) or type("R", (), {"id": "x"})(),
+        )
+        call_command("run_pipeline", "workbook", "--rebuild-all")
+        assert seen == {"rebuild_all": True}
+
+    def test_a_stage_that_does_not_take_it_says_so(self):
+        """Failing here beats an unexpected kwarg failing inside a worker minutes later, in
+        a log nobody is watching."""
+        with pytest.raises(CommandError, match="does not take --rebuild-all"):
+            call_command("run_pipeline", "crawl", "--rebuild-all")

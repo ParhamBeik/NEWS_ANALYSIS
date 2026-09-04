@@ -28,7 +28,7 @@ import shutil
 import warnings
 import zipfile
 from copy import copy
-from datetime import time
+from datetime import time, timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -47,6 +47,7 @@ HEADERS = [
 SHEET = "بررسی خبر"
 MAX_STYLED_ROW = 504  # the template pre-styles to here; dropdowns must cover the same span
 FIRST_DATA_ROW = 3
+ID_HEADER = "شناسه خبر"
 NOTIFY_HEADER = "وضعیت اطلاع رسانی"
 
 
@@ -120,7 +121,11 @@ def _jalali_day(moment) -> str:
 
 
 def rows(articles=None) -> list[dict[str, str]]:
-    """One record per canonical article, keyed by the workbook's own column headers."""
+    """One record per canonical article, keyed by the workbook's own column headers.
+
+    Deliberately does NOT number the rows. «شناسه خبر» is a position within a file, and
+    this function does not know which file a record will end up in - see `build_workbook`.
+    """
     from articles.models import Article
     from inference.models import Classification, Evaluation, Summary
 
@@ -134,7 +139,7 @@ def rows(articles=None) -> list[dict[str, str]]:
     latest_summary = {s.article_id: s for s in Summary.objects.latest_per_article()}
 
     records = []
-    for index, article in enumerate(queryset, 1):
+    for article in queryset:
         # Normally written at ingest. Derived here as a fallback because an article with a
         # publication date but an empty Jalali field would otherwise be silently dropped
         # from every daily workbook - the file would just be shorter, with nothing to see.
@@ -149,8 +154,10 @@ def rows(articles=None) -> list[dict[str, str]]:
         )
         records.append({
             "_day": day,
+            # Fetch time, not publication time: it is what decides whether this day's
+            # workbook can still change. See `_days_worth_rebuilding`.
+            "_fetched_at": article.fetched_at,
             "_category": classification.category if classification else "other",
-            "شناسه خبر": str(index),
             "تاریخ انتشار": persian_date(day),
             "ساعت انتشار": article.published_time or "",
             "منبع": article.original_outlet or article.source_id,
@@ -275,7 +282,14 @@ def build_workbook(records: list[dict[str, str]], target: Path) -> Path:
             _copy_row_style(sheet, FIRST_DATA_ROW, index)
         for column, header in enumerate(HEADERS, 1):
             cell = sheet.cell(index, column)
-            if header == NOTIFY_HEADER:
+            if header == ID_HEADER:
+                # Numbered HERE, from this file's own row position. All 40 workbooks the
+                # team produced run 1..N within the file, with no exceptions; the exporter
+                # used to number the whole canonical corpus and then group the records by
+                # day, so the second day of a deployment opened at «شناسه خبر» 51. Deriving
+                # it from the row means no way of selecting records can reintroduce that.
+                cell.value = str(index - FIRST_DATA_ROW + 1)
+            elif header == NOTIFY_HEADER:
                 cell.value = _formula(index)
             elif header == "ساعت انتشار":
                 cell.value = _time_value(record[header])
@@ -297,8 +311,43 @@ def feed_text(records: list[dict[str, str]]) -> str:
     ) + ("\n" if records else "")
 
 
-def export_all(directory: Path | None = None) -> dict[str, Path]:
-    """One workbook per Jalali day, plus the notify feed and one file per category."""
+def _days_worth_rebuilding(records: list[dict], window_days: int) -> set[str]:
+    """The Jalali days whose workbook could still say something different.
+
+    A day's content changes only when one of its articles gets a new answer, and
+    `inference.run_cycle` only ever considers articles fetched inside the same rolling
+    window - so a day with nothing fetched recently is a day whose file would be rewritten
+    byte for byte.
+
+    Keyed on FETCH time, not publication time, and for the same reason `in_window` is: a
+    backfill run pulls in months-old articles today, and their workbook is an old day's file
+    that genuinely does need rebuilding.
+
+    Computed from the records rather than by a second query, so `_day` here is necessarily
+    the same string `rows()` filed the article under - including its fallback for an article
+    whose Jalali field was never written.
+    """
+    from django.utils import timezone
+
+    cutoff = timezone.now() - timedelta(days=max(window_days, 1))
+    return {
+        record["_day"]
+        for record in records
+        if record["_day"] and record["_fetched_at"] >= cutoff
+    }
+
+
+def export_all(
+    directory: Path | None = None, *, window_days: int | None = None
+) -> dict[str, Path]:
+    """One workbook per Jalali day, plus the notify feed and one file per category.
+
+    `window_days` bounds which workbooks are REBUILT. None means every day in the corpus,
+    which is what a fresh deployment or a post-import backfill wants; the scheduled path in
+    `exports.tasks.build_daily_workbook` passes the rolling window instead. The text feeds
+    always cover the whole corpus either way - they are one file each rather than one per
+    day, so bounding them would just lose data.
+    """
     from core.vocabulary import CATEGORIES
 
     directory = Path(directory or settings.EXPORT_DIR)
@@ -307,10 +356,13 @@ def export_all(directory: Path | None = None) -> dict[str, Path]:
     # `other` articles are stored and visible in the app, but the analyst workbook is a
     # security/economics instrument and the team's own files never carried them.
     eligible = [record for record in records if record["_category"] != "other"]
+    wanted = (
+        None if window_days is None else _days_worth_rebuilding(eligible, window_days)
+    )
 
     by_day: dict[str, list[dict[str, str]]] = {}
     for record in eligible:
-        if record["_day"]:
+        if record["_day"] and (wanted is None or record["_day"] in wanted):
             by_day.setdefault(record["_day"], []).append(record)
 
     files = {

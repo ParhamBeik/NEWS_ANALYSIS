@@ -51,6 +51,14 @@ class Command(BaseCommand):
             help="Cap the number of items. Accepted only by stages that take one.",
         )
         parser.add_argument(
+            "--rebuild-all", action="store_true",
+            help=(
+                "Ignore the rolling window and redo everything. The scheduled workbook "
+                "export only rebuilds days that could still have changed; this is the way "
+                "back for a fresh deployment or a corpus that was just imported."
+            ),
+        )
+        parser.add_argument(
             "--now", action="store_true",
             help="Run inline instead of queueing. Use when you suspect the workers.",
         )
@@ -64,15 +72,20 @@ class Command(BaseCommand):
         if task is None:
             raise CommandError(f"{module_path}.{task_name} does not exist")
 
-        # Only pass `limit` where the task actually accepts it. Sending an unexpected
+        # Only pass an option where the task actually accepts it. Sending an unexpected
         # kwarg to a Celery task fails inside the worker, minutes later, in a log the
         # operator is not watching.
+        accepted = task.run.__code__.co_varnames[: task.run.__code__.co_argcount]
         kwargs = {}
-        if options["limit"] is not None:
-            accepted = task.run.__code__.co_varnames[: task.run.__code__.co_argcount]
-            if "limit" not in accepted:
-                raise CommandError(f"stage {stage!r} does not take --limit")
-            kwargs["limit"] = options["limit"]
+        for flag, name, supplied in (
+            ("--limit", "limit", options["limit"] is not None),
+            ("--rebuild-all", "rebuild_all", options["rebuild_all"]),
+        ):
+            if not supplied:
+                continue
+            if name not in accepted:
+                raise CommandError(f"stage {stage!r} does not take {flag}")
+            kwargs[name] = options[name]
 
         if options["now"]:
             self.stdout.write(f"running {stage} inline...")

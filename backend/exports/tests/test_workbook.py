@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import itertools
 import zipfile
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
+from django.conf import settings
 from django.utils import timezone
 from openpyxl import load_workbook
 
+from articles.models import Article
 from core.scoring import HIGH_COUNT_REQUIRED, decide
+from core.text import jalali_str, to_jalali
 from core.vocabulary import GOLD_TRENDS, LEVELS, NotifyStatus
 from exports import workbook
 from inference.models import Classification, Evaluation, Summary
@@ -247,3 +252,124 @@ class TestExportAll:
         analysed(confidence_occurrence="کم", security_relevance="کم")
         files = workbook.export_all(tmp_path)
         assert files["important"].read_text(encoding="utf-8").strip() == ""
+
+
+class TestRowNumbering:
+    """`شناسه خبر` is a position within the file, not a corpus-wide sequence.
+
+    Checked against the team's own output, not inferred: all 40 workbooks under
+    `LEGACY/NEWS_AI_PROJECT/*/Excel Files/` number their rows 1..N from 1, with zero
+    exceptions. The exporter enumerated the WHOLE canonical corpus and then grouped the
+    already-numbered records by day, so the second day of a deployment opened with
+    «شناسه خبر» starting at 51. Nothing in the pipeline notices - the file still opens, and
+    the only reader who sees it is the analyst.
+    """
+
+    def test_each_workbook_numbers_its_own_rows_from_one(self, analysed, tmp_path):
+        yesterday = timezone.now() - timedelta(days=1)
+        for _ in range(2):
+            analysed()
+        older = analysed()
+        Article.objects.filter(pk=older.pk).update(
+            published_at=yesterday,
+            published_at_jalali=jalali_str(
+                to_jalali(yesterday.astimezone(ZoneInfo(settings.TEHRAN_TZ)))
+            ),
+        )
+
+        files = workbook.export_all(tmp_path)
+        paths = [path for key, path in files.items() if key.startswith("excel:")]
+        assert len(paths) == 2, "the fixture must produce two distinct Jalali days"
+
+        for path in paths:
+            sheet = load_workbook(path)[workbook.SHEET]
+            ids = [
+                sheet.cell(row, 1).value
+                for row in range(workbook.FIRST_DATA_ROW, sheet.max_row + 1)
+            ]
+            ids = [value for value in ids if value not in (None, "")]
+            assert ids == [str(n) for n in range(1, len(ids) + 1)], (
+                f"{path.name} is numbered {ids}, not 1..N"
+            )
+
+    def test_numbering_is_a_property_of_the_file_not_of_the_records(self, analysed, tmp_path):
+        """Handing `build_workbook` an arbitrary slice still yields 1..N, so no future way
+        of selecting records can reintroduce a global sequence."""
+        for _ in range(3):
+            analysed()
+        target = workbook.build_workbook(workbook.rows()[1:], tmp_path / "slice.xlsx")
+
+        sheet = load_workbook(target)[workbook.SHEET]
+        assert sheet.cell(workbook.FIRST_DATA_ROW, 1).value == "1"
+
+
+class TestRebuildIsBounded:
+    """The nightly task rebuilt one workbook per Jalali day in the whole corpus, forever.
+
+    Each is a template copy, an openpyxl parse, a save and a zip rewrite, so the cost grew
+    without limit for the life of the deployment while almost every file was rewritten
+    byte-for-byte. Nothing about the output would ever show it - only the clock.
+    """
+
+    def _age(self, article, days):
+        moment = timezone.now() - timedelta(days=days)
+        Article.objects.filter(pk=article.pk).update(
+            published_at=moment,
+            fetched_at=moment,
+            published_at_jalali=jalali_str(
+                to_jalali(moment.astimezone(ZoneInfo(settings.TEHRAN_TZ)))
+            ),
+        )
+
+    def test_a_day_nobody_touched_is_not_rebuilt(self, analysed, tmp_path, settings):
+        settings.NEWS_ROLLING_WINDOW_DAYS = 14
+        settings.EXPORT_DIR = tmp_path
+        self._age(analysed(), 90)
+        analysed()
+
+        from exports.tasks import build_daily_workbook
+
+        result = build_daily_workbook()
+        assert result["workbooks"] == 1, "only the recent day should have been rebuilt"
+
+    def test_a_backfilled_old_article_does_bring_its_day_back(self, analysed, tmp_path, settings):
+        """The window is on FETCH time, not publication time. A backfill run pulls in
+        months-old articles today, and their workbook is an old day's file that genuinely
+        does need rewriting - keying this on publication would silently skip it."""
+        settings.NEWS_ROLLING_WINDOW_DAYS = 14
+        settings.EXPORT_DIR = tmp_path
+        old = analysed()
+        moment = timezone.now() - timedelta(days=90)
+        Article.objects.filter(pk=old.pk).update(
+            published_at=moment,
+            fetched_at=timezone.now(),  # fetched today, published in the spring
+            published_at_jalali=jalali_str(
+                to_jalali(moment.astimezone(ZoneInfo(settings.TEHRAN_TZ)))
+            ),
+        )
+
+        from exports.tasks import build_daily_workbook
+
+        assert build_daily_workbook()["workbooks"] == 1
+
+    def test_rebuild_all_is_the_escape_for_a_fresh_deployment(self, analysed, tmp_path, settings):
+        settings.NEWS_ROLLING_WINDOW_DAYS = 14
+        settings.EXPORT_DIR = tmp_path
+        self._age(analysed(), 90)
+        analysed()
+
+        from exports.tasks import build_daily_workbook
+
+        assert build_daily_workbook(rebuild_all=True)["workbooks"] == 2
+
+    def test_the_text_feeds_still_cover_the_whole_corpus(self, analysed, tmp_path, settings):
+        """One file each, not one per day, so bounding them would just lose data."""
+        settings.NEWS_ROLLING_WINDOW_DAYS = 14
+        settings.EXPORT_DIR = tmp_path
+        self._age(analysed(), 90)
+
+        from exports.tasks import build_daily_workbook
+
+        build_daily_workbook()
+        feed = (tmp_path / "TXT Files" / "security_news.txt").read_text(encoding="utf-8")
+        assert "تیتر بهینه‌شده" in feed
