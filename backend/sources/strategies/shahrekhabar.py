@@ -19,7 +19,7 @@ from urllib.parse import urljoin
 
 import requests
 
-from ..extraction import RawArticle, get, node_text, parse_generic_article, soup_of
+from ..extraction import RawArticle, fetch_text, node_text, parse_generic_article, soup_of
 
 
 def parse_listing(html: str, base_url: str) -> list[RawArticle]:
@@ -54,15 +54,15 @@ def relay_target(html: str, page_url: str) -> str:
 
 def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     articles: list[RawArticle] = []
-    for listed in parse_listing(get(session, spec.url).text, spec.url):
+    for listed in parse_listing(fetch_text(session, spec.url), spec.url):
         try:
-            relay = get(session, listed.url)
-            target = relay_target(relay.text, listed.url)
-            detail = relay if target == listed.url else get(session, target)
+            relay = fetch_text(session, listed.url)
+            target = relay_target(relay, listed.url)
+            detail = relay if target == listed.url else fetch_text(session, target)
         except Exception:
             continue
         extracted = parse_generic_article(
-            detail.text, listed.source, target, listed.original_outlet
+            detail, listed.source, target, listed.original_outlet
         )
         # The listing knows the title and crediting outlet; the detail page knows the body
         # and the date. Neither is complete on its own.

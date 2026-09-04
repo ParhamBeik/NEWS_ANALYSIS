@@ -21,7 +21,7 @@ from core.text import clean
 from ..extraction import (
     RawArticle,
     body_text,
-    get,
+    fetch_text,
     image_from,
     json_ld,
     keywords_from,
@@ -77,8 +77,8 @@ def collect_urls(session: requests.Session, base_url: str, *, limit: int) -> lis
     urls: list[str] = []
     seen: set[str] = set()
     for page in range(1, MAX_LISTING_PAGES + 1):
-        found = [url for url in parse_listing(get(session, page_url(base_url, page)).text, base_url)
-                 if url not in seen]
+        listing = parse_listing(fetch_text(session, page_url(base_url, page)), base_url)
+        found = [url for url in listing if url not in seen]
         if not found:
             break
         seen.update(found)
@@ -92,7 +92,7 @@ def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     articles = []
     for url in collect_urls(session, spec.url, limit=limit):
         try:
-            articles.append(parse_article(get(session, url).text, url, spec.name))
+            articles.append(parse_article(fetch_text(session, url), url, spec.name))
         except Exception:
             # A single unreachable detail page is not a source failure. The listing already
             # proved the source is alive.

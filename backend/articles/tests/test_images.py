@@ -1,86 +1,61 @@
-"""Image fetching, and the size cap that has to hold before the bytes arrive.
+"""Image fetching: what gets stored, and what gets refused.
 
-The interesting property is not "an oversized image is rejected" - it is that it is
-rejected without being read. A worker with a 640 MB limit and four concurrent children
-cannot afford to find out how large a response was by receiving all of it.
+The size cap and the address guard themselves are tested in `core/tests/test_net.py`. What
+matters here is that this task routes both of them to the same place - a row marked FAILED
+with the reason on it - rather than raising, because a picture is decoration and the story
+is the product. A retry on either would spend the same bandwidth to reach the same answer.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from articles.tasks import MAX_BYTES, _read_capped
+from articles.tasks import MAX_BYTES
+from core.net import BlockedURL
+from core.tests.test_net import FakeResponse
 
 
-class FakeResponse:
-    """Just enough of `requests.Response` to observe how much was actually read.
+@pytest.fixture
+def image_row(make_article, db):
+    from articles.models import ArticleImage
 
-    `response.content` is deliberately absent: touching it is the bug under test, so a
-    regression here fails with an AttributeError rather than passing quietly.
-    """
-
-    def __init__(self, total_bytes: int, chunk_size: int = 64 * 1024):
-        self.total_bytes = total_bytes
-        self.chunk_size = chunk_size
-        self.read_bytes = 0
-        self.closed = False
-
-    def iter_content(self, chunk_size: int):
-        remaining = self.total_bytes
-        while remaining > 0:
-            if self.closed:  # a real connection stops producing once hung up on
-                return
-            size = min(chunk_size, remaining)
-            remaining -= size
-            self.read_bytes += size
-            yield b"\0" * size
-
-    def close(self):
-        self.closed = True
-
-
-class TestReadCapped:
-    def test_a_small_image_is_read_whole(self):
-        response = FakeResponse(1024)
-        assert len(_read_capped(response)) == 1024
-
-    def test_an_oversized_body_is_abandoned_rather_than_downloaded(self):
-        """`stream=True` followed by `response.content` materialises the WHOLE body, so
-        slicing afterwards trimmed a buffer that had already been read in full - a CDN
-        serving 500 MB was downloaded entirely before being declared too large."""
-        response = FakeResponse(500 * 1024 * 1024)
-        payload = _read_capped(response)
-
-        assert len(payload) == MAX_BYTES + 1, "the extra byte is what makes it detectable"
-        assert response.closed, "the connection must be hung up on, not drained"
-        # One chunk of overshoot is the cost of noticing; anything near the full body means
-        # the cap is being applied after the download rather than during it.
-        assert response.read_bytes < MAX_BYTES + 2 * response.chunk_size
-
-    def test_a_body_exactly_at_the_limit_is_kept(self):
-        assert len(_read_capped(FakeResponse(MAX_BYTES))) == MAX_BYTES
+    article = make_article()
+    return ArticleImage.objects.create(
+        article=article, source_url="https://cdn.example/huge.jpg"
+    )
 
 
 @pytest.mark.django_db
-def test_an_oversized_image_is_recorded_as_failed_not_retried(make_article, monkeypatch):
-    """A too-large image is a fact about the source, not a transient error: retrying it
-    spends the same bandwidth again to reach the same conclusion."""
+def test_an_oversized_image_is_recorded_as_failed_not_retried(image_row, monkeypatch):
+    """A too-large image is a fact about the source, not a transient error."""
     from articles.models import ArticleImage, ImageStatus
     from articles.tasks import download_image
 
-    article = make_article()
-    ArticleImage.objects.create(article=article, source_url="https://cdn.example/huge.jpg")
-
     monkeypatch.setattr(
-        "articles.tasks.build_session",
-        lambda: type("S", (), {"get": lambda *a, **k: _oversized()})(),
+        "articles.tasks.open_checked",
+        lambda *a, **k: FakeResponse(MAX_BYTES + 50 * 1024 * 1024),
     )
-    result = download_image(article.pk)
+    result = download_image(image_row.article_id)
+
     assert result["status"] == "too_large"
-    assert ArticleImage.objects.get(article=article).status == ImageStatus.FAILED
+    assert ArticleImage.objects.get(pk=image_row.pk).status == ImageStatus.FAILED
 
 
-def _oversized():
-    response = FakeResponse(50 * 1024 * 1024)
-    response.raise_for_status = lambda: None
-    return response
+@pytest.mark.django_db
+def test_an_image_url_pointing_into_our_own_network_is_refused(image_row, monkeypatch):
+    """This URL came out of a third party's og:image tag and this worker sits on the same
+    private network as Postgres and Redis. The refusal has to be recorded, not raised: a
+    Transient here would retry a request forgery attempt three times with backoff."""
+    from articles.models import ArticleImage, ImageStatus
+    from articles.tasks import download_image
+
+    def refuse(*args, **kwargs):
+        raise BlockedURL("cdn.example resolves to non-public address 127.0.0.1")
+
+    monkeypatch.setattr("articles.tasks.open_checked", refuse)
+    result = download_image(image_row.article_id)
+
+    stored = ArticleImage.objects.get(pk=image_row.pk)
+    assert result["status"] == "blocked"
+    assert stored.status == ImageStatus.FAILED
+    assert "non-public" in stored.error

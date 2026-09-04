@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterator
 
 import requests
 
-from ..extraction import RawArticle, get
+from ..extraction import RawArticle, fetch_text
 
 MAX_PAGES = 500  # matches the legacy HARD_MAX_PAGES
 STALE_PAGE_LIMIT = 2  # consecutive pages with zero new URLs before giving up
@@ -39,11 +39,11 @@ def paginate(
     stale = 0
     for page in range(1, MAX_PAGES + 1):
         try:
-            response = get(session, page_url(page))
+            listing = fetch_text(session, page_url(page))
         except Exception:
             return
         new_urls = [
-            url for url in parse_listing(response.text, listing_base_url) if url not in seen
+            url for url in parse_listing(listing, listing_base_url) if url not in seen
         ]
         if not new_urls:
             stale += 1
@@ -55,10 +55,10 @@ def paginate(
         for url in new_urls:
             seen.add(url)
             try:
-                detail = get(session, url)
+                detail = fetch_text(session, url)
             except Exception:
                 continue
-            article = parse_article(detail.text, url)
+            article = parse_article(detail, url)
             yield article
             reached_floor |= bool(article.published_at and article.published_at < since_date)
         if reached_floor:

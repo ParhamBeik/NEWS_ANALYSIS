@@ -28,7 +28,7 @@ import requests
 from core.errors import Permanent
 from core.text import clean
 
-from ..extraction import RawArticle, get, parse_generic_article
+from ..extraction import RawArticle, fetch_text, parse_generic_article
 
 CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
@@ -89,19 +89,19 @@ def parse_feed(xml: str, source: str, outlet: str) -> list[RawArticle]:
 
 def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     outlet = spec.display_name or spec.name
-    entries = parse_feed(get(session, spec.url).text, spec.name, outlet)[:limit]
+    entries = parse_feed(fetch_text(session, spec.url), spec.name, outlet)[:limit]
 
     articles = []
     for entry in entries:
         try:
-            page = get(session, entry.url)
+            page = fetch_text(session, entry.url)
         except Exception:
             # One unreachable article page must not fail the whole feed. The entry still
             # carries a title, a date, an image and a category - enough to store and to
             # notice later that its body never arrived.
             articles.append(entry)
             continue
-        full = parse_generic_article(page.text, entry.source, entry.url, entry.original_outlet)
+        full = parse_generic_article(page, entry.source, entry.url, entry.original_outlet)
         articles.append(
             RawArticle(
                 source=entry.source,

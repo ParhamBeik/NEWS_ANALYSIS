@@ -20,7 +20,8 @@ import requests
 from bs4 import BeautifulSoup
 from django.conf import settings
 
-from core.errors import Transient
+from core.errors import Permanent, Transient
+from core.net import MAX_BODY_BYTES, open_checked, read_capped
 from core.text import clean, content_hash
 
 
@@ -70,17 +71,32 @@ def build_session() -> requests.Session:
     return session
 
 
-def get(session: requests.Session, url: str) -> requests.Response:
-    """One HTTP attempt. Retry belongs to the Celery task, never here - a retry loop at
-    both layers compounds into nine requests for one logical fetch."""
+def fetch_text(session: requests.Session, url: str) -> str:
+    """One guarded HTTP attempt, returning the decoded body.
+
+    Retry belongs to the Celery task, never here - a retry loop at both layers compounds
+    into nine requests for one logical fetch.
+
+    Text rather than a `Response` because that is all any caller ever wanted, and because
+    it is what makes the size cap expressible: `response.text` has already read the whole
+    body into memory by the time you could measure it. Only the first URL of a crawl comes
+    from our own configuration; the listing links, the relay targets and the image URLs all
+    come out of a third party's markup, which is why `core.net` validates every hop.
+    """
+    response = open_checked(session, url, timeout=settings.NEWS_HTTP_TIMEOUT, stream=True)
     try:
-        response = session.get(url, timeout=settings.NEWS_HTTP_TIMEOUT)
-    except requests.RequestException as exc:
-        raise Transient(f"fetch failed: {exc}") from exc
-    if response.status_code >= 500 or response.status_code == 429:
-        raise Transient(f"retryable HTTP {response.status_code} for {url}")
-    response.raise_for_status()
-    return response
+        if response.status_code >= 500 or response.status_code == 429:
+            raise Transient(f"retryable HTTP {response.status_code} for {url}")
+        response.raise_for_status()
+        payload = read_capped(response)
+    finally:
+        response.close()
+    if len(payload) > MAX_BODY_BYTES:
+        raise Permanent(f"response from {url[:200]} exceeds {MAX_BODY_BYTES} bytes")
+    # `apparent_encoding` is chardet-slow and these pages all declare UTF-8; `response.
+    # encoding` carries whatever the header said, which is the same thing requests would
+    # have used for `.text`.
+    return payload.decode(response.encoding or "utf-8", errors="replace")
 
 
 def soup_of(html: str) -> BeautifulSoup:
