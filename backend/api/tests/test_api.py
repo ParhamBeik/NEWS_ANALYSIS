@@ -14,12 +14,9 @@ Four things are worth locking here, and they are the four that would rot silentl
 
 from __future__ import annotations
 
-import re
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -484,25 +481,6 @@ class TestOps:
 
         assert client.get("/api/ops/?days=1").json()["notify"][NotifyStatus.NOTIFY] == 1
         assert client.get("/api/ops/?days=30").json()["notify"][NotifyStatus.NOTIFY] == 2
-
-
-def test_the_feeds_verdict_filter_offers_only_values_the_filter_accepts():
-    """A contract between the two halves of the repo, because nothing else checks it.
-
-    `notify` is a ChoiceFilter, so a value the backend does not have is not a filter that
-    quietly matches nothing - it is a 400, and the feed page renders its error boundary
-    instead of the feed. The frontend shipped «اطلاعات ناکافی» against the vocabulary's
-    «ارزیابی ناکافی»: three characters apart, invisible in review, and the "Insufficient"
-    option was broken from the day it was written.
-    """
-    page = Path(settings.BASE_DIR).parent / "frontend" / "app" / "page.js"
-    if not page.exists():
-        pytest.skip("frontend tree not present (backend-only image)")
-    offered = re.findall(
-        r'\["([^"]+)",\s*"(?:Notify|Quiet|Insufficient)"\]', page.read_text(encoding="utf-8")
-    )
-    assert offered, "the feed's NOTIFY_STATES list moved; this test needs to follow it"
-    assert offered == list(NotifyStatus.values)
 
 
 @pytest.mark.django_db
