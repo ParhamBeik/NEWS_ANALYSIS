@@ -16,7 +16,7 @@ Two things make it honest rather than flattering:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from django.db import models
 
@@ -59,14 +59,6 @@ class PriceSnapshot(models.Model):
     @classmethod
     def last_before(cls, symbol: str, moment: datetime) -> PriceSnapshot | None:
         return cls.objects.filter(symbol=symbol, observed_at__lte=moment).first()
-
-    @classmethod
-    def first_after(cls, symbol: str, moment: datetime) -> PriceSnapshot | None:
-        return (
-            cls.objects.filter(symbol=symbol, observed_at__gte=moment)
-            .order_by("observed_at")
-            .first()
-        )
 
     @classmethod
     def trading_days_after(cls, symbol: str, start: datetime, days: int) -> datetime | None:
@@ -139,7 +131,3 @@ class PredictionOutcome(models.Model):
 
     def __str__(self) -> str:
         return f"{self.symbol} {self.realized_pct:+.2f}% over {self.window_trading_days}d"
-
-    @staticmethod
-    def window_for(published_at: datetime, days: int) -> timedelta:
-        return timedelta(days=days)

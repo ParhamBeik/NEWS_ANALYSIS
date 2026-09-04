@@ -24,6 +24,7 @@ import logging
 
 from celery import shared_task
 from django.db import IntegrityError
+from django.db.models import Count, Q
 
 from core.errors import Transient
 from core.vocabulary import GoldTrend
@@ -112,22 +113,47 @@ def _score_one(evaluation, symbol: str, window: int) -> PredictionOutcome | None
 
 @shared_task(name="market.backtest_predictions")
 def backtest_predictions(
-    symbol: str = Symbol.GOLD_18K, windows: tuple[int, ...] = DEFAULT_WINDOWS, limit: int = 500
+    symbol: str = Symbol.GOLD_18K,
+    windows: tuple[int, ...] = DEFAULT_WINDOWS,
+    limit: int = 500,
+    rescore: bool = False,
 ) -> dict:
-    """Score every gold-impact prediction that the market has now had time to answer.
+    """Score every gold-impact prediction the market has now had time to answer.
 
     Only evaluations that actually ASSESSED the gold axis are scored. An evaluation that
     left `gold_price_impact` NULL made no claim about gold, and including it would measure
     the model against a prediction it explicitly declined to make.
+
+    UNSCORED ONLY, and the exclusion is doing two jobs. The obvious one is cost: an outcome
+    is the realised price at a fixed past timestamp, so re-deriving it produces the same
+    numbers, and this sweep runs hourly - a thousand identical write transactions an hour,
+    forever. The one that actually bites is the `limit`. Ordering by recency and taking the
+    newest 500 meant an evaluation had to STAY in the newest 500 until the market had traded
+    three days; at one active variant that is roughly a week of slack, and activating a
+    second arm halves it. Anything that aged out unscored was never scored by anything.
+    Excluding what is already done means the backlog is what competes for the limit, so a
+    prediction waiting on the market cannot be crowded out by one already answered.
+
+    `rescore=True` exists for the one case where an existing outcome IS stale: retuning
+    `DIRECTION_DEADBAND_PCT`, which changes what "correct" meant for every row.
     """
     from inference.models import Evaluation
 
-    pending = (
+    candidates = (
         Evaluation.objects.filter(gold_price_impact__isnull=False)
         .filter(article__published_at__isnull=False)
         .select_related("article")
-        .order_by("-created_at")[:limit]
     )
+    if not rescore:
+        # A window is settled when its outcome exists. Counting per evaluation rather than
+        # excluding on `outcomes__isnull` because a 1-day window can be scored while the
+        # 3-day one is still waiting on the market.
+        candidates = candidates.annotate(
+            settled=Count("outcomes", filter=Q(outcomes__symbol=symbol,
+                                               outcomes__window_trading_days__in=windows))
+        ).filter(settled__lt=len(windows))
+    pending = candidates.order_by("-created_at")[:limit]
+
     scored, skipped = 0, 0
     for evaluation in pending:
         for window in windows:

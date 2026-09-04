@@ -302,3 +302,89 @@ class TestSnapshotIdentity:
         )
         assert created is False
         assert PriceSnapshot.objects.count() == 1
+
+
+class TestSweepIsIncremental:
+    """The hourly sweep must not spend its budget re-deriving answers that cannot change.
+
+    An outcome is the realised price at a fixed past timestamp, so a second pass computes
+    the same numbers - but the cost was never the point. `limit` is: ordering by recency
+    and taking the newest 500 meant an evaluation had to STAY in the newest 500 until the
+    market had traded three days, and anything that aged out unscored was never scored by
+    anything at all.
+    """
+
+    def _trading_days(self, price, published_at, days, start=104):
+        for offset, day in enumerate(days):
+            price(str(start + offset * 2), published_at + timedelta(days=day))
+
+    def test_a_settled_evaluation_is_not_rescored(self, price, evaluation):
+        published_at = _at_ten()
+        price("100", published_at - timedelta(hours=1))
+        self._trading_days(price, published_at, [1, 2, 3])
+        evaluation(published_at)
+
+        first = backtest_predictions()
+        assert first["scored"] == 2, "both windows should score on the first sweep"
+
+        second = backtest_predictions()
+        assert second["scored"] == 0, "nothing left to do"
+        assert second["not_yet_scorable"] == 0, "and it was not re-examined at all"
+
+    def test_a_half_settled_evaluation_stays_in_the_queue(self, price, evaluation):
+        """The 1-day window can be scorable while the 3-day one is still waiting on the
+        market, so "has any outcome" is the wrong exclusion."""
+        published_at = _at_ten()
+        price("100", published_at - timedelta(hours=1))
+        self._trading_days(price, published_at, [1])
+        evaluation(published_at)
+
+        assert backtest_predictions()["scored"] == 1
+        assert PredictionOutcome.objects.count() == 1
+
+        self._trading_days(price, published_at, [2, 3], start=110)
+        # Two, not one: the exclusion is per EVALUATION, so a row with an outstanding
+        # window re-derives its settled one as well. That is one redundant window per
+        # unfinished prediction, against one per finished prediction on every sweep
+        # forever - and a per-window exclusion would mean a query per window.
+        assert backtest_predictions()["scored"] == 2
+        assert PredictionOutcome.objects.count() == 2, "the 3-day window is now answered"
+
+    def test_an_unscored_prediction_is_not_crowded_out_by_a_settled_one(
+        self, price, evaluation
+    ):
+        """`limit` is a budget, and recency alone spends it on whatever was stored last.
+
+        `waiting` is published today with no observation after it, so the market cannot
+        answer it yet. `settled` is published ten days ago and is fully scorable, and is
+        created SECOND - so with `limit=1` and plain recency ordering the sweep looks only
+        at the row it has already finished, and `waiting` is never revisited no matter how
+        long the market has since had.
+        """
+        today = _at_ten()
+        price("100", today - timedelta(hours=1))
+        waiting = evaluation(today)
+
+        long_ago = today - timedelta(days=10)
+        price("200", long_ago - timedelta(hours=1))
+        self._trading_days(price, long_ago, [1, 2, 3], start=204)
+        evaluation(long_ago)
+
+        assert backtest_predictions()["scored"] == 2, "only the older one is answerable"
+        assert not PredictionOutcome.objects.filter(evaluation=waiting).exists()
+
+        # The market finally trades past the newer prediction.
+        self._trading_days(price, today, [1, 2, 3], start=110)
+        assert backtest_predictions(limit=1)["scored"] == 2
+        assert PredictionOutcome.objects.filter(evaluation=waiting).count() == 2
+
+    def test_rescore_is_the_way_back_after_retuning_the_deadband(self, price, evaluation):
+        """Retuning DIRECTION_DEADBAND_PCT changes what "correct" meant for every stored
+        row, which is the one case where an existing outcome really is stale."""
+        published_at = _at_ten()
+        price("100", published_at - timedelta(hours=1))
+        self._trading_days(price, published_at, [1, 2, 3])
+        evaluation(published_at)
+        backtest_predictions()
+
+        assert backtest_predictions(rescore=True)["scored"] == 2

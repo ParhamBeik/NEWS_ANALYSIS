@@ -1,8 +1,12 @@
 """Inference orchestration.
 
-One task per (article, node, variant). Not one task per article: the three nodes have
-different costs and different failure modes, and a summary failing must not discard a
-classification that was already paid for.
+One Celery task per (article, variant): `process_article`, which walks
+classify -> evaluate -> summarize in order. The nodes are functions (`_run_node`), not
+tasks, and that is deliberate - making each a task and calling them from `process_article`
+nests Celery's retry inside Celery's retry, so three attempts become nine HTTP calls and
+nine budget charges for one logical inference. Retrying the whole chain is cheap instead of
+wasteful because `_already_answered` skips whatever succeeded last time, so a summary
+failing never discards a classification that was already paid for.
 
 The three-class error taxonomy maps onto Celery like this:
 
@@ -239,29 +243,6 @@ def _persist(node: str, article, variant: PromptVariant, run: Run, answer) -> No
             optimized_title=data.optimized_title,
             one_line=data.one_line,
         )
-
-
-def _node_task(node: str):
-    """Build one Celery task per node. Identical plumbing, different node name."""
-
-    @shared_task(
-        bind=True,
-        name=f"inference.{node}_article",
-        autoretry_for=(Transient,),
-        retry_backoff=True,
-        retry_backoff_max=300,
-        retry_jitter=True,
-        max_retries=3,
-    )
-    def task(self, article_id: int, variant_id: int, run_id: str) -> dict:
-        return _run_node(node, article_id, variant_id, run_id, self.request.retries + 1)
-
-    return task
-
-
-classify_article = _node_task("classify")
-evaluate_article = _node_task("evaluate")
-summarize_article = _node_task("summarize")
 
 
 @shared_task(

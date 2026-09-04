@@ -23,7 +23,7 @@ from articles.models import Article, ArticleImage
 from core.vocabulary import AXES, Category, GoldTrend, Level, NotifyStatus
 from inference.models import Classification, Evaluation, PromptVariant, Run, Summary
 from market.models import PredictionOutcome, PriceSnapshot
-from review.models import ABFeedback, ABPair, ReviewCase
+from review.models import ABPair, ReviewCase
 from sources.models import Source
 
 # One place to build the English gloss for a Persian value, so every endpoint agrees.
@@ -382,13 +382,6 @@ class ABPairSerializer(serializers.ModelSerializer):
 
     def get_right(self, obj):
         return self._side(obj, obj.variant_on("right"))
-
-
-class ABFeedbackSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ABFeedback
-        fields = ["id", "pair", "winner", "reasoning", "created_at"]
-        read_only_fields = ["id", "created_at"]
 
 
 # ------------------------------------------------------------------------------- market

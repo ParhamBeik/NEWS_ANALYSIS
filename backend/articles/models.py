@@ -18,8 +18,6 @@ from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from pgvector.django import HnswIndex, VectorField
 
-from core.text import content_hash
-
 
 class ExtractionTier(models.TextChoices):
     """How the body was obtained, best first.
@@ -108,14 +106,6 @@ class Article(models.Model):
 
     def __str__(self) -> str:
         return self.original_title[:80]
-
-    def recompute_content_hash(self) -> str:
-        self.content_hash = content_hash(self.original_title, self.lead, self.content)
-        return self.content_hash
-
-    @property
-    def is_canonical(self) -> bool:
-        return self.duplicate_of_id is None
 
 
 class ImageStatus(models.TextChoices):

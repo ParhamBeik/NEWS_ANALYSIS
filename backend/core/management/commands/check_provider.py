@@ -17,8 +17,6 @@ import requests
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-PROBE_TOKENS = 16
-
 
 class Command(BaseCommand):
     help = "Report which provider credentials are in effect and whether they work."

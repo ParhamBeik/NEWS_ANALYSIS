@@ -109,9 +109,8 @@ TASKS = {
     "summary": (SummaryOutput, "Summarize"),
 }
 
-# The node each task backs. Node names are what NodeEvent and the replay command use.
+# The node each task backs. Node names are what NodeEvent records and what /ops groups by.
 TASK_FOR_NODE = {"classify": "classification", "evaluate": "evaluation", "summarize": "summary"}
-NODES = tuple(TASK_FOR_NODE)
 
 
 def load_policy(name: str) -> str:
