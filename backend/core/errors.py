@@ -39,6 +39,10 @@ class BudgetExceeded(Fatal):
     that would keep spending past the ceiling the error exists to enforce."""
 
 
+class Gone(Permanent):
+    """The URL is gone (404/410). Retrying will not bring the page back."""
+
+
 def classify_exception(exc: BaseException) -> type[PipelineError]:
     """Route an arbitrary exception into the taxonomy. Unknown means Permanent."""
     if isinstance(exc, PipelineError):

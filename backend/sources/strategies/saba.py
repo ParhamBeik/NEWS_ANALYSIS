@@ -20,12 +20,13 @@ at tier `feed` rather than dropped.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree
 
 import requests
 
-from core.errors import Permanent
+from core.errors import Gone, Permanent
 from core.text import clean
 
 from ..extraction import RawArticle, fetch_text, parse_generic_article
@@ -95,6 +96,12 @@ def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     for entry in entries:
         try:
             page = fetch_text(session, entry.url)
+        except Gone as exc:
+            # Keep the feed row so the deletion is stored, but stamp it gone so the next
+            # listing touch cannot revive a URL whose detail page already 404'd.
+            code = 410 if "410" in str(exc) else 404
+            articles.append(replace(entry, gone_http_status=code))
+            continue
         except Exception:
             # One unreachable article page must not fail the whole feed. The entry still
             # carries a title, a date, an image and a category - enough to store and to

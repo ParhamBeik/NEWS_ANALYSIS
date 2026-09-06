@@ -37,6 +37,8 @@ STAGES = {
     "workbook": ("exports.tasks", "build_daily_workbook"),
     "sample-review": ("review.tasks", "sample_review_cases"),
     "ab-pairs": ("review.tasks", "build_ab_pairs"),
+    "probe": ("inference.tasks", "probe_circuit"),
+    "url-health": ("articles.tasks", "check_stale_urls"),
 }
 
 

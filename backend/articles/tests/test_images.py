@@ -42,6 +42,23 @@ def test_an_oversized_image_is_recorded_as_failed_not_retried(image_row, monkeyp
 
 
 @pytest.mark.django_db
+def test_a_404_is_gone_and_is_not_retried(image_row, monkeypatch):
+    """Unit: a deleted CDN object is a fact, not a Transient. The hourly sweep was
+    re-queuing 404s forever because the status stayed PENDING."""
+    from articles.models import ArticleImage, ImageStatus
+    from articles.tasks import download_image
+
+    monkeypatch.setattr(
+        "articles.tasks.open_checked",
+        lambda *a, **k: FakeResponse(0, status_code=404),
+    )
+    result = download_image(image_row.article_id)
+    stored = ArticleImage.objects.get(pk=image_row.pk)
+    assert result["status"] == "gone"
+    assert stored.status == ImageStatus.GONE
+
+
+@pytest.mark.django_db
 def test_an_image_url_pointing_into_our_own_network_is_refused(image_row, monkeypatch):
     """This URL came out of a third party's og:image tag and this worker sits on the same
     private network as Postgres and Redis. The refusal has to be recorded, not raised: a

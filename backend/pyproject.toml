@@ -5,6 +5,7 @@ testpaths = ["core", "sources", "articles", "inference", "review", "market", "ex
 addopts = "-q --strict-markers"
 markers = [
     "network: hits a real external service; excluded from the default run",
+    "fresh_circuit: leave the provider circuit unclosed so the production default is visible",
 ]
 
 [tool.ruff]

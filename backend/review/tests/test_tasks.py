@@ -107,7 +107,9 @@ class TestABPairBuilder:
         """
         article = make_article()
         evaluate(article, variant)
-        assert build_ab_pairs()["created"] == 0
+        result = build_ab_pairs()
+        assert result["created"] == 0
+        assert result["status"] == "idle"
         assert ABPair.objects.count() == 0
 
     def test_running_twice_does_not_duplicate_a_head_to_head(

@@ -187,6 +187,15 @@ class TestBackfillSweep:
         pairs = dedupe.backfill(dry_run=True)
         assert len(pairs) == 1
 
+    def test_a_time_budget_stops_without_losing_progress(self, make_article):
+        """Unit: the nightly sweep died at the worker limit with nothing committed.
+        A tiny budget must return a checkpoint rather than raise."""
+        first = make_article(original_title="خبر یکسان", content="x")
+        make_article(original_title="خبر یکسان", content="x", content_hash=first.content_hash)
+        result = dedupe.backfill(dry_run=True, time_budget_s=0.000001, limit=500)
+        assert hasattr(result, "timed_out")
+        assert result.last_id >= 0
+
     def test_dry_run_changes_nothing(self, make_article):
         first = make_article(original_title="خبر یکسان", content="x")
         second = make_article(
@@ -195,6 +204,23 @@ class TestBackfillSweep:
         dedupe.backfill(dry_run=True)
         second.refresh_from_db()
         assert second.duplicate_of_id is None
+
+    def test_dry_run_does_not_advance_the_nightly_cursor(self, make_article, monkeypatch):
+        from articles.tasks import backfill_dedupe
+
+        store = {"newsintel:dedupe:after_id": "12"}
+
+        class Fake:
+            def get(self, key):
+                return store.get(key)
+
+            def set(self, key, value):
+                store[key] = str(value)
+
+        monkeypatch.setattr("inference.budget.client", lambda: Fake())
+        make_article()
+        backfill_dedupe(dry_run=True)
+        assert store["newsintel:dedupe:after_id"] == "12"
 
 
 class TestCandidateCost:

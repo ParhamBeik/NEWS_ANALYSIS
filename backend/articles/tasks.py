@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from io import BytesIO
 
 import requests
@@ -11,11 +12,15 @@ from django.core.files.base import ContentFile
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
+from core.actions import log_action
 from core.errors import Transient
 from core.net import BlockedURL, open_checked, read_capped
 from sources.extraction import build_session
 
 from .models import ArticleImage, ImageStatus
+from .url_health import check_stale_urls as check_stale_urls
+
+GONE_HTTP = {404, 410}
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +61,28 @@ def download_image(article_id: int) -> dict:
     source publishes an image it will not serve.
     """
     record = ArticleImage.objects.filter(article_id=article_id).first()
-    if record is None or not record.source_url or record.status == ImageStatus.STORED:
+    if record is None or not record.source_url or record.status in {
+        ImageStatus.STORED, ImageStatus.GONE,
+    }:
         return {"article": article_id, "status": "skipped"}
 
     session = build_session()
     try:
         response = open_checked(session, record.source_url, timeout=20, stream=True)
         try:
+            if response.status_code in GONE_HTTP:
+                record.status = ImageStatus.GONE
+                record.error = f"HTTP {response.status_code}"
+                record.save(update_fields=["status", "error"])
+                log_action(
+                    "image.gone", "gone",
+                    article=article_id, http_status=response.status_code,
+                )
+                return {
+                    "article": article_id,
+                    "status": "gone",
+                    "http_status": response.status_code,
+                }
             response.raise_for_status()
             payload = read_capped(response, MAX_BYTES)
         finally:
@@ -76,6 +96,17 @@ def download_image(article_id: int) -> dict:
         record.save(update_fields=["status", "error"])
         return {"article": article_id, "status": "blocked"}
     except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in GONE_HTTP:
+            record.status, record.error = ImageStatus.GONE, f"HTTP {status}"
+            record.save(update_fields=["status", "error"])
+            log_action("image.gone", "gone", article=article_id, http_status=status)
+            return {"article": article_id, "status": "gone", "http_status": status}
+        if status and status < 500 and status != 429:
+            record.status, record.error = ImageStatus.FAILED, f"HTTP {status}: {exc}"
+            record.save(update_fields=["status", "error"])
+            log_action("image.failed", "failed", article=article_id, http_status=status)
+            return {"article": article_id, "status": "failed", "http_status": status}
         raise Transient(f"image fetch failed: {exc}") from exc
 
     if len(payload) > MAX_BYTES:
@@ -120,11 +151,48 @@ def download_pending_images(limit: int = 200) -> dict:
 
 @shared_task(name="articles.tasks.backfill_dedupe")
 def backfill_dedupe(dry_run: bool = True) -> dict:
-    """Sweep stored articles for near-duplicates missed at ingest time."""
+    """Sweep recent articles for near-duplicates missed at ingest time.
+
+    The previous full-corpus walk never finished inside the worker time limit, so
+    duplicates accumulated. One bounded batch per night, checkpointed in Redis, walks
+    the backlog across nights instead of dying with nothing committed.
+    """
+    from inference import budget
+
     from . import dedupe
 
-    merged = dedupe.backfill(dry_run=dry_run)
-    return {"pairs": len(merged), "dry_run": dry_run}
+    cursor_key = "newsintel:dedupe:after_id"
+    after_id = int(budget.client().get(cursor_key) or 0)
+    since = timezone.now() - timedelta(days=7) if after_id == 0 else None
+    merged = dedupe.backfill(
+        dry_run=dry_run,
+        since=since,
+        after_id=after_id,
+        limit=500,
+        time_budget_s=120,
+    )
+    if not dry_run:
+        if merged.exhausted:
+            budget.client().set(cursor_key, 0)
+        else:
+            budget.client().set(cursor_key, merged.last_id)
+    log_action(
+        "dedupe.backfill",
+        "done",
+        pairs=len(merged),
+        scanned=merged.scanned,
+        last_id=merged.last_id,
+        exhausted=merged.exhausted,
+        dry_run=dry_run,
+    )
+    return {
+        "pairs": len(merged),
+        "dry_run": dry_run,
+        "scanned": merged.scanned,
+        "last_id": merged.last_id,
+        "exhausted": merged.exhausted,
+        "timed_out": merged.timed_out,
+    }
 
 
 @shared_task(name="articles.tasks.reapply_prefilter")

@@ -110,6 +110,15 @@ class TestMoneyCeilings:
         assert spend.day_remaining == pytest.approx(2.75)
 
 
+class TestReleaseCall:
+    def test_a_failed_http_call_does_not_consume_the_cap(self):
+        """Unit: failed reserves used to burn NEWS_MAX_PROVIDER_CALLS_PER_RUN, so an
+        empty wallet tripped the local cap and kept it tripped after a top-up."""
+        budget.reserve_call(RUN)
+        budget.release_call(RUN)
+        assert budget.current(RUN).run_calls == 0
+
+
 class TestAbort:
     def test_abort_is_visible_to_every_task(self):
         """A ceiling that only stops the task which noticed it is not a ceiling - the other

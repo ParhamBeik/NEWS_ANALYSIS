@@ -17,6 +17,20 @@ from inference.models import PromptVariant
 from sources.models import Source, Strategy
 
 
+@pytest.fixture(autouse=True)
+def _isolate_provider_circuit(db, request):
+    """Dispatch tests assume a closed circuit. Production starts paused."""
+    from inference.circuit import close
+    from inference.models import ProviderCircuit
+
+    if request.node.get_closest_marker("fresh_circuit"):
+        ProviderCircuit.objects.all().delete()
+        yield
+        return
+    close("test isolation")
+    yield
+
+
 @pytest.fixture
 def source(db) -> Source:
     return Source.objects.create(

@@ -76,8 +76,13 @@ class PromptVariant(models.Model):
 class RunStatus(models.TextChoices):
     RUNNING = "running", "Running"
     SUCCESS = "success", "Success"
+    PARTIAL = "partial", "Partial — some nodes succeeded"
     FAILED = "failed", "Failed"
-    ABORTED = "aborted", "Aborted (budget or fatal)"
+    ABORTED = "aborted", "Aborted (fatal, non-budget)"
+    QUOTA_EXHAUSTED = "quota_exhausted", "Stopped — provider wallet empty"
+    CIRCUIT_OPEN = "circuit_open", "Skipped — provider circuit open"
+    HALTED = "halted", "Halted — probes keep failing"
+    NO_WORK = "no_work", "Nothing to do"
 
 
 def new_run_id(now: datetime | None = None) -> str:
@@ -94,7 +99,7 @@ def new_run_id(now: datetime | None = None) -> str:
 class Run(models.Model):
     run_id = models.CharField(max_length=32, unique=True, default=new_run_id, editable=False)
     mode = models.CharField(max_length=32, default="pipeline")
-    status = models.CharField(max_length=16, choices=RunStatus, default=RunStatus.RUNNING)
+    status = models.CharField(max_length=32, choices=RunStatus, default=RunStatus.RUNNING)
     started_at = models.DateTimeField(default=timezone.now)
     finished_at = models.DateTimeField(null=True, blank=True)
     articles_fetched = models.PositiveIntegerField(default=0)
@@ -118,6 +123,9 @@ class NodeStatus(models.TextChoices):
     PERMANENT = "permanent", "Permanent failure"
     FATAL = "fatal", "Fatal"
     SKIPPED = "skipped", "Skipped (already answered)"
+    ABORTED = "aborted", "Aborted by run flag"
+    CIRCUIT_OPEN = "circuit_open", "Skipped — provider circuit open"
+    QUOTA_EXHAUSTED = "quota_exhausted", "Provider wallet empty"
 
 
 class NodeEvent(models.Model):
@@ -133,7 +141,7 @@ class NodeEvent(models.Model):
     variant = models.ForeignKey(
         PromptVariant, null=True, blank=True, on_delete=models.SET_NULL, related_name="events"
     )
-    status = models.CharField(max_length=16, choices=NodeStatus)
+    status = models.CharField(max_length=32, choices=NodeStatus)
     attempt = models.PositiveSmallIntegerField(default=1)
     latency_ms = models.PositiveIntegerField(null=True, blank=True)
     tokens_in = models.PositiveIntegerField(default=0)
@@ -308,3 +316,38 @@ class Summary(InferenceResult):
         abstract = False
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["article", "-created_at"])]
+
+
+class CircuitState(models.TextChoices):
+    CLOSED = "closed", "Closed — inference allowed"
+    OPEN_BUDGET = "open_budget", "Open — provider wallet empty"
+    OPEN_ERRORS = "open_errors", "Open — too many provider errors"
+    PROBING = "probing", "Weekly wallet probe in progress"
+    STOPPED = "stopped", "Stopped — probes keep failing"
+
+
+class ProviderCircuit(models.Model):
+    """Singleton automatic halt for paid provider calls.
+
+    Not a user toggle. Tasks read this before dispatching; a weekly probe is the only
+    thing that may try the wallet again. One row (pk=1), created on first read.
+    """
+
+    state = models.CharField(
+        max_length=16, choices=CircuitState, default=CircuitState.OPEN_BUDGET
+    )
+    reason = models.TextField(blank=True)
+    error_kind = models.CharField(max_length=32, blank=True)
+    consecutive_failures = models.PositiveIntegerField(default=0)
+    probe_failures = models.PositiveIntegerField(default=0)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    next_probe_at = models.DateTimeField(null=True, blank=True)
+    last_probe_at = models.DateTimeField(null=True, blank=True)
+    last_probe_result = models.CharField(max_length=64, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "provider circuit"
+
+    def __str__(self) -> str:
+        return f"circuit {self.state}"

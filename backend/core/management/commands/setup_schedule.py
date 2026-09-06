@@ -57,6 +57,12 @@ CRON_TASKS = [
     # Dedup sweep at 03:00, when nothing else is competing for the worker.
     ("nightly-dedupe-sweep", "articles.tasks.backfill_dedupe", {"hour": "3", "minute": "0"},
      {"dry_run": False}),
+    # Weekly wallet probe: the only inference call allowed after the circuit opens.
+    ("weekly-circuit-probe", "inference.probe_circuit",
+     {"hour": "4", "minute": "0", "day_of_week": "0"}, {}),
+    # Re-check articles that have fallen off listings; 404 becomes GONE, once.
+    ("weekly-url-health", "articles.tasks.check_stale_urls",
+     {"hour": "4", "minute": "30", "day_of_week": "0"}, {}),
 ]
 
 
@@ -90,7 +96,7 @@ class Command(BaseCommand):
             schedule, _ = CrontabSchedule.objects.get_or_create(
                 minute=cron["minute"],
                 hour=cron["hour"],
-                day_of_week="*",
+                day_of_week=cron.get("day_of_week", "*"),
                 day_of_month="*",
                 month_of_year="*",
                 timezone=TEHRAN,

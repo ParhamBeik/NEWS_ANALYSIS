@@ -25,6 +25,8 @@ from .base import *
 
 DEBUG = False
 # Tasks run inline; no broker is available in the test environment.
+# Existing dispatch tests assume a closed circuit and no wallet HTTP.
+NEWS_INFERENCE_PREFLIGHT = False
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_BEAT_SCHEDULER = "celery.beat:PersistentScheduler"

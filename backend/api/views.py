@@ -34,9 +34,9 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
-from articles.models import Article
+from articles.models import Article, UrlStatus
 from core.vocabulary import AXES, NotifyStatus
-from inference import budget
+from inference import budget, circuit
 from inference.models import (
     Classification,
     DeadLetter,
@@ -481,6 +481,11 @@ class OpsView(APIView):
                 .order_by("-count")
             ),
             "recent_runs": RunSerializer(Run.objects.all()[:10], many=True).data,
+            "provider_circuit": circuit.snapshot(),
+            "url_health": {
+                "gone_articles": Article.objects.filter(url_status=UrlStatus.GONE).count(),
+                "dropped_articles": Article.objects.filter(url_status=UrlStatus.DROPPED).count(),
+            },
         })
 
 

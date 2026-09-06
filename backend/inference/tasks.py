@@ -30,11 +30,12 @@ from django.conf import settings
 from django.db.models import Max, Sum
 from django.utils import timezone
 
-from articles.models import Article
+from articles.models import Article, UrlStatus
+from core.actions import log_action
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from core.vocabulary import AXES
 
-from . import budget, memory
+from . import budget, circuit, memory
 from .models import (
     Classification,
     DeadLetter,
@@ -141,10 +142,33 @@ def _context(article, variant, node: str, category: str | None):
 # -------------------------------------------------------------------------- inference
 
 
+def _halt_status(reason: str) -> str:
+    lowered = reason.lower()
+    if "quota" in lowered or "budget" in lowered:
+        return NodeStatus.QUOTA_EXHAUSTED
+    if "circuit" in lowered:
+        return NodeStatus.CIRCUIT_OPEN
+    return NodeStatus.ABORTED
+
+
 def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt: int) -> dict:
     """Shared body for all three inference nodes."""
+    if reason := circuit.block_reason():
+        run = _run_for(run_id)
+        _record(run, node, article_id, None, NodeStatus.CIRCUIT_OPEN, attempt=attempt)
+        log_action("inference.node", NodeStatus.CIRCUIT_OPEN, node=node, article=article_id)
+        return {
+            "article": article_id,
+            "node": node,
+            "status": NodeStatus.CIRCUIT_OPEN,
+            "reason": reason,
+        }
     if reason := budget.abort_reason(run_id):
-        return {"article": article_id, "node": node, "status": "aborted", "reason": reason}
+        run = _run_for(run_id)
+        status = _halt_status(reason)
+        _record(run, node, article_id, None, status, attempt=attempt)
+        log_action("inference.node", status, node=node, article=article_id, reason=reason[:200])
+        return {"article": article_id, "node": node, "status": status, "reason": reason}
 
     variant = PromptVariant.objects.filter(pk=variant_id).first()
     if variant is None:
@@ -177,26 +201,47 @@ def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt:
     try:
         answer = provider.complete(_context(article, variant, node, category), schema, run_id)
     except BudgetExceeded as exc:
+        if circuit.is_wallet_failure(exc):
+            circuit.open_budget(str(exc))
+            Run.objects.filter(run_id=run_id).update(
+                status=RunStatus.QUOTA_EXHAUSTED, finished_at=timezone.now(), error=str(exc)[:2000]
+            )
+        else:
+            Run.objects.filter(run_id=run_id).update(
+                status=RunStatus.ABORTED, finished_at=timezone.now(), error=str(exc)[:2000]
+            )
+        budget.abort(run_id, str(exc))
+        node_status = (
+            NodeStatus.QUOTA_EXHAUSTED
+            if circuit.is_wallet_failure(exc)
+            else NodeStatus.ABORTED
+        )
+        _record(run, node, article_id, variant, node_status, attempt=attempt, exc=exc)
+        log_action("inference.node", node_status, node=node, article=article_id)
+        raise
+    except Fatal as exc:
+        circuit.record_failure(exc)
         budget.abort(run_id, str(exc))
         Run.objects.filter(run_id=run_id).update(
             status=RunStatus.ABORTED, finished_at=timezone.now(), error=str(exc)[:2000]
         )
         _record(run, node, article_id, variant, NodeStatus.FATAL, attempt=attempt, exc=exc)
-        raise
-    except Fatal as exc:
-        budget.abort(run_id, str(exc))
-        Run.objects.filter(run_id=run_id).update(
-            status=RunStatus.FAILED, finished_at=timezone.now(), error=str(exc)[:2000]
-        )
-        _record(run, node, article_id, variant, NodeStatus.FATAL, attempt=attempt, exc=exc)
+        log_action("inference.node", NodeStatus.FATAL, node=node, article=article_id)
         raise
     except Permanent as exc:
         _record(run, node, article_id, variant, NodeStatus.PERMANENT, attempt=attempt, exc=exc)
         _dead_letter(article_id, node, exc, attempt)
+        log_action("inference.node", NodeStatus.PERMANENT, node=node, article=article_id)
         return {"article": article_id, "node": node, "status": "permanent", "error": str(exc)}
+    except Transient as exc:
+        circuit.record_failure(exc)
+        _record(run, node, article_id, variant, NodeStatus.RETRY, attempt=attempt, exc=exc)
+        log_action("inference.node", NodeStatus.RETRY, node=node, article=article_id)
+        raise
 
     latency_ms = int((timezone.now() - started).total_seconds() * 1000)
     _persist(node, article, variant, run, answer)
+    circuit.record_success()
     _record(
         run, node, article_id, variant, NodeStatus.SUCCESS,
         attempt=attempt, latency_ms=latency_ms, usage=answer.usage,
@@ -268,7 +313,30 @@ def process_article(self, article_id: int, variant_id: int, run_id: str) -> dict
     skips any node that succeeded on the previous attempt.
     """
     attempt = self.request.retries + 1
+    if reason := circuit.block_reason():
+        run = _run_for(run_id)
+        _record(run, "classify", article_id, None, NodeStatus.CIRCUIT_OPEN, attempt=attempt)
+        log_action("inference.process", NodeStatus.CIRCUIT_OPEN, article=article_id)
+        return {
+            "article": article_id,
+            "status": NodeStatus.CIRCUIT_OPEN,
+            "reason": reason,
+            "category": None,
+            "steps": [],
+        }
+
+    settled_ok = {"ok", "skipped"}
     steps = [_run_node("classify", article_id, variant_id, run_id, attempt)]
+    classify_status = steps[0].get("status")
+    if classify_status not in settled_ok:
+        log_action("inference.process", classify_status, article=article_id)
+        return {
+            "article": article_id,
+            "status": classify_status,
+            "category": None,
+            "steps": steps,
+        }
+
     category = (
         Classification.objects.filter(article_id=article_id, variant_id=variant_id)
         .order_by("-created_at")
@@ -277,8 +345,16 @@ def process_article(self, article_id: int, variant_id: int, run_id: str) -> dict
     )
     if category and category != "other":
         steps.append(_run_node("evaluate", article_id, variant_id, run_id, attempt))
-        steps.append(_run_node("summarize", article_id, variant_id, run_id, attempt))
-    return {"article": article_id, "category": category, "steps": steps}
+        if steps[-1].get("status") in settled_ok:
+            steps.append(_run_node("summarize", article_id, variant_id, run_id, attempt))
+
+    overall = "ok"
+    for step in steps:
+        if step.get("status") not in settled_ok:
+            overall = step["status"]
+            break
+    log_action("inference.process", overall, article=article_id, category=category)
+    return {"article": article_id, "status": overall, "category": category, "steps": steps}
 
 
 @shared_task(
@@ -289,6 +365,9 @@ def process_article(self, article_id: int, variant_id: int, run_id: str) -> dict
 )
 def embed_article(article_id: int, run_id: str = "embeddings") -> dict:
     """Compute and store one article's embedding."""
+    if reason := circuit.block_reason():
+        log_action("inference.embed", NodeStatus.CIRCUIT_OPEN, article=article_id)
+        return {"article": article_id, "status": NodeStatus.CIRCUIT_OPEN, "reason": reason}
     if budget.abort_reason(run_id):
         return {"article": article_id, "status": "aborted"}
     article = Article.objects.filter(pk=article_id).first()
@@ -298,7 +377,20 @@ def embed_article(article_id: int, run_id: str = "embeddings") -> dict:
     if not text:
         return {"article": article_id, "status": "empty"}
     model = settings.GAPGPT_EMBEDDING_MODEL
-    vectors, _ = GapGPTProvider().embed([text], run_id, model=model)
+    try:
+        vectors, _ = GapGPTProvider().embed([text], run_id, model=model)
+    except BudgetExceeded as exc:
+        if circuit.is_wallet_failure(exc):
+            circuit.open_budget(str(exc))
+            log_action("inference.embed", NodeStatus.QUOTA_EXHAUSTED, article=article_id)
+        budget.abort(run_id, str(exc))
+        raise
+    except Fatal as exc:
+        circuit.record_failure(exc)
+        raise
+    except Transient as exc:
+        circuit.record_failure(exc)
+        raise
     memory.store_embedding(article, vectors[0], model)
     return {"article": article_id, "status": "stored", "dimensions": len(vectors[0])}
 
@@ -306,8 +398,12 @@ def embed_article(article_id: int, run_id: str = "embeddings") -> dict:
 @shared_task(name="inference.embed_missing")
 def embed_missing(limit: int = 200, run_id: str = "embeddings") -> dict:
     """Queue embeddings for canonical articles that do not have one yet."""
+    if not circuit.preflight():
+        log_action("inference.embed_missing", "circuit_open", reason=circuit.block_reason())
+        return {"queued": 0, "status": "circuit_open", "reason": circuit.block_reason()}
     ids = list(
         Article.objects.canonical()
+        .exclude(url_status=UrlStatus.GONE)
         .exclude(embeddings__model=settings.GAPGPT_EMBEDDING_MODEL)
         .values_list("id", flat=True)[:limit]
     )
@@ -371,6 +467,15 @@ def run_cycle(limit: int | None = None, variant_names: list[str] | None = None) 
     variants = list(variants)
     if not variants:
         return {"error": "no active prompt variants"}
+    if not circuit.preflight():
+        reason = circuit.block_reason()
+        log_action("inference.cycle", "circuit_open", reason=reason)
+        return {
+            "status": "circuit_open",
+            "reason": reason,
+            "articles": 0,
+            "dispatched": 0,
+        }
 
     # Windowed, because an unbounded queryset re-offers the whole corpus forever: an old
     # article nothing will ever answer (its source went away, its content is empty) would
@@ -425,7 +530,7 @@ def finalize_run(run_id: str) -> dict:
     )
     processed = run.events.filter(status=NodeStatus.SUCCESS).values("article").distinct().count()
     if run.status == RunStatus.RUNNING:
-        run.status = RunStatus.SUCCESS
+        run.status = _status_from_events(run)
     run.finished_at = timezone.now()
     run.cost_usd = totals["cost"] or 0
     run.tokens_in = totals["tin"] or 0
@@ -457,3 +562,36 @@ def finalize_stale_runs(idle_minutes: int = 10) -> dict:
         finalize_run(run.run_id)
         closed.append(run.run_id)
     return {"closed": len(closed), "run_ids": closed}
+
+
+def _status_from_events(run: Run) -> str:
+    """A drained run is not automatically a success. Empty-wallet cycles used to close as
+    `success` because every task returned a dict instead of raising, and /ops looked fine.
+    """
+    statuses = list(run.events.values_list("status", flat=True))
+    if not statuses:
+        return RunStatus.NO_WORK
+    if NodeStatus.QUOTA_EXHAUSTED in statuses:
+        return RunStatus.QUOTA_EXHAUSTED
+    if NodeStatus.CIRCUIT_OPEN in statuses:
+        return RunStatus.CIRCUIT_OPEN
+    if NodeStatus.FATAL in statuses:
+        return RunStatus.ABORTED
+    successes = statuses.count(NodeStatus.SUCCESS)
+    failures = [
+        status for status in statuses
+        if status not in {NodeStatus.SUCCESS, NodeStatus.SKIPPED, NodeStatus.RETRY}
+    ]
+    if successes and failures:
+        return RunStatus.PARTIAL
+    if successes or set(statuses) <= {NodeStatus.SKIPPED}:
+        return RunStatus.SUCCESS if successes else RunStatus.NO_WORK
+    return RunStatus.FAILED
+
+
+@shared_task(name="inference.probe_circuit")
+def probe_circuit() -> dict:
+    """Weekly wallet check. The only inference-side call allowed while the circuit is open."""
+    result = circuit.weekly_probe()
+    log_action("inference.probe", result.get("action", ""), status=result.get("status"))
+    return result

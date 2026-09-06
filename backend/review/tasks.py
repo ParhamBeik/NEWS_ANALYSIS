@@ -149,8 +149,21 @@ def build_ab_pairs(limit: int = 50) -> dict:
     variants = list(PromptVariant.objects.filter(is_active=True).order_by("pk"))
     if len(variants) < 2:
         # Not an error. One active variant is the normal, cheap configuration; the
-        # experiment is the deliberate exception.
-        return {"created": 0, "reason": "fewer than two active variants"}
+        # experiment is the deliberate exception. Empty pairs are also expected while
+        # inference is paused — there are no evaluations to compare.
+        logger.info(
+            "action=ab.pairs status=idle reason=fewer_than_two_active_variants variants=%s",
+            len(variants),
+        )
+        return {
+            "created": 0,
+            "status": "idle",
+            "reason": "fewer than two active variants",
+            "detail": (
+                "A/B pairing needs two active variants that both produced evaluations. "
+                "Empty is expected while inference is paused or only one arm is live."
+            ),
+        }
 
     created = 0
     for left, right in itertools.combinations(variants, 2):
@@ -181,4 +194,14 @@ def build_ab_pairs(limit: int = 50) -> dict:
             )
             created += 1
     logger.info("built %s a/b pairs", created)
+    if created == 0:
+        return {
+            "created": 0,
+            "status": "idle",
+            "reason": "no overlapping evaluations",
+            "detail": (
+                "A/B pairing needs two active variants that both produced evaluations. "
+                "Empty is expected while inference is paused or the arms have not overlapped."
+            ),
+        }
     return {"created": created}

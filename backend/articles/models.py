@@ -19,6 +19,12 @@ from django.db import models
 from pgvector.django import HnswIndex, VectorField
 
 
+class UrlStatus(models.TextChoices):
+    LIVE = "live", "Live"
+    GONE = "gone", "Permanently gone (404/410)"
+    DROPPED = "dropped", "Dropped from the listing"
+
+
 class ExtractionTier(models.TextChoices):
     """How the body was obtained, best first.
 
@@ -39,7 +45,9 @@ class ArticleQuerySet(models.QuerySet):
         return self.filter(duplicate_of__isnull=True)
 
     def eligible_for_inference(self):
-        return self.canonical().filter(quality_flag="", prefilter_reason="")
+        return self.canonical().filter(
+            quality_flag="", prefilter_reason="", url_status=UrlStatus.LIVE
+        )
 
     def in_window(self, days: int):
         from datetime import timedelta
@@ -92,6 +100,11 @@ class Article(models.Model):
     fetched_at = models.DateTimeField(db_index=True)
     first_seen_run = models.CharField(max_length=32, blank=True)
     last_seen_run = models.CharField(max_length=32, blank=True)
+    url_status = models.CharField(
+        max_length=16, choices=UrlStatus, default=UrlStatus.LIVE, db_index=True
+    )
+    gone_at = models.DateTimeField(null=True, blank=True)
+    gone_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = ArticleQuerySet.as_manager()
@@ -112,6 +125,7 @@ class ImageStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     STORED = "stored", "Stored"
     FAILED = "failed", "Failed"
+    GONE = "gone", "Permanently gone (404/410)"
     ABSENT = "absent", "No image published"
 
 

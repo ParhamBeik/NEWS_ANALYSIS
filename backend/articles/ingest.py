@@ -20,7 +20,7 @@ from sources import prefilter
 from sources.extraction import RawArticle
 
 from . import dedupe
-from .models import Article, ArticleImage, ImageStatus
+from .models import Article, ArticleImage, ExtractionTier, ImageStatus, UrlStatus
 
 MIN_TITLE_CHARS = 10
 # Title plus lead is enough to judge a photo post; a full body is not required. IRNA and
@@ -78,9 +78,30 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
     """
     existing = Article.objects.filter(url=raw.url).first()
     if existing is not None:
-        Article.objects.filter(pk=existing.pk).update(
-            last_seen_run=run_id, fetched_at=timezone.now()
+        fields = {"last_seen_run": run_id}
+        # A listing/feed row still names a URL after the detail page 404s. Treating that
+        # as resurrection flipped GONE back to LIVE every crawl and the 404 never stuck.
+        detail_page = (
+            raw.extraction_tier not in {ExtractionTier.FEED, ExtractionTier.LISTING}
+            and bool(raw.content)
         )
+        if raw.gone_http_status:
+            fields.update(
+                url_status=UrlStatus.GONE,
+                gone_at=timezone.now(),
+                gone_http_status=raw.gone_http_status,
+            )
+        elif existing.url_status == UrlStatus.GONE:
+            if detail_page:
+                fields.update(
+                    url_status=UrlStatus.LIVE,
+                    gone_at=None,
+                    gone_http_status=None,
+                    fetched_at=timezone.now(),
+                )
+        else:
+            fields["fetched_at"] = timezone.now()
+        Article.objects.filter(pk=existing.pk).update(**fields)
         return existing, False
 
     published_at, jalali, clock = published_fields(raw.published_at)
@@ -104,6 +125,9 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
         fetched_at=timezone.now(),
         first_seen_run=run_id,
         last_seen_run=run_id,
+        url_status=UrlStatus.GONE if raw.gone_http_status else UrlStatus.LIVE,
+        gone_at=timezone.now() if raw.gone_http_status else None,
+        gone_http_status=raw.gone_http_status,
     )
     dedupe.resolve(article)
 

@@ -23,7 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 
-from .budget import Usage, charge, check, reserve_call
+from .budget import Usage, charge, check, release_call, reserve_call
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ class GapGPTProvider:
                 timeout=REQUEST_TIMEOUT,
             )
         except (requests.Timeout, requests.ConnectionError) as exc:
+            release_call(run_id)
             raise Transient(f"provider request failed: {exc}") from exc
 
         status = response.status_code
@@ -101,17 +102,21 @@ class GapGPTProvider:
             # returns 403 with "pre-consume quota failed, remaining user quota: $0.000176"
             # when the account is out of credit. Calling that "authentication failed" sends
             # you hunting for a broken API key while the real fix is topping up the account.
+            release_call(run_id)
             detail = response.text[:300]
             if "quota" in detail.lower() or "insufficient" in detail.lower():
                 raise BudgetExceeded(f"provider quota exhausted (HTTP {status}): {detail}")
             raise Fatal(f"provider authentication failed: HTTP {status}: {detail}")
         if status == 429 or status >= 500:
+            release_call(run_id)
             raise Transient(f"retryable HTTP {status}")
         if status >= 400:
+            release_call(run_id)
             raise Permanent(f"provider rejected request: HTTP {status} {response.text[:300]}")
         try:
             return response.json()
         except json.JSONDecodeError as exc:
+            release_call(run_id)
             raise Permanent(f"provider returned non-JSON body: {exc}") from exc
 
     def _usage(self, body: dict) -> Usage:

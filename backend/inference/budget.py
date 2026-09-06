@@ -166,6 +166,18 @@ def abort_reason(run_id: str) -> str:
     return client().get(_run_key(run_id, "aborted")) or ""
 
 
+def release_call(run_id: str) -> None:
+    """Refund a reserved slot when the HTTP call never completed.
+
+    Failed requests used to count against NEWS_MAX_PROVIDER_CALLS_PER_RUN, so an empty
+    wallet burned the cap on 403s and then kept the guard tripped after a top-up.
+    """
+    conn = client()
+    used = int(conn.decr(_run_key(run_id, "calls")))
+    if used < 0:
+        conn.set(_run_key(run_id, "calls"), 0, ex=RUN_KEY_TTL)
+
+
 def reset(run_id: str) -> None:
     """Drop a run's counters. For tests and for restarting an aborted run deliberately."""
     conn = client()

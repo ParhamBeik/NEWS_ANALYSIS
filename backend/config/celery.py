@@ -22,6 +22,7 @@ app.autodiscover_tasks()
 app.conf.task_routes = {
     "sources.*": {"queue": "crawl"},
     "articles.tasks.download_image": {"queue": "crawl"},
+    "articles.tasks.check_stale_urls": {"queue": "crawl"},
     "market.*": {"queue": "crawl"},
     "inference.*": {"queue": "inference"},
     "articles.tasks.embed_article": {"queue": "inference"},

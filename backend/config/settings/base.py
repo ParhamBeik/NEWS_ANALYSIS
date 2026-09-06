@@ -210,6 +210,12 @@ NEWS_RUN_BUDGET_USD = env_float("NEWS_RUN_BUDGET_USD", 1.00)
 NEWS_DAILY_BUDGET_USD = env_float("NEWS_DAILY_BUDGET_USD", 3.00)
 # Runaway-loop breaker on request COUNT, not money. Belongs well above a normal cycle.
 NEWS_MAX_PROVIDER_CALLS_PER_RUN = env_int("NEWS_MAX_PROVIDER_CALLS_PER_RUN", 1000)
+# Automatic provider halt. Not a user toggle: the first empty-wallet response opens the
+# circuit; a weekly probe is the only thing that may try again.
+NEWS_CIRCUIT_ERROR_THRESHOLD = env_int("NEWS_CIRCUIT_ERROR_THRESHOLD", 5)
+NEWS_CIRCUIT_PROBE_DAYS = env_int("NEWS_CIRCUIT_PROBE_DAYS", 7)
+NEWS_CIRCUIT_PROBE_FAIL_STOP = env_int("NEWS_CIRCUIT_PROBE_FAIL_STOP", 3)
+NEWS_INFERENCE_PREFLIGHT = env_bool("NEWS_INFERENCE_PREFLIGHT", True)
 # 350 is enough for every node's JSON (the winner uses 234) and is a real selection
 # criterion, not just a cost guard: it excludes models that spend their output budget on
 # internal reasoning tokens before emitting anything. gpt-5-nano produced NO content even

@@ -133,13 +133,14 @@ class TestNoNestedRetry:
         assert len(responses.calls) == 1
 
     @responses.activate
-    def test_a_transient_failure_still_consumes_one_request_slot(self, provider):
-        """The cap counts REQUESTS, not successes. A retry storm that never succeeds is
-        exactly the runaway this ceiling exists to stop."""
+    def test_a_transient_failure_does_not_consume_the_request_cap(self, provider):
+        """Failed HTTP used to count against NEWS_MAX_PROVIDER_CALLS_PER_RUN, so an empty
+        wallet burned the cap on 403s and kept it tripped after a top-up. The circuit, not
+        the request cap, is what stops a retry storm."""
         responses.add(responses.POST, URL, json={"error": "later"}, status=503)
         with pytest.raises(Transient):
             provider.complete(messages(), ClassificationOutput, RUN)
-        assert budget.current(RUN).run_calls == 1
+        assert budget.current(RUN).run_calls == 0
 
 
 class TestCostAccounting:

@@ -17,7 +17,8 @@ Exact hash matches bypass the threshold: they are identity, not similarity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from django.db.models import Q
@@ -35,6 +36,21 @@ class Match:
     article_id: int
     score: float
     reason: str
+
+
+@dataclass
+class BackfillResult:
+    pairs: list[tuple[str, str, float]] = field(default_factory=list)
+    scanned: int = 0
+    last_id: int = 0
+    timed_out: bool = False
+    exhausted: bool = True
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __iter__(self):
+        return iter(self.pairs)
 
 
 def candidates(article):
@@ -162,24 +178,43 @@ def resolve(article) -> Match | None:
 
 
 def backfill(
-    *, dry_run: bool = False, since: datetime | None = None
-) -> list[tuple[str, str, float]]:
+    *,
+    dry_run: bool = False,
+    since: datetime | None = None,
+    after_id: int = 0,
+    limit: int = 0,
+    time_budget_s: float = 0,
+) -> BackfillResult:
     """Apply near-duplicate detection to articles already stored.
 
     The imported legacy corpus was deduplicated by URL alone, so reworded republications
-    are still separate rows. Returns (title, other title, score) per merged pair.
+    are still separate rows. Returns a BackfillResult (still iterable as the pair list).
+    `limit` / `time_budget_s` of 0 mean unbounded — the tests and ingest-time path.
     """
     from .models import Article
 
-    rows = Article.objects.canonical().exclude(original_title="").order_by("published_at")
+    rows = (
+        Article.objects.canonical()
+        .exclude(original_title="")
+        .filter(pk__gt=after_id)
+        .order_by("id")
+    )
     if since is not None:
-        rows = rows.filter(Q(published_at__gte=since) | Q(published_at__isnull=True))
+        rows = rows.filter(Q(fetched_at__gte=since) | Q(published_at__isnull=True))
+    if limit:
+        rows = rows[:limit]
 
-    merged: list[tuple[str, str, float]] = []
-    # In dry-run nothing is linked, so without this the same pair reports twice - once from
-    # each side - and the count comes out double.
+    result = BackfillResult(last_id=after_id)
+    deadline = time.monotonic() + time_budget_s if time_budget_s else None
     claimed: set[int] = set()
+    scanned = 0
+    last_id = after_id
     for article in rows.iterator():
+        if deadline and time.monotonic() >= deadline:
+            result.timed_out = True
+            break
+        scanned += 1
+        last_id = article.pk
         if article.pk in claimed:
             continue
         current = Article.objects.filter(pk=article.pk).values_list("duplicate_of", flat=True)
@@ -194,8 +229,11 @@ def backfill(
             .first()
             or ""
         )
-        merged.append((article.original_title, other_title, match.score))
+        result.pairs.append((article.original_title, other_title, match.score))
         claimed.update({article.pk, match.article_id})
         if not dry_run:
             link(article, match)
-    return merged
+    result.scanned = scanned
+    result.last_id = last_id
+    result.exhausted = not result.timed_out and (not limit or scanned < limit)
+    return result

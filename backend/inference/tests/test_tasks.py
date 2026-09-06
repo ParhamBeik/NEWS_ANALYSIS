@@ -144,6 +144,28 @@ class TestRunCycle:
         run_cycle()
         assert Run.objects.count() == 0
 
+    def test_a_gone_url_is_not_dispatched(self, make_article, variant, dispatched):
+        from articles.models import UrlStatus
+
+        make_article(url_status=UrlStatus.GONE)
+        assert run_cycle()["dispatched"] == 0
+        assert dispatched == []
+
+    def test_embed_missing_skips_gone_urls(self, make_article, monkeypatch):
+        from articles.models import UrlStatus
+        from inference.tasks import embed_missing
+
+        queued: list[int] = []
+        monkeypatch.setattr(
+            "inference.tasks.embed_article.delay",
+            lambda article_id, run_id="embeddings": queued.append(article_id),
+        )
+        gone = make_article(url_status=UrlStatus.GONE)
+        live = make_article()
+        embed_missing()
+        assert gone.pk not in queued
+        assert live.pk in queued
+
     def test_articles_outside_the_rolling_window_are_left_alone(
         self, make_article, variant, dispatched, settings
     ):

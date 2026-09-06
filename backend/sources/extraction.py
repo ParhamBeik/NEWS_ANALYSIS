@@ -20,7 +20,7 @@ import requests
 from bs4 import BeautifulSoup
 from django.conf import settings
 
-from core.errors import Permanent, Transient
+from core.errors import Gone, Permanent, Transient
 from core.net import MAX_BODY_BYTES, open_checked, read_capped
 from core.text import clean, content_hash
 
@@ -44,6 +44,7 @@ class RawArticle:
     native_category: str = ""
     keywords: list[str] = field(default_factory=list)
     image_url: str = ""
+    gone_http_status: int | None = None
 
     @property
     def content_hash(self) -> str:
@@ -62,6 +63,7 @@ class RawArticle:
             native_category=self.native_category or other.native_category,
             keywords=self.keywords or other.keywords,
             image_url=self.image_url or other.image_url,
+            gone_http_status=self.gone_http_status or other.gone_http_status,
         )
 
 
@@ -85,6 +87,11 @@ def fetch_text(session: requests.Session, url: str) -> str:
     """
     response = open_checked(session, url, timeout=settings.NEWS_HTTP_TIMEOUT, stream=True)
     try:
+        if response.status_code in {404, 410}:
+            from articles.url_health import note_gone
+
+            note_gone(url, response.status_code)
+            raise Gone(f"HTTP {response.status_code} for {url}")
         if response.status_code >= 500 or response.status_code == 429:
             raise Transient(f"retryable HTTP {response.status_code} for {url}")
         response.raise_for_status()

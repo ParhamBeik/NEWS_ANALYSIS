@@ -15,6 +15,15 @@ from django.core.management.base import CommandError
 from core.management.commands.run_pipeline import STAGES
 
 
+def test_url_health_is_exported_from_the_module_celery_autodiscovers():
+    """Beat schedules `articles.tasks.check_stale_urls`. Autodiscover only imports
+    `tasks.py`, so a task that lived only in url_health.py would be an unregistered name
+    at 04:30 every Sunday."""
+    from articles.tasks import check_stale_urls
+
+    assert check_stale_urls.name == "articles.tasks.check_stale_urls"
+
+
 @pytest.mark.parametrize("stage", sorted(STAGES))
 def test_every_stage_resolves_to_a_real_celery_task(stage):
     module_path, task_name = STAGES[stage]
