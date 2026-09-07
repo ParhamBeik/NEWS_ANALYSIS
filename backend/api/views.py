@@ -398,6 +398,32 @@ class ABPairViewSet(viewsets.ReadOnlyModelViewSet):
 # ---------------------------------------------------------------------------- dashboards
 
 
+class FeedStatsView(APIView):
+    """Lightweight counters for the feed header — not the full ops dashboard."""
+
+    def get(self, request):
+        since = window_start(request, default_days=1)
+        articles = Article.objects.filter(fetched_at__gte=since)
+        canonical_ids = set(
+            articles.filter(duplicate_of__isnull=True).values_list("id", flat=True)
+        )
+        return Response({
+            "funnel": {
+                "fetched": articles.count(),
+                "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
+            },
+            "notify": {
+                state: len(articles_with_decision(state) & canonical_ids)
+                for state in NotifyStatus.values
+            },
+            "budget": {
+                "spent_today_usd": budget.day_spend(),
+                "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
+            },
+            "provider_circuit": circuit.snapshot(),
+        })
+
+
 class OpsView(APIView):
     """The operational picture: what the pipeline did, what it cost, what broke."""
 

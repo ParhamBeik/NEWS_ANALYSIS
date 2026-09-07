@@ -91,7 +91,9 @@ UI chrome is English throughout; article title/lead/body are Persian and render 
   reviewer corrects rather than fills. Every approved row becomes truth for `/kpi`,
   few-shot examples for the next run, and part of the golden set.
 - **`/ab`** — blinded pairwise judging between prompt variants, with the position-bias
-  check reported alongside the standings.
+  check reported alongside the standings. On a fresh deploy only the control variant is
+  active; the A/B tab shows variant status and setup steps. Activate a second arm in Django
+  admin when you are ready for the doubled inference cost — see `seed_variants`.
 - **`/ops`** — the funnel, cost and tokens per day, node outcome rates, dead letters,
   prefilter effect, image status and per-source health.
 - **`/kpi`** — model-vs-human agreement, the notify confusion matrix, and the market

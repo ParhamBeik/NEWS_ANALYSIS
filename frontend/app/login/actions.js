@@ -20,6 +20,11 @@ function safeNext(next) {
   return target;
 }
 
+function firstError(body) {
+  if (!body || typeof body !== "object") return "";
+  return Object.values(body).flat().find(Boolean) || "";
+}
+
 async function storeToken(token) {
   (await cookies()).set("news_token", token, {
     httpOnly: true,
@@ -38,9 +43,12 @@ async function storeToken(token) {
  * of doing this in a server action rather than a client fetch.
  */
 export async function login(_previous, formData) {
-  const username = formData.get("username");
-  const password = formData.get("password");
+  const username = String(formData.get("username") || "").trim();
+  const password = String(formData.get("password") || "");
   const next = formData.get("next") || "/";
+
+  if (!username) return { error: "Enter your username." };
+  if (!password) return { error: "Enter your password." };
 
   let response;
   try {
@@ -56,7 +64,19 @@ export async function login(_previous, formData) {
     return { error: "Cannot reach the API. Is the backend running?" };
   }
 
-  if (!response.ok) return { error: "Incorrect username or password." };
+  if (!response.ok) {
+    if (response.status === 400) {
+      const message = firstError(await response.json().catch(() => null));
+      if (message) {
+        const lower = message.toLowerCase();
+        if (lower.includes("blank") || lower.includes("may not be null")) {
+          return { error: !username ? "Enter your username." : "Enter your password." };
+        }
+        return { error: message };
+      }
+    }
+    return { error: "Incorrect username or password." };
+  }
 
   const { token } = await response.json();
   await storeToken(token);
@@ -64,10 +84,16 @@ export async function login(_previous, formData) {
 }
 
 export async function signup(_previous, formData) {
-  const username = formData.get("username");
+  const username = String(formData.get("username") || "").trim();
   const email = formData.get("email");
-  const password = formData.get("password");
-  if (password !== formData.get("passwordConfirm")) {
+  const password = String(formData.get("password") || "");
+  const passwordConfirm = String(formData.get("passwordConfirm") || "");
+  const next = formData.get("next") || "/";
+
+  if (!username) return { error: "Enter a username." };
+  if (!password) return { error: "Enter a password." };
+  if (!passwordConfirm) return { error: "Confirm your password." };
+  if (password !== passwordConfirm) {
     return { error: "Passwords do not match." };
   }
 
@@ -85,10 +111,10 @@ export async function signup(_previous, formData) {
 
   const body = await response.json();
   if (!response.ok) {
-    const message = Object.values(body).flat().find(Boolean);
+    const message = firstError(body);
     return { error: message || "Could not create the account." };
   }
 
   await storeToken(body.token);
-  redirect("/");
+  redirect(safeNext(next));
 }

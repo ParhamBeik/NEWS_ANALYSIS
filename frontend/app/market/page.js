@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Card, EmptyState, Metric, SectionTitle } from "@/components/primitives";
+import { Card, EmptyState, Metric, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { number, percent, tehranTime } from "@/lib/display";
 
@@ -122,57 +122,59 @@ export default async function MarketPage({ searchParams }) {
             window, and a directional prediction that was not «خنثی» or «نامطمئن».
           </p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
-                <th className="pb-1">Article</th>
-                <th className="pb-1">Predicted</th>
-                <th className="pb-1 text-right">Impact</th>
-                <th className="pb-1 text-right">Window</th>
-                <th className="pb-1 text-right">Realised</th>
-                <th className="pb-1 text-right">Verdict</th>
-              </tr>
-            </thead>
-            <tbody>
-              {market.outcomes.map((row) => (
-                <tr key={row.id} className="border-t border-slate-800">
-                  <td className="py-1.5">
-                    <Link
-                      href={`/article/${row.article_id}`}
-                      className="text-emerald-500 hover:underline"
-                    >
-                      #{row.article_id}
-                    </Link>
-                  </td>
-                  <td className="persian py-1.5">
-                    <bdi>{row.gold_trend || "—"}</bdi>
-                  </td>
-                  <td className="persian py-1.5 text-right text-slate-400">
-                    <bdi>{row.gold_price_impact || "not assessed"}</bdi>
-                  </td>
-                  <td className="py-1.5 text-right tabular text-slate-500">
-                    {row.window_trading_days}d
-                  </td>
-                  <td
-                    className={`py-1.5 text-right tabular ${
-                      row.realized_pct > 0 ? "text-emerald-400" : "text-rose-400"
-                    }`}
-                  >
-                    {row.realized_pct?.toFixed(2)}%
-                  </td>
-                  <td className="py-1.5 text-right">
-                    {row.direction_correct === null ? (
-                      <span className="text-slate-600">not scored</span>
-                    ) : row.direction_correct ? (
-                      <span className="text-emerald-400">correct</span>
-                    ) : (
-                      <span className="text-rose-400">wrong</span>
-                    )}
-                  </td>
+          <TableScroll>
+            <table className="w-full min-w-[480px] text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
+                  <th className="pb-1">Article</th>
+                  <th className="pb-1">Predicted</th>
+                  <th className="hidden pb-1 text-right sm:table-cell">Impact</th>
+                  <th className="pb-1 text-right">Window</th>
+                  <th className="pb-1 text-right">Realised</th>
+                  <th className="pb-1 text-right">Verdict</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {market.outcomes.map((row) => (
+                  <tr key={row.id} className="border-t border-slate-800">
+                    <td className="py-1.5">
+                      <Link
+                        href={`/article/${row.article_id}`}
+                        className="text-emerald-500 hover:underline"
+                      >
+                        #{row.article_id}
+                      </Link>
+                    </td>
+                    <td className="persian py-1.5">
+                      <bdi>{row.gold_trend || "—"}</bdi>
+                    </td>
+                    <td className="persian hidden py-1.5 text-right text-slate-400 sm:table-cell">
+                      <bdi>{row.gold_price_impact || "not assessed"}</bdi>
+                    </td>
+                    <td className="py-1.5 text-right tabular text-slate-500">
+                      {row.window_trading_days}d
+                    </td>
+                    <td
+                      className={`py-1.5 text-right tabular ${
+                        row.realized_pct > 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {row.realized_pct?.toFixed(2)}%
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {row.direction_correct === null ? (
+                        <span className="text-slate-600">not scored</span>
+                      ) : row.direction_correct ? (
+                        <span className="text-emerald-400">correct</span>
+                      ) : (
+                        <span className="text-rose-400">wrong</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         )}
       </Card>
     </>

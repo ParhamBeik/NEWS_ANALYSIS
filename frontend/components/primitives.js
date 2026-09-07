@@ -6,6 +6,7 @@ import {
   TREND_STYLE,
   UNASSESSED_STYLE,
   levelIndex,
+  tehranTime,
 } from "@/lib/display";
 
 /**
@@ -139,6 +140,48 @@ export function EmptyState({ title, children }) {
     <Card className="p-10 text-center">
       <p className="text-slate-300">{title}</p>
       {children && <p className="mt-2 text-sm text-slate-500">{children}</p>}
+    </Card>
+  );
+}
+
+/** Horizontal scroll for tables on narrow viewports without breaking card layout. */
+export function TableScroll({ children, className = "" }) {
+  return (
+    <div className={`-mx-1 overflow-x-auto px-1 ${className}`}>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+const CIRCUIT_TONE = {
+  closed: "",
+  open_budget: "border-amber-900/60 bg-amber-950/20 text-amber-200/90",
+  open_errors: "border-rose-900/60 bg-rose-950/20 text-rose-200/90",
+  probing: "border-sky-900/60 bg-sky-950/20 text-sky-200/90",
+  stopped: "border-rose-900/60 bg-rose-950/20 text-rose-200/90",
+};
+
+/** Shown when the provider circuit has paused inference (e.g. empty wallet). */
+export function CircuitBanner({ circuit }) {
+  if (!circuit || circuit.state === "closed") return null;
+  const tone = CIRCUIT_TONE[circuit.state] || CIRCUIT_TONE.open_budget;
+  const isQuota =
+    circuit.error_kind === "budget" ||
+    /quota|insufficient|wallet|credit/i.test(circuit.reason || "");
+  return (
+    <Card className={`mb-6 p-4 text-sm ${tone}`}>
+      <p className="font-medium">Inference paused — classification is not running</p>
+      <p className="mt-1 text-xs opacity-90">
+        {isQuota
+          ? "The provider wallet has no usable quota. New articles may stay unclassified until an operator tops up the account. Crawling and the rest of the dashboard still work."
+          : circuit.reason ||
+            "The provider circuit is open. New LLM calls are blocked until the weekly probe succeeds."}
+      </p>
+      {circuit.next_probe_at && (
+        <p className="mt-2 text-[11px] opacity-70">
+          Next automatic wallet probe: {tehranTime(circuit.next_probe_at)}
+        </p>
+      )}
     </Card>
   );
 }
