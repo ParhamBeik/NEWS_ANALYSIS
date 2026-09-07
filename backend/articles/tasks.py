@@ -66,8 +66,13 @@ class RecordImageFailure(Task):
     """
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
-        article_id = kwargs.get("article_id", args[0] if args else None)
+        # Positional first: every production caller is `delay(article.pk)`.
+        article_id = args[0] if args else kwargs.get("article_id")
         if article_id is None:
+            logger.warning(
+                "image on_failure missing article_id task_id=%s args=%s kwargs=%s",
+                task_id, args, kwargs,
+            )
             return
         # `.update()` on PENDING only: one statement that cannot fail on a deleted row, and
         # that will not overwrite a STORED row if a later attempt won the race.

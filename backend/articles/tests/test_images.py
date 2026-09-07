@@ -92,6 +92,30 @@ def test_an_unreachable_host_stops_being_pending_once_retries_run_out(image_row,
 
 
 @pytest.mark.django_db
+def test_a_redirect_loop_stops_being_pending(image_row, monkeypatch):
+    """Unit: a Permanent the body does not name must still hit on_failure.
+
+    `open_checked` raises Permanent on a redirect loop. That is not Transient, so Celery
+    does not retry it, and download_image does not catch it - the row would stay PENDING
+    unless the base-class hook is actually wired.
+    """
+    from articles.models import ArticleImage, ImageStatus
+    from articles.tasks import download_image
+    from core.errors import Permanent
+
+    def loop(*args, **kwargs):
+        raise Permanent("more than 5 redirects")
+
+    monkeypatch.setattr("articles.tasks.open_checked", loop)
+    result = download_image.apply(args=[image_row.article_id], throw=False)
+
+    assert result.failed()
+    stored = ArticleImage.objects.get(pk=image_row.pk)
+    assert stored.status == ImageStatus.FAILED
+    assert "redirects" in stored.error
+
+
+@pytest.mark.django_db
 def test_giving_up_never_overwrites_an_image_that_was_already_stored(image_row):
     """A late failure must not undo a success. `on_failure` fires outside the task body,
     so it is the one place that can reach a row another attempt has already finished."""
