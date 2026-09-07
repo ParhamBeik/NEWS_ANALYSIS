@@ -88,7 +88,11 @@ def check_url(url: str) -> None:
 
 
 def open_checked(
-    session: requests.Session, url: str, *, timeout: int, stream: bool = False
+    session: requests.Session,
+    url: str,
+    *,
+    timeout: int | tuple[int, int],
+    stream: bool = False,
 ) -> requests.Response:
     """GET `url`, validating it and every redirect target it leads to.
 
