@@ -7,7 +7,7 @@ from datetime import timedelta
 from io import BytesIO
 
 import requests
-from celery import shared_task
+from celery import Task, shared_task
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
@@ -46,7 +46,45 @@ def _encode(image: Image.Image, size: tuple[int, int]) -> ContentFile:
     return ContentFile(buffer.getvalue())
 
 
+class RecordImageFailure(Task):
+    """Write a terminal status when `download_image` gives up.
+
+    Every failure the task *handles* already marks the row - GONE for a 404, FAILED for an
+    oversized or undecodable body, FAILED for a refused address. The two that escaped were
+    the ones that leave by raising: a `Transient` whose retries ran out, and a `Permanent`
+    that no handler names (a redirect loop). Those left the row PENDING, which is the same
+    state a never-queued image has, so `download_pending_images` could not tell "not tried
+    yet" from "tried three times and unreachable" and re-queued the second kind forever.
+    Measured on the VPS: 601 rows for one dead CDN, 0% ever stored across four days, three
+    20-second connects each, re-queued every hour - about 86% of the crawl pool's capacity
+    spent proving the same host was still down, while newer images from reachable hosts
+    were never reached at all.
+
+    Celery calls this only when the task has finally failed, so putting it here covers
+    every raising path including ones nobody has written yet, which is the property the
+    per-handler version did not have.
+    """
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        # Positional first: every production caller is `delay(article.pk)`.
+        article_id = args[0] if args else kwargs.get("article_id")
+        if article_id is None:
+            logger.warning(
+                "image on_failure missing article_id task_id=%s args=%s kwargs=%s",
+                task_id, args, kwargs,
+            )
+            return
+        # `.update()` on PENDING only: one statement that cannot fail on a deleted row, and
+        # that will not overwrite a STORED row if a later attempt won the race.
+        updated = ArticleImage.objects.filter(
+            article_id=article_id, status=ImageStatus.PENDING
+        ).update(status=ImageStatus.FAILED, error=f"{type(exc).__name__}: {exc}"[:500])
+        if updated:
+            log_action("image.failed", "failed", article=article_id, error=str(exc)[:200])
+
+
 @shared_task(
+    base=RecordImageFailure,
     name="articles.tasks.download_image",
     autoretry_for=(Transient,),
     retry_backoff=True,
@@ -68,7 +106,13 @@ def download_image(article_id: int) -> dict:
 
     session = build_session()
     try:
-        response = open_checked(session, record.source_url, timeout=20, stream=True)
+        # (connect, read), not one number for both. A dead host costs the full connect
+        # timeout on all three attempts, and every CDN that actually answers connects in
+        # under a third of a second - measured across the twelve hosts in use, the slowest
+        # is 0.32s. Five seconds is generous for the handshake and caps what an unreachable
+        # host can spend; the read budget stays at 20s because a slow large image is a
+        # different thing from a host that is gone.
+        response = open_checked(session, record.source_url, timeout=(5, 20), stream=True)
         try:
             if response.status_code in GONE_HTTP:
                 record.status = ImageStatus.GONE
@@ -142,7 +186,16 @@ def download_pending_images(limit: int = 200) -> dict:
     article; this is what makes that safe - the row stays PENDING and gets picked up here
     instead of being lost.
     """
-    pending = ArticleImage.objects.filter(status=ImageStatus.PENDING).exclude(source_url="")
+    # Ordered, because `LIMIT` without `ORDER BY` is whatever order Postgres finds cheapest
+    # - in practice the same physical rows every hour. With one CDN stuck PENDING that made
+    # this sweep pick the identical 200 dead rows 24 times a day and never once reach the
+    # 81 live ones behind them. Newest first: this is a news product, and a picture for
+    # today's story is worth more than one for a story from four days ago.
+    pending = (
+        ArticleImage.objects.filter(status=ImageStatus.PENDING)
+        .exclude(source_url="")
+        .order_by("-article_id")
+    )
     article_ids = list(pending.values_list("article_id", flat=True)[:limit])
     for article_id in article_ids:
         download_image.delay(article_id)
