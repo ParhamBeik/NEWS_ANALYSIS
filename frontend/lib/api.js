@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 /**
@@ -19,6 +19,14 @@ import { redirect } from "next/navigation";
 
 const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 
+async function loginRedirect() {
+  const pathname = (await headers()).get("x-pathname");
+  if (pathname && pathname !== "/login" && pathname !== "/signup") {
+    redirect(`/login?next=${encodeURIComponent(pathname)}`);
+  }
+  redirect("/login");
+}
+
 export async function apiFetch(path, options = {}) {
   const token = (await cookies()).get("news_token")?.value;
   const response = await fetch(`${API_ORIGIN}${path}`, {
@@ -36,7 +44,7 @@ export async function apiFetch(path, options = {}) {
 /** Fetch JSON, sending an expired or missing session back to the login screen. */
 export async function apiGet(path) {
   const response = await apiFetch(path);
-  if (response.status === 401 || response.status === 403) redirect("/login");
+  if (response.status === 401 || response.status === 403) await loginRedirect();
   if (response.status === 204) return null;
   if (!response.ok) {
     throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
@@ -46,7 +54,7 @@ export async function apiGet(path) {
 
 export async function apiPost(path, body) {
   const response = await apiFetch(path, { method: "POST", body: JSON.stringify(body) });
-  if (response.status === 401 || response.status === 403) redirect("/login");
+  if (response.status === 401 || response.status === 403) await loginRedirect();
   if (!response.ok) {
     throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
   }

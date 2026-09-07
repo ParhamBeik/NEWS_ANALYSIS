@@ -16,14 +16,34 @@ import { NextResponse } from "next/server";
 
 const PUBLIC = ["/login", "/signup", "/_next", "/favicon.ico"];
 
+function safeNext(next) {
+  if (typeof next !== "string" || !next.startsWith("/")) return "/";
+  if (next.startsWith("//") || next.startsWith("/\\")) return "/";
+  return next;
+}
+
+function withPathname(request, pathname) {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", pathname);
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
 export function middleware(request) {
   const { pathname } = request.nextUrl;
-  if (PUBLIC.some((prefix) => pathname.startsWith(prefix))) return NextResponse.next();
-  if (request.cookies.get("news_token")) return NextResponse.next();
+  const hasToken = Boolean(request.cookies.get("news_token"));
+
+  if (PUBLIC.some((prefix) => pathname.startsWith(prefix))) {
+    if (hasToken && (pathname.startsWith("/login") || pathname.startsWith("/signup"))) {
+      const next = safeNext(request.nextUrl.searchParams.get("next"));
+      return NextResponse.redirect(new URL(next, request.url));
+    }
+    return withPathname(request, pathname);
+  }
+
+  if (hasToken) return withPathname(request, pathname);
 
   const target = request.nextUrl.clone();
   target.pathname = "/login";
-  // Remember where they were headed, so a bookmarked article survives the login.
   target.search = pathname === "/" ? "" : `?next=${encodeURIComponent(pathname)}`;
   return NextResponse.redirect(target);
 }

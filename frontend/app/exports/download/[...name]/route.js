@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { redirect } from "next/navigation";
 
 /**
  * Stream a workbook from Django through Next.
@@ -18,6 +19,9 @@ export async function GET(request, { params }) {
   const segments = Array.isArray(name) ? name : [name];
   const path = segments.map(encodeURIComponent).join("/");
   const upstream = await apiFetch(`/api/exports/${path}/`);
+  if (upstream.status === 401 || upstream.status === 403) {
+    redirect("/login?next=" + encodeURIComponent("/exports"));
+  }
   if (!upstream.ok) {
     return new Response("Not found", { status: upstream.status });
   }

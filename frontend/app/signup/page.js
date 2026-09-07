@@ -3,17 +3,24 @@ import SignupForm from "./SignupForm";
 
 export const metadata = { title: "Create account · News Intelligence" };
 
-export default function SignupPage() {
+export default async function SignupPage({ searchParams }) {
+  const params = await searchParams;
+  const next = params?.next || "/";
+  const loginHref =
+    next && next !== "/"
+      ? `/login?next=${encodeURIComponent(next)}`
+      : "/login";
+
   return (
-    <div className="mx-auto mt-24 max-w-sm">
+    <div className="mx-auto mt-24 max-w-sm px-3">
       <h1 className="text-xl font-semibold text-slate-100">Create account</h1>
       <p className="mt-1 mb-6 text-sm text-slate-500">
         Join the News Intelligence workspace.
       </p>
-      <SignupForm />
+      <SignupForm next={next} />
       <p className="mt-4 text-center text-sm text-slate-500">
         Already registered?{" "}
-        <Link href="/login" className="text-emerald-400 hover:underline">
+        <Link href={loginHref} className="text-emerald-400 hover:underline">
           Sign in
         </Link>
       </p>

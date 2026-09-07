@@ -1,4 +1,4 @@
-import { Card, Metric, SectionTitle } from "@/components/primitives";
+import { Card, CircuitBanner, Metric, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { money, number, percent, tehranTime } from "@/lib/display";
 
@@ -43,7 +43,7 @@ export default async function OpsPage({ searchParams }) {
             throughput alone lets a runaway run look healthy.
           </p>
         </div>
-        <div className="flex gap-1 text-xs">
+        <div className="flex flex-wrap gap-1 text-xs">
           {[1, 7, 14, 30].map((option) => (
             <a
               key={option}
@@ -59,6 +59,8 @@ export default async function OpsPage({ searchParams }) {
           ))}
         </div>
       </div>
+
+      <CircuitBanner circuit={ops.provider_circuit} />
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Metric
@@ -92,9 +94,9 @@ export default async function OpsPage({ searchParams }) {
               ["Evaluated", funnel.evaluated, "bg-emerald-500"],
             ].map(([label, value, tone]) => (
               <div key={label}>
-                <div className="mb-1 flex justify-between text-xs">
-                  <span className="text-slate-400">{label}</span>
-                  <span className="tabular text-slate-300">
+                <div className="mb-1 flex justify-between gap-2 text-xs">
+                  <span className="min-w-0 text-slate-400">{label}</span>
+                  <span className="shrink-0 tabular text-slate-300">
                     {number(value)}{" "}
                     <span className="text-slate-600">
                       {funnel.fetched ? percent(value / funnel.fetched, 0) : ""}
@@ -128,17 +130,17 @@ export default async function OpsPage({ searchParams }) {
           ) : (
             <div className="space-y-1.5">
               {ops.cost_by_day.map((row) => (
-                <div key={row.day} className="flex items-center gap-3 text-xs">
-                  <span className="w-20 shrink-0 tabular text-slate-500">{row.day}</span>
+                <div key={row.day} className="flex items-center gap-2 text-xs sm:gap-3">
+                  <span className="w-16 shrink-0 tabular text-slate-500 sm:w-20">{row.day}</span>
                   <Bar
                     value={row.cost}
                     max={maxCost}
                     tone={row.cost > budget.daily_ceiling_usd ? "bg-rose-500" : "bg-emerald-500"}
                   />
-                  <span className="w-16 shrink-0 text-right tabular text-slate-300">
+                  <span className="w-14 shrink-0 text-right tabular text-slate-300 sm:w-16">
                     {money(row.cost)}
                   </span>
-                  <span className="w-12 shrink-0 text-right tabular text-slate-600">
+                  <span className="hidden w-12 shrink-0 text-right tabular text-slate-600 sm:inline">
                     {number(row.calls)}
                   </span>
                 </div>
@@ -151,29 +153,31 @@ export default async function OpsPage({ searchParams }) {
           <SectionTitle hint="reachability is measured, not assumed">
             Source health
           </SectionTitle>
-          <table className="w-full text-sm">
-            <tbody>
-              {ops.sources.map((source) => (
-                <tr key={source.name} className="border-t border-slate-800">
-                  <td className="py-2">
-                    <div className="text-slate-200">{source.name}</div>
-                    <div className="text-[11px] text-slate-600">
-                      {source.strategy} · tier {source.tier}
-                      {!source.supports_backfill && " · no archive backfill"}
-                    </div>
-                  </td>
-                  <td className="py-2 text-right">
-                    <div className={HEALTH_TONE[source.health_status] || "text-slate-400"}>
-                      {source.enabled ? source.health_status : "disabled"}
-                    </div>
-                    <div className="text-[11px] text-slate-600">
-                      {tehranTime(source.last_success_at)}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TableScroll>
+            <table className="w-full min-w-[280px] text-sm">
+              <tbody>
+                {ops.sources.map((source) => (
+                  <tr key={source.name} className="border-t border-slate-800">
+                    <td className="py-2 pr-2">
+                      <div className="text-slate-200">{source.name}</div>
+                      <div className="text-[11px] leading-snug text-slate-600">
+                        {source.strategy} · tier {source.tier}
+                        {!source.supports_backfill && " · no archive backfill"}
+                      </div>
+                    </td>
+                    <td className="py-2 text-right">
+                      <div className={HEALTH_TONE[source.health_status] || "text-slate-400"}>
+                        {source.enabled ? source.health_status : "disabled"}
+                      </div>
+                      <div className="text-[11px] text-slate-600">
+                        {tehranTime(source.last_success_at)}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         </Card>
 
         <Card className="p-4">
@@ -183,17 +187,19 @@ export default async function OpsPage({ searchParams }) {
           {failures.length === 0 ? (
             <p className="text-sm text-emerald-400">No failures in this window.</p>
           ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {failures.map((row) => (
-                  <tr key={`${row.node}-${row.status}`} className="border-t border-slate-800">
-                    <td className="py-1.5 text-slate-300">{row.node}</td>
-                    <td className="py-1.5 text-slate-500">{row.status}</td>
-                    <td className="py-1.5 text-right tabular text-amber-400">{row.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <TableScroll>
+              <table className="w-full min-w-[240px] text-sm">
+                <tbody>
+                  {failures.map((row) => (
+                    <tr key={`${row.node}-${row.status}`} className="border-t border-slate-800">
+                      <td className="py-1.5 text-slate-300">{row.node}</td>
+                      <td className="py-1.5 text-slate-500">{row.status}</td>
+                      <td className="py-1.5 text-right tabular text-amber-400">{row.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableScroll>
           )}
           {ops.dead_letters.length > 0 && (
             <>
@@ -203,21 +209,18 @@ export default async function OpsPage({ searchParams }) {
               {ops.dead_letters.map((row) => (
                 <div
                   key={`${row.node}-${row.error_class}`}
-                  className="flex justify-between border-t border-slate-800 py-1.5 text-xs"
+                  className="flex justify-between gap-2 border-t border-slate-800 py-1.5 text-xs"
                 >
-                  <span className="text-slate-400">
+                  <span className="min-w-0 text-slate-400">
                     {row.node} · {row.error_class}
                   </span>
-                  <span className="tabular text-slate-300">{row.count}</span>
+                  <span className="shrink-0 tabular text-slate-300">{row.count}</span>
                 </div>
               ))}
             </>
           )}
         </Card>
 
-        {/* The prefilter is the one change that can silently lose a story, so its effect is
-            reported rather than assumed. `articles` is the evidence you'd need to justify
-            turning a rule back off. */}
         <Card className="p-4">
           <SectionTitle hint="the only change that can silently lose a story">
             Prefilter audit
@@ -227,31 +230,33 @@ export default async function OpsPage({ searchParams }) {
               No rules defined. Every article reaches inference.
             </p>
           ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {ops.prefilter_rules.map((rule) => (
-                  <tr
-                    key={`${rule.source}-${rule.native_category}`}
-                    className="border-t border-slate-800"
-                  >
-                    <td className="py-1.5">
-                      <span className="text-slate-300">{rule.source}</span>
-                      <span className="text-slate-600"> / {rule.native_category}</span>
-                    </td>
-                    <td className="py-1.5 text-right tabular text-slate-400">
-                      {number(rule.articles)}
-                    </td>
-                    <td className="py-1.5 pl-3 text-right">
-                      <span
-                        className={rule.enabled ? "text-amber-400" : "text-slate-600"}
-                      >
-                        {rule.enabled ? "skipping" : "off"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <TableScroll>
+              <table className="w-full min-w-[280px] text-sm">
+                <tbody>
+                  {ops.prefilter_rules.map((rule) => (
+                    <tr
+                      key={`${rule.source}-${rule.native_category}`}
+                      className="border-t border-slate-800"
+                    >
+                      <td className="py-1.5 pr-2">
+                        <span className="text-slate-300">{rule.source}</span>
+                        <span className="text-slate-600"> / {rule.native_category}</span>
+                      </td>
+                      <td className="py-1.5 text-right tabular text-slate-400">
+                        {number(rule.articles)}
+                      </td>
+                      <td className="py-1.5 pl-2 text-right sm:pl-3">
+                        <span
+                          className={rule.enabled ? "text-amber-400" : "text-slate-600"}
+                        >
+                          {rule.enabled ? "skipping" : "off"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableScroll>
           )}
         </Card>
 
@@ -261,8 +266,8 @@ export default async function OpsPage({ searchParams }) {
           </SectionTitle>
           <div className="space-y-1.5">
             {ops.extraction_tiers.map((row) => (
-              <div key={row.extraction_tier} className="flex items-center gap-3 text-xs">
-                <span className="w-20 shrink-0 text-slate-400">
+              <div key={row.extraction_tier} className="flex items-center gap-2 text-xs sm:gap-3">
+                <span className="w-16 shrink-0 text-slate-400 sm:w-20">
                   {row.extraction_tier || "unknown"}
                 </span>
                 <Bar
@@ -284,39 +289,47 @@ export default async function OpsPage({ searchParams }) {
 
         <Card className="p-4 lg:col-span-2">
           <SectionTitle>Recent runs</SectionTitle>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
-                <th className="pb-1">Run</th>
-                <th className="pb-1">Started</th>
-                <th className="pb-1 text-right">Fetched</th>
-                <th className="pb-1 text-right">Processed</th>
-                <th className="pb-1 text-right">Cost</th>
-                <th className="pb-1 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ops.recent_runs.map((run) => (
-                <tr key={run.run_id} className="border-t border-slate-800">
-                  <td className="py-1.5 font-mono text-xs text-slate-400">{run.run_id}</td>
-                  <td className="py-1.5 text-xs text-slate-500">
-                    {tehranTime(run.started_at)}
-                  </td>
-                  <td className="py-1.5 text-right tabular">{run.articles_fetched}</td>
-                  <td className="py-1.5 text-right tabular">{run.articles_processed}</td>
-                  <td className="py-1.5 text-right tabular">{money(run.cost_usd)}</td>
-                  <td
-                    className={`py-1.5 text-right text-xs ${
-                      run.status === "failed" ? "text-rose-400" : "text-slate-400"
-                    }`}
-                    title={run.error || ""}
-                  >
-                    {run.status}
-                  </td>
+          <TableScroll>
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
+                  <th className="pb-1">Run</th>
+                  <th className="pb-1">Started</th>
+                  <th className="hidden pb-1 text-right sm:table-cell">Fetched</th>
+                  <th className="hidden pb-1 text-right md:table-cell">Processed</th>
+                  <th className="pb-1 text-right">Cost</th>
+                  <th className="pb-1 text-right">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {ops.recent_runs.map((run) => (
+                  <tr key={run.run_id} className="border-t border-slate-800">
+                    <td className="max-w-[9rem] truncate py-1.5 font-mono text-xs text-slate-400 sm:max-w-none">
+                      {run.run_id}
+                    </td>
+                    <td className="whitespace-nowrap py-1.5 text-xs text-slate-500">
+                      {tehranTime(run.started_at)}
+                    </td>
+                    <td className="hidden py-1.5 text-right tabular sm:table-cell">
+                      {run.articles_fetched}
+                    </td>
+                    <td className="hidden py-1.5 text-right tabular md:table-cell">
+                      {run.articles_processed}
+                    </td>
+                    <td className="py-1.5 text-right tabular">{money(run.cost_usd)}</td>
+                    <td
+                      className={`py-1.5 text-right text-xs ${
+                        run.status === "failed" ? "text-rose-400" : "text-slate-400"
+                      }`}
+                      title={run.error || ""}
+                    >
+                      {run.status}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         </Card>
       </div>
     </>

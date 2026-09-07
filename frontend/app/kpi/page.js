@@ -1,4 +1,4 @@
-import { Card, Metric, SectionTitle } from "@/components/primitives";
+import { Card, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { AXIS_LABEL, number, percent } from "@/lib/display";
 
@@ -54,7 +54,8 @@ export default async function KPIPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-4">
           <SectionTitle hint="both sides assessed only">Axis agreement</SectionTitle>
-          <table className="w-full text-sm">
+          <TableScroll>
+            <table className="w-full min-w-[280px] text-sm">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
                 <th className="pb-1">Axis</th>
@@ -78,6 +79,7 @@ export default async function KPIPage() {
               ))}
             </tbody>
           </table>
+          </TableScroll>
           <p className="mt-3 text-[11px] text-slate-600">
             The scale is ordinal, so ±1 is the honest headline: «زیاد» against «خیلی زیاد» is
             a far smaller error than «زیاد» against «خیلی کم», and exact-match hides that.

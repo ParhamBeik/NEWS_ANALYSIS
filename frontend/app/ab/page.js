@@ -1,5 +1,5 @@
 import AsyncPanel, { Skeleton } from "@/components/AsyncPanel";
-import { Card, SectionTitle } from "@/components/primitives";
+import { Card, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { percent } from "@/lib/display";
 import ABLab from "./ABLab";
@@ -12,6 +12,75 @@ async function Judging() {
   return <ABLab initialPair={pair} />;
 }
 
+async function VariantSetup() {
+  const data = await apiGet("/api/variants/?limit=20");
+  const variants = data.results ?? data;
+  const active = variants.filter((row) => row.is_active);
+  const inactive = variants.filter((row) => !row.is_active);
+  const ready = active.length >= 2;
+
+  return (
+    <Card className="p-4">
+      <SectionTitle hint={`${active.length} active · costs ~${active.length}× per cycle`}>
+        Prompt variants
+      </SectionTitle>
+      {variants.length === 0 ? (
+        <p className="text-sm text-slate-500">
+          No variants seeded yet. Run{" "}
+          <code className="text-slate-400">python manage.py seed_variants</code> on the
+          backend (creates control + inactive challengers; no API spend).
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-2 text-sm">
+            {variants.map((variant) => (
+              <li
+                key={variant.id}
+                className="flex items-start justify-between gap-2 border-t border-slate-800 pt-2 first:border-0 first:pt-0"
+              >
+                <div className="min-w-0">
+                  <span className="text-slate-200">{variant.name}</span>
+                  <span className="text-slate-600"> · {variant.memory_strategy}</span>
+                  {variant.description && (
+                    <p className="mt-0.5 text-[11px] leading-snug text-slate-600">
+                      {variant.description}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className={`shrink-0 text-xs ${
+                    variant.is_active ? "text-emerald-400" : "text-slate-600"
+                  }`}
+                >
+                  {variant.is_active ? "active" : "inactive"}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {!ready && (
+            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/40 p-4 text-sm">
+              <p className="text-slate-300">A/B lab is waiting for a second active arm.</p>
+              <p className="mt-2 text-xs text-slate-500">
+                Only <span className="text-slate-300">{active[0]?.name || "control"}</span> is
+                active. Activate one challenger in Django admin when you are ready to spend
+                roughly double inference cost, run a cycle, then wait for the hourly{" "}
+                <code className="text-slate-400">build-ab-pairs</code> task.
+                {inactive.length > 0 && (
+                  <>
+                    {" "}
+                    Inactive arms ready to enable:{" "}
+                    {inactive.map((row) => row.name).join(", ")}.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 /**
  * The standings and the bias check, in their own boundary.
  *
@@ -22,9 +91,6 @@ async function Judging() {
 async function Standings() {
   const results = await apiGet("/api/ab/pairs/results/");
   const bias = results.position_bias.left_share_of_decided;
-  // 0.5 is unbiased. Flagging past 0.65 rather than at any deviation: with a handful of
-  // judgements a run of three lefts is noise, and a warning that cries wolf gets ignored
-  // exactly when it starts being true.
   const biased = bias !== null && Math.abs(bias - 0.5) > 0.15 && results.judgements >= 10;
 
   return (
@@ -36,38 +102,38 @@ async function Standings() {
             No judgements yet. Standings appear once you have judged a pair.
           </p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
-                <th className="pb-1">Variant</th>
-                <th className="pb-1 text-right">Win rate</th>
-                <th className="pb-1 text-right">n</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.standings.map((row) => (
-                <tr key={row.variant} className="border-t border-slate-800">
-                  <td className="py-1.5">
-                    <div className="text-slate-200">{row.variant}</div>
-                    <div className="text-[11px] text-slate-600">
-                      {row.model} · {row.memory_strategy}
-                    </div>
-                  </td>
-                  <td className="py-1.5 text-right tabular text-emerald-400">
-                    {percent(row.win_rate)}
-                  </td>
-                  <td className="py-1.5 text-right tabular text-slate-500">
-                    {row.appearances}
-                  </td>
+          <TableScroll>
+            <table className="w-full min-w-[240px] text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
+                  <th className="pb-1">Variant</th>
+                  <th className="pb-1 text-right">Win rate</th>
+                  <th className="pb-1 text-right">n</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {results.standings.map((row) => (
+                  <tr key={row.variant} className="border-t border-slate-800">
+                    <td className="py-1.5">
+                      <div className="text-slate-200">{row.variant}</div>
+                      <div className="text-[11px] text-slate-600">
+                        {row.model} · {row.memory_strategy}
+                      </div>
+                    </td>
+                    <td className="py-1.5 text-right tabular text-emerald-400">
+                      {percent(row.win_rate)}
+                    </td>
+                    <td className="py-1.5 text-right tabular text-slate-500">
+                      {row.appearances}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
         )}
       </Card>
 
-      {/* Reporting wins without this number would be dishonest: a reviewer who picks the
-          left card regardless of content produces standings that measure the layout. */}
       <Card className={`p-4 ${biased ? "border-amber-900/60 bg-amber-950/20" : ""}`}>
         <SectionTitle>Position bias</SectionTitle>
         <p className="text-sm text-slate-400">
@@ -100,16 +166,31 @@ export default async function ABPage() {
       </div>
 
       <aside className="space-y-4">
+        <AsyncPanel label="Variant setup" fallback={<Skeleton className="h-40 w-full" />}>
+          <VariantSetup />
+        </AsyncPanel>
+
         <AsyncPanel label="Standings" fallback={<Skeleton className="h-56 w-full" />}>
           <Standings />
         </AsyncPanel>
 
         <Card className="p-4 text-xs text-slate-500">
           <SectionTitle>How pairs are made</SectionTitle>
-          Activate a second variant with <code className="text-slate-400">seed_variants</code>{" "}
-          so both arms answer every article. An hourly task then pairs any article both arms
-          have evaluated. Each active arm roughly doubles cost per cycle, which is why only
-          the control ships active.
+          <ol className="mt-2 list-decimal space-y-1.5 pl-4">
+            <li>
+              <code className="text-slate-400">seed_variants</code> creates control (active)
+              plus inactive challengers — safe on a fresh deploy, no API calls.
+            </li>
+            <li>
+              When ready, activate a second variant in admin. Each active arm answers every
+              article (~double cost per cycle).
+            </li>
+            <li>
+              Run inference, then wait for the hourly{" "}
+              <code className="text-slate-400">build-ab-pairs</code> task to pair articles
+              both arms evaluated.
+            </li>
+          </ol>
         </Card>
       </aside>
     </div>

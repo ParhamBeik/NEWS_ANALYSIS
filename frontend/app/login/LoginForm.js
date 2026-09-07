@@ -22,22 +22,39 @@ export default function LoginForm({ next }) {
   return (
     <form action={action} className="space-y-3">
       <input type="hidden" name="next" value={next} />
-      <input
-        name="username"
-        autoComplete="username"
-        autoFocus
-        placeholder="Username"
-        className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-emerald-600"
-      />
-      <input
-        name="password"
-        type="password"
-        autoComplete="current-password"
-        placeholder="Password"
-        className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-emerald-600"
-      />
+      <div>
+        <label htmlFor="username" className="sr-only">
+          Username
+        </label>
+        <input
+          id="username"
+          name="username"
+          autoComplete="username"
+          autoFocus
+          required
+          placeholder="Username"
+          className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+        />
+      </div>
+      <div>
+        <label htmlFor="password" className="sr-only">
+          Password
+        </label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autoComplete="current-password"
+          required
+          placeholder="Password"
+          className="w-full rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+        />
+      </div>
       {state?.error && (
-        <p className="rounded-lg border border-rose-900 bg-rose-950 px-3 py-2 text-xs text-rose-300">
+        <p
+          role="alert"
+          className="rounded-lg border border-rose-900 bg-rose-950 px-3 py-2 text-xs text-rose-300"
+        >
           {state.error}
         </p>
       )}

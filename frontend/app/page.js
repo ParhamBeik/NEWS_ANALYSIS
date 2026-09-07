@@ -2,7 +2,7 @@ import Link from "next/link";
 import ArticleCard from "@/components/ArticleCard";
 import AsyncPanel, { Skeleton } from "@/components/AsyncPanel";
 import FeedFilters from "@/components/FeedFilters";
-import { EmptyState, Metric } from "@/components/primitives";
+import { CircuitBanner, EmptyState, Metric } from "@/components/primitives";
 import { apiGet, query } from "@/lib/api";
 import { money, number } from "@/lib/display";
 
@@ -42,31 +42,37 @@ function pageHref(params, offset) {
 /**
  * The four header numbers, on their own.
  *
- * `/api/ops/` is the most expensive endpoint in the app - roughly fifteen aggregates, one
- * of which walks the latest evaluation of every article ever stored. Awaiting it before
- * showing the feed meant the primary page paid the dashboard's cost on every load, to
- * print four integers.
+ * Uses `/api/feed-stats/` — a lightweight aggregate — instead of the full `/api/ops/`
+ * dashboard document, which walks fifteen aggregates including source health and recent
+ * runs just to print four integers.
  */
 async function FeedMetrics() {
-  const ops = await apiGet("/api/ops/?days=1");
-  const notified = ops.notify?.["اطلاع‌رسانی شود"] ?? 0;
-  const spend = ops.budget.spent_today_usd;
+  const stats = await apiGet("/api/feed-stats/?days=1");
+  const notified = stats.notify?.["اطلاع‌رسانی شود"] ?? 0;
+  const spend = stats.budget.spent_today_usd;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <Metric label="Fetched (24h)" value={number(ops.funnel.fetched)} />
-      <Metric label="Analysed (24h)" value={number(ops.funnel.evaluated)} />
-      <Metric
-        label="Flagged notify (24h)"
-        value={number(notified)}
-        tone={notified ? "text-emerald-400" : ""}
-      />
-      <Metric
-        label="Spend today"
-        value={money(spend)}
-        hint={`ceiling ${money(ops.budget.daily_ceiling_usd, 2)}`}
-        tone={spend > ops.budget.daily_ceiling_usd * 0.8 ? "text-amber-400" : ""}
-      />
-    </div>
+    <>
+      {stats.provider_circuit && (
+        <div className="mb-4">
+          <CircuitBanner circuit={stats.provider_circuit} />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric label="Fetched (24h)" value={number(stats.funnel.fetched)} />
+        <Metric label="Analysed (24h)" value={number(stats.funnel.evaluated)} />
+        <Metric
+          label="Flagged notify (24h)"
+          value={number(notified)}
+          tone={notified ? "text-emerald-400" : ""}
+        />
+        <Metric
+          label="Spend today"
+          value={money(spend)}
+          hint={`ceiling ${money(stats.budget.daily_ceiling_usd, 2)}`}
+          tone={spend > stats.budget.daily_ceiling_usd * 0.8 ? "text-amber-400" : ""}
+        />
+      </div>
+    </>
   );
 }
 
@@ -121,7 +127,7 @@ async function FeedList({ params, offset }) {
         </div>
       )}
 
-      <div className="mt-6 flex items-center justify-between text-sm">
+      <div className="mt-6 flex items-center justify-between gap-2 text-sm">
         {offset > 0 ? (
           <Link
             href={pageHref(params, Math.max(0, offset - PAGE_SIZE))}
@@ -132,7 +138,7 @@ async function FeedList({ params, offset }) {
         ) : (
           <span />
         )}
-        <span className="text-xs text-slate-600 tabular">
+        <span className="text-center text-xs text-slate-600 tabular">
           {feed.count
             ? `${offset + 1}–${Math.min(offset + PAGE_SIZE, feed.count)} of ${feed.count}`
             : ""}
@@ -156,10 +162,6 @@ export default async function FeedPage({ searchParams }) {
   const params = (await searchParams) || {};
   const offset = Number(params.offset || 0);
 
-  // Three independent regions, three boundaries. They start fetching together - siblings
-  // suspend in parallel - so this is no slower than the old Promise.all, but the heading
-  // and whichever region answers first paint immediately instead of waiting for the rest,
-  // and a failure is contained to the panel that failed.
   return (
     <>
       <div className="mb-6">

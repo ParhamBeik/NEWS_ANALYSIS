@@ -1,4 +1,4 @@
-import { Card, EmptyState, SectionTitle } from "@/components/primitives";
+import { Card, EmptyState, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { tehranTime } from "@/lib/display";
 
@@ -34,7 +34,8 @@ export default async function ExportsPage() {
           <SectionTitle hint={`${files.length} file${files.length === 1 ? "" : "s"}`}>
             Available
           </SectionTitle>
-          <table className="w-full text-sm">
+          <TableScroll>
+            <table className="w-full min-w-[280px] text-sm">
             <tbody>
               {files.map((file) => (
                 <tr key={file.name} className="border-t border-slate-800">
@@ -62,6 +63,7 @@ export default async function ExportsPage() {
               ))}
             </tbody>
           </table>
+          </TableScroll>
         </Card>
       )}
     </>

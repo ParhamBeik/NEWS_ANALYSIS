@@ -85,11 +85,21 @@ class TestAuthentication:
 
     @pytest.mark.parametrize(
         "path",
-        ["/api/articles/", "/api/ops/", "/api/kpi/", "/api/market/",
+        ["/api/articles/", "/api/feed-stats/", "/api/ops/", "/api/kpi/", "/api/market/",
          "/api/exports/", "/api/ab/pairs/", "/api/reviews/", "/api/sources/"],
     )
     def test_everything_else_requires_login(self, db, path):
         assert APIClient().get(path).status_code in {401, 403}
+
+    def test_empty_login_credentials_return_field_errors(self, db):
+        response = APIClient().post(
+            "/api/auth/token/",
+            {"username": "", "password": ""},
+            format="json",
+        )
+        assert response.status_code == 400
+        body = response.json()
+        assert "username" in body or "password" in body or "non_field_errors" in body
 
 
 class TestFeed:
