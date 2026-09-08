@@ -43,7 +43,16 @@ def _queue_image(article) -> int:
     image = getattr(article, "image", None)
     if image is None or not image.source_url or image.status == ImageStatus.STORED:
         return 0
-    from articles.tasks import download_image
+    from articles.models import ArticleImage
+    from articles.tasks import _image_host, download_image, image_host_is_dead
+
+    host = _image_host(image.source_url)
+    if image_host_is_dead(host):
+        ArticleImage.objects.filter(pk=image.pk, status=ImageStatus.PENDING).update(
+            status=ImageStatus.FAILED,
+            error=f"skipped: host {host} recently unreachable",
+        )
+        return 0
 
     try:
         download_image.delay(article.pk)

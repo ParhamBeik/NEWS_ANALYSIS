@@ -59,19 +59,12 @@ def test_a_404_is_gone_and_is_not_retried(image_row, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_an_unreachable_host_stops_being_pending_once_retries_run_out(image_row, monkeypatch):
-    """The row must not stay PENDING after the task has given up.
+def test_an_unreachable_host_is_failed_without_celery_retry(image_row, monkeypatch):
+    """Unit: a DNS/connect timeout is a fact about this VPS's path to that CDN.
 
-    PENDING is also what a never-queued image looks like, so a row left there after three
-    failed attempts is indistinguishable from work that has not started - and the hourly
-    sweep re-queues it forever. Live evidence: 601 rows for one CDN that never once
-    answered in four days, still PENDING, every one of them with an empty `error`.
-
-    Driven through `apply()` rather than by calling the handler, because the bug this
-    guards is the *wiring*: a test that called `on_failure` directly would still pass if
-    the base class were never attached to the task. `retries=max_retries` enters the task
-    on its last attempt, which is the only one whose failure is terminal - the earlier two
-    raise `Retry` and are supposed to.
+    Live: cdn.mashreghnews.ir does not resolve from the production host (5s DNS
+    timeout), 757 rows failed, 0 stored, crawl worker at 90% of 640MB. Retrying
+    Transient three times triples that wait and never stores a file.
     """
     from articles.models import ArticleImage, ImageStatus
     from articles.tasks import download_image
@@ -81,14 +74,33 @@ def test_an_unreachable_host_stops_being_pending_once_retries_run_out(image_row,
         raise Transient("fetch failed: connection to cdn.example timed out")
 
     monkeypatch.setattr("articles.tasks.open_checked", unreachable)
-    result = download_image.apply(
-        args=[image_row.article_id], retries=download_image.max_retries, throw=False
-    )
+    monkeypatch.setattr("articles.tasks._remember_dead_image_host", lambda host: None)
+    result = download_image(image_row.article_id)
 
-    assert result.failed()
+    assert result["status"] == "failed"
     stored = ArticleImage.objects.get(pk=image_row.pk)
     assert stored.status == ImageStatus.FAILED
     assert "timed out" in stored.error
+
+
+@pytest.mark.django_db
+def test_pending_sweep_skips_a_host_already_known_unreachable(image_row, monkeypatch):
+    """Unit: after one timeout, later pictures for that host must not be queued."""
+    from articles.models import ArticleImage, ImageStatus
+    from articles.tasks import download_pending_images
+
+    queued = []
+    monkeypatch.setattr("articles.tasks.image_host_is_dead", lambda host: True)
+    monkeypatch.setattr(
+        "articles.tasks.download_image",
+        type("Stub", (), {"delay": staticmethod(lambda pk: queued.append(pk))}),
+    )
+    result = download_pending_images(limit=10)
+
+    assert queued == []
+    assert result["queued"] == 0
+    assert result["skipped_dead_host"] == 1
+    assert ArticleImage.objects.get(pk=image_row.pk).status == ImageStatus.FAILED
 
 
 @pytest.mark.django_db

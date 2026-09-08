@@ -24,6 +24,41 @@ GONE_HTTP = {404, 410}
 
 logger = logging.getLogger(__name__)
 
+# A CDN that cannot even be resolved from this VPS will not recover inside Celery's
+# 5s-retry window. Remember the host so later pictures skip the connect timeout entirely.
+# ponytail: 24h TTL; drop the Redis skip if the host starts resolving again.
+DEAD_IMAGE_HOST_PREFIX = "newsintel:image-dead-host:"
+DEAD_IMAGE_HOST_TTL = 24 * 60 * 60
+
+
+def _image_host(url: str) -> str:
+    from urllib.parse import urlparse
+
+    return (urlparse(url).netloc or "").lower()
+
+
+def image_host_is_dead(host: str) -> bool:
+    if not host:
+        return False
+    try:
+        from inference import budget
+
+        return bool(budget.client().get(DEAD_IMAGE_HOST_PREFIX + host))
+    except Exception:
+        return False
+
+
+def _remember_dead_image_host(host: str) -> None:
+    if not host:
+        return
+    try:
+        from inference import budget
+
+        budget.client().set(DEAD_IMAGE_HOST_PREFIX + host, "1", ex=DEAD_IMAGE_HOST_TTL)
+    except Exception:
+        logger.warning("could not record dead image host %s", host, exc_info=True)
+
+
 DISPLAY_MAX = (1200, 1200)
 THUMBNAIL_MAX = (400, 400)
 MAX_BYTES = 8 * 1024 * 1024
@@ -152,6 +187,13 @@ def download_image(article_id: int) -> dict:
             log_action("image.failed", "failed", article=article_id, http_status=status)
             return {"article": article_id, "status": "failed", "http_status": status}
         raise Transient(f"image fetch failed: {exc}") from exc
+    except Transient as exc:
+        host = _image_host(record.source_url)
+        record.status, record.error = ImageStatus.FAILED, f"{type(exc).__name__}: {exc}"[:500]
+        record.save(update_fields=["status", "error"])
+        _remember_dead_image_host(host)
+        log_action("image.failed", "failed", article=article_id, host=host, error=str(exc)[:200])
+        return {"article": article_id, "status": "failed", "host": host}
 
     if len(payload) > MAX_BYTES:
         record.status, record.error = ImageStatus.FAILED, "image exceeds size limit"
@@ -196,10 +238,23 @@ def download_pending_images(limit: int = 200) -> dict:
         .exclude(source_url="")
         .order_by("-article_id")
     )
-    article_ids = list(pending.values_list("article_id", flat=True)[:limit])
-    for article_id in article_ids:
+    rows = list(pending.values_list("article_id", "source_url")[:limit])
+    queued = 0
+    skipped = 0
+    for article_id, source_url in rows:
+        host = _image_host(source_url)
+        if image_host_is_dead(host):
+            ArticleImage.objects.filter(
+                article_id=article_id, status=ImageStatus.PENDING
+            ).update(
+                status=ImageStatus.FAILED,
+                error=f"skipped: host {host} recently unreachable",
+            )
+            skipped += 1
+            continue
         download_image.delay(article_id)
-    return {"queued": len(article_ids)}
+        queued += 1
+    return {"queued": queued, "skipped_dead_host": skipped}
 
 
 @shared_task(name="articles.tasks.backfill_dedupe")
