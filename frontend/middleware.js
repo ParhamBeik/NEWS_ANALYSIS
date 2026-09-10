@@ -16,12 +16,6 @@ import { NextResponse } from "next/server";
 
 const PUBLIC = ["/login", "/signup", "/_next", "/favicon.ico"];
 
-function safeNext(next) {
-  if (typeof next !== "string" || !next.startsWith("/")) return "/";
-  if (next.startsWith("//") || next.startsWith("/\\")) return "/";
-  return next;
-}
-
 function withPathname(request, pathname) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-pathname", pathname);
@@ -33,10 +27,7 @@ export function middleware(request) {
   const hasToken = Boolean(request.cookies.get("news_token"));
 
   if (PUBLIC.some((prefix) => pathname.startsWith(prefix))) {
-    if (hasToken && (pathname.startsWith("/login") || pathname.startsWith("/signup"))) {
-      const next = safeNext(request.nextUrl.searchParams.get("next"));
-      return NextResponse.redirect(new URL(next, request.url));
-    }
+    // A revoked token still has a cookie. Redirecting it home loops back here on the API 401.
     return withPathname(request, pathname);
   }
 

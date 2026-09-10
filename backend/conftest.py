@@ -18,6 +18,20 @@ from sources.models import Source, Strategy
 
 
 @pytest.fixture(autouse=True)
+def _reset_throttle_counters():
+    """Rate-limit state lives in the cache, and the cache is not reset between tests.
+
+    Without this, a test that signs up is spending the NEXT test's allowance, and the suite
+    starts failing on ordering rather than on behaviour. The throttle tests still assert the
+    limit explicitly - this only guarantees each test begins with a full one.
+    """
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_provider_circuit(db, request):
     """Dispatch tests assume a closed circuit. Production starts paused."""
     from inference.circuit import close

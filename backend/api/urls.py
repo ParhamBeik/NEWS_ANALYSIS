@@ -6,7 +6,6 @@ during development. Both are configured in REST_FRAMEWORK; this module only name
 """
 
 from django.urls import include, path
-from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.routers import DefaultRouter
 
 from .views import (
@@ -17,6 +16,8 @@ from .views import (
     FeedStatsView,
     HealthView,
     KPIView,
+    LoginView,
+    LogoutView,
     MarketView,
     MeView,
     OpsView,
@@ -37,8 +38,9 @@ router.register("ab/pairs", ABPairViewSet, basename="ab-pair")
 
 urlpatterns = [
     path("health/", HealthView.as_view(), name="health"),
-    path("auth/token/", obtain_auth_token, name="auth-token"),
+    path("auth/token/", LoginView.as_view(), name="auth-token"),
     path("auth/signup/", SignupView.as_view(), name="auth-signup"),
+    path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("feed-stats/", FeedStatsView.as_view(), name="feed-stats"),
     path("ops/", OpsView.as_view(), name="ops"),

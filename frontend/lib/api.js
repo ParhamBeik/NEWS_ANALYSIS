@@ -32,6 +32,7 @@ export async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_ORIGIN}${path}`, {
     ...options,
     cache: "no-store",
+    signal: options.signal ?? AbortSignal.timeout(15_000),
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Token ${token}` } : {}),

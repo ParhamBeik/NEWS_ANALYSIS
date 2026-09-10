@@ -20,6 +20,58 @@ function Bar({ value, max, tone = "bg-emerald-500" }) {
   );
 }
 
+/**
+ * Backup freshness.
+ *
+ * A backup job that stopped three weeks ago looks exactly like one that is working, right
+ * up until the restore that discovers otherwise. The age of the newest VERIFIED dump is
+ * the only number that distinguishes them, so it gets a card rather than a log line, and
+ * it turns amber before it turns into an incident.
+ */
+function BackupHealth({ backups }) {
+  const stale = backups.age_hours === null || backups.age_hours > 36;
+  return (
+    <Card className="p-4">
+      <SectionTitle hint="a silent backup failure is invisible until the restore">
+        Backups
+      </SectionTitle>
+      {!backups.configured ? (
+        <p className="text-sm text-amber-400">
+          No backup directory is mounted. The database holds every human review label, and
+          nothing here is dumping it — see the restore runbook in the README.
+        </p>
+      ) : (
+        <div className="flex items-baseline justify-between gap-4">
+          <div>
+            <div
+              className={`text-2xl font-semibold tabular ${
+                stale ? "text-rose-400" : "text-emerald-400"
+              }`}
+            >
+              {backups.age_hours === null ? "never" : `${backups.age_hours}h ago`}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {backups.last_success_at
+                ? `last verified dump ${tehranTime(backups.last_success_at)}`
+                : "no dump has completed yet"}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="tabular text-lg text-slate-200">{number(backups.retained)}</div>
+            <div className="text-xs text-slate-500">retained</div>
+          </div>
+        </div>
+      )}
+      {backups.configured && stale && backups.age_hours !== null && (
+        <p className="mt-3 text-xs text-rose-300/80">
+          Expected a dump every 24h. Check <span className="tabular">docker compose logs
+          backup</span>.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 export default async function OpsPage({ searchParams }) {
   const params = await searchParams;
   const days = params?.days || 14;
@@ -148,6 +200,8 @@ export default async function OpsPage({ searchParams }) {
             </div>
           )}
         </Card>
+
+        <BackupHealth backups={ops.backups} />
 
         <Card className="p-4">
           <SectionTitle hint="reachability is measured, not assumed">

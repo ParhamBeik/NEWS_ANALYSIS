@@ -33,6 +33,12 @@ CELERY_BEAT_SCHEDULER = "celery.beat:PersistentScheduler"
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
+# In-process cache for the throttle counters. The suite runs single-process, so this is a
+# real shared counter here, and it means a throttle test cannot leave state in a Redis
+# database that the NEXT run then starts inside. Tests that exercise a limit clear it
+# explicitly; see api/tests/test_api.py.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},

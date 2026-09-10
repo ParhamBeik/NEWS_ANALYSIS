@@ -21,12 +21,15 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
+from django.core.cache import cache
+from django.db import IntegrityError, connection
 from django.db.models import Avg, Count, DecimalField, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import FileResponse, Http404
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
+from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
@@ -107,36 +110,85 @@ def latest_inference_prefetches(prefix: str = "") -> list[Prefetch]:
 
 
 class HealthView(APIView):
-    """Unauthenticated on purpose: this is what the container healthcheck and Caddy hit."""
+    """Unauthenticated readiness check for the web process and its required stores."""
 
     permission_classes = [AllowAny]
 
     def get(self, request):
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            cache.get("healthcheck")
+        except Exception:
+            return Response({"status": "unavailable"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response({"status": "ok"})
 
 
 class MeView(APIView):
     def get(self, request):
-        return Response({
-            "username": request.user.get_username(),
-            "is_staff": request.user.is_staff,
-        })
+        return Response(
+            {
+                "username": request.user.get_username(),
+                "is_staff": request.user.is_staff,
+            }
+        )
 
 
 class SignupThrottle(AnonRateThrottle):
-    rate = "5/hour"
+    scope = "signup"
+
+
+class LoginThrottle(AnonRateThrottle):
+    """Rate limit on the ONE endpoint that will tell a stranger whether a password is right.
+
+    Without this, `obtain_auth_token` accepts guesses as fast as the network allows, which
+    makes every account's security exactly the strength of its password against an offline-
+    speed online attack. Keyed by client address, so one attacker cannot lock out everyone -
+    see NUM_PROXIES in settings for why that address is trustworthy.
+    """
+
+    scope = "login"
+
+
+class LoginView(ObtainAuthToken):
+    """DRF's own token view, with a throttle attached. Everything else is inherited."""
+
+    throttle_classes = [LoginThrottle]
+    authentication_classes = []
 
 
 class SignupView(APIView):
+    authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [SignupThrottle]
 
     def post(self, request):
         serializer = SignupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        try:
+            user = serializer.save()
+        except IntegrityError as exc:
+            # Validation is a snapshot. Another request can claim the username between
+            # `is_valid()` and INSERT, and that ordinary race must remain a 400, not a 500.
+            raise ValidationError({"username": "This username is already in use."}) from exc
         token = Token.objects.create(user=user)
         return Response({"token": token.key, "username": user.get_username()}, status=201)
+
+
+class LogoutView(APIView):
+    """Delete the caller's token server-side.
+
+    Dropping the browser cookie is not a sign-out. A DRF token has no expiry, so the string
+    the cookie held stays a valid credential for the whole corpus forever - which means a
+    token captured from a shared machine, a proxy log or a backup outlives every sign-out
+    that ever happens afterwards. Revoking the row is the only thing that ends the session.
+
+    Idempotent: signing out twice is a normal thing to do, not an error.
+    """
+
+    def post(self, request):
+        Token.objects.filter(key=getattr(request.auth, "key", None)).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
@@ -146,9 +198,8 @@ class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
         return ArticleDetailSerializer if self.action == "retrieve" else ArticleListSerializer
 
     def get_queryset(self):
-        queryset = (
-            Article.objects.select_related("source", "image")
-            .prefetch_related(*latest_inference_prefetches())
+        queryset = Article.objects.select_related("source", "image").prefetch_related(
+            *latest_inference_prefetches()
         )
         # Canonical-only by default. See the note in api/filters.py for why this is not a
         # FilterSet field: an absent parameter has to narrow, and django-filter cannot.
@@ -172,9 +223,8 @@ class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
         article = self.get_object()
         classification = (getattr(article, "latest_classification", None) or [None])[0]
         variant = (
-            (classification.variant if classification else None)
-            or PromptVariant.objects.filter(is_active=True).first()
-        )
+            classification.variant if classification else None
+        ) or PromptVariant.objects.filter(is_active=True).first()
         if variant is None:
             return Response([])
         neighbours = retrieve(
@@ -183,19 +233,21 @@ class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
             task=request.query_params.get("task", "evaluation"),
             category=classification.category if classification else None,
         )
-        return Response([
-            {
-                "title": item.title,
-                "category": item.category,
-                "similarity": round(item.similarity, 4),
-                # True = a human approved this label; False = it is the model's own past
-                # verdict. Feeding a model its own output back is a real failure mode, so
-                # the distinction is surfaced rather than smoothed over.
-                "reviewed": item.reviewed,
-                "output": item.output,
-            }
-            for item in neighbours
-        ])
+        return Response(
+            [
+                {
+                    "title": item.title,
+                    "category": item.category,
+                    "similarity": round(item.similarity, 4),
+                    # True = a human approved this label; False = it is the model's own past
+                    # verdict. Feeding a model its own output back is a real failure mode, so
+                    # the distinction is surfaced rather than smoothed over.
+                    "reviewed": item.reviewed,
+                    "output": item.output,
+                }
+                for item in neighbours
+            ]
+        )
 
 
 class SourceViewSet(viewsets.ReadOnlyModelViewSet):
@@ -213,15 +265,22 @@ class RunViewSet(viewsets.ReadOnlyModelViewSet):
     def events(self, request, run_id=None):
         run = self.get_object()
         rows = run.events.select_related("article")[:500]
-        return Response([
-            {
-                "node": event.node, "status": event.status, "attempt": event.attempt,
-                "article_id": event.article_id, "latency_ms": event.latency_ms,
-                "cost_usd": float(event.cost_usd), "error_class": event.error_class,
-                "error": event.error[:400], "created_at": event.created_at,
-            }
-            for event in rows
-        ])
+        return Response(
+            [
+                {
+                    "node": event.node,
+                    "status": event.status,
+                    "attempt": event.attempt,
+                    "article_id": event.article_id,
+                    "latency_ms": event.latency_ms,
+                    "cost_usd": float(event.cost_usd),
+                    "error_class": event.error_class,
+                    "error": event.error[:400],
+                    "created_at": event.created_at,
+                }
+                for event in rows
+            ]
+        )
 
 
 class VariantViewSet(viewsets.ReadOnlyModelViewSet):
@@ -300,12 +359,7 @@ class ABPairViewSet(viewsets.ReadOnlyModelViewSet):
         Filtering per user rather than globally: two reviewers judging the same pair is
         signal (it measures inter-rater agreement), not a duplicate to be suppressed.
         """
-        pair = (
-            self.get_queryset()
-            .exclude(feedback__user=request.user)
-            .order_by("?")
-            .first()
-        )
+        pair = self.get_queryset().exclude(feedback__user=request.user).order_by("id").first()
         if pair is None:
             return Response(status=status.HTTP_204_NO_CONTENT)
         return Response(self.get_serializer(pair).data)
@@ -345,9 +399,7 @@ class ABPairViewSet(viewsets.ReadOnlyModelViewSet):
         left card 70% of the time regardless of content, the standings measure layout, not
         quality. Storing `shown_as_left` is what makes that number computable at all.
         """
-        rows = ABFeedback.objects.select_related(
-            "pair", "pair__variant_a", "pair__variant_b"
-        )
+        rows = ABFeedback.objects.select_related("pair", "pair__variant_a", "pair__variant_b")
         tally: dict[str, dict] = {}
         left_wins = right_wins = ties = 0
         for record in rows:
@@ -360,9 +412,14 @@ class ABPairViewSet(viewsets.ReadOnlyModelViewSet):
             for variant in (record.pair.variant_a, record.pair.variant_b):
                 tally.setdefault(
                     variant.name,
-                    {"variant": variant.name, "model": variant.model,
-                     "memory_strategy": variant.memory_strategy,
-                     "appearances": 0, "wins": 0, "ties": 0},
+                    {
+                        "variant": variant.name,
+                        "model": variant.model,
+                        "memory_strategy": variant.memory_strategy,
+                        "appearances": 0,
+                        "wins": 0,
+                        "ties": 0,
+                    },
                 )
                 tally[variant.name]["appearances"] += 1
             chosen = record.winning_variant
@@ -375,24 +432,29 @@ class ABPairViewSet(viewsets.ReadOnlyModelViewSet):
         standings = sorted(
             (
                 {**entry, "win_rate": round(entry["wins"] / entry["appearances"], 3)}
-                for entry in tally.values() if entry["appearances"]
+                for entry in tally.values()
+                if entry["appearances"]
             ),
             key=lambda entry: entry["win_rate"],
             reverse=True,
         )
         decided = left_wins + right_wins
-        return Response({
-            "judgements": rows.count(),
-            "standings": standings,
-            "position_bias": {
-                "left_wins": left_wins, "right_wins": right_wins, "ties": ties,
-                # 0.5 is unbiased. Far from it means the layout is being judged.
-                "left_share_of_decided": round(left_wins / decided, 3) if decided else None,
-            },
-            "pairs_awaiting_judgement": ABPair.objects.exclude(
-                feedback__user=request.user
-            ).count(),
-        })
+        return Response(
+            {
+                "judgements": rows.count(),
+                "standings": standings,
+                "position_bias": {
+                    "left_wins": left_wins,
+                    "right_wins": right_wins,
+                    "ties": ties,
+                    # 0.5 is unbiased. Far from it means the layout is being judged.
+                    "left_share_of_decided": round(left_wins / decided, 3) if decided else None,
+                },
+                "pairs_awaiting_judgement": ABPair.objects.exclude(
+                    feedback__user=request.user
+                ).count(),
+            }
+        )
 
 
 # ---------------------------------------------------------------------------- dashboards
@@ -404,24 +466,47 @@ class FeedStatsView(APIView):
     def get(self, request):
         since = window_start(request, default_days=1)
         articles = Article.objects.filter(fetched_at__gte=since)
-        canonical_ids = set(
-            articles.filter(duplicate_of__isnull=True).values_list("id", flat=True)
+        canonical_ids = set(articles.filter(duplicate_of__isnull=True).values_list("id", flat=True))
+        return Response(
+            {
+                "funnel": {
+                    "fetched": articles.count(),
+                    "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
+                },
+                "notify": {
+                    state: len(articles_with_decision(state, canonical_ids))
+                    for state in NotifyStatus.values
+                },
+                "budget": {
+                    "spent_today_usd": budget.day_spend(),
+                    "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
+                },
+                "provider_circuit": circuit.snapshot(),
+            }
         )
-        return Response({
-            "funnel": {
-                "fetched": articles.count(),
-                "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
-            },
-            "notify": {
-                state: len(articles_with_decision(state) & canonical_ids)
-                for state in NotifyStatus.values
-            },
-            "budget": {
-                "spent_today_usd": budget.day_spend(),
-                "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
-            },
-            "provider_circuit": circuit.snapshot(),
-        })
+
+
+def backup_health() -> dict:
+    """Report actual archives; a leftover success marker cannot prove a dump still exists."""
+    directory = Path(settings.BACKUP_DIR)
+    dumps = [path.stat() for path in directory.glob("*.dump") if path.is_file()]
+    dumps = [stat for stat in dumps if stat.st_size > 0]
+    if not dumps:
+        return {
+            "configured": directory.is_dir(),
+            "last_success_at": None,
+            "age_hours": None,
+            "retained": 0,
+        }
+    stamp = timezone.datetime.fromtimestamp(
+        max(stat.st_mtime for stat in dumps), tz=timezone.get_current_timezone()
+    )
+    return {
+        "configured": True,
+        "last_success_at": stamp,
+        "age_hours": round((timezone.now() - stamp).total_seconds() / 3600, 1),
+        "retained": len(dumps),
+    }
 
 
 class OpsView(APIView):
@@ -435,9 +520,7 @@ class OpsView(APIView):
         # stored, so the notify counts have to be intersected back down to this window and
         # to canonical rows. Without it the feed page renders an all-time, duplicate-
         # inclusive total in a row labelled "(24h)", and it only ever grows.
-        canonical_ids = set(
-            articles.filter(duplicate_of__isnull=True).values_list("id", flat=True)
-        )
+        canonical_ids = set(articles.filter(duplicate_of__isnull=True).values_list("id", flat=True))
 
         by_node = list(
             events.values("node", "status")
@@ -453,66 +536,72 @@ class OpsView(APIView):
             )
             .order_by("day")
         )
-        return Response({
-            "window_days": (timezone.now() - since).days,
-            "funnel": {
-                "fetched": articles.count(),
-                "canonical": articles.filter(duplicate_of__isnull=True).count(),
-                "duplicates": articles.filter(duplicate_of__isnull=False).count(),
-                "prefiltered": articles.exclude(prefilter_reason="").count(),
-                "quality_rejected": articles.exclude(quality_flag="").count(),
-                "classified": articles.filter(classifications__isnull=False).distinct().count(),
-                "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
-            },
-            "notify": {
-                state: len(articles_with_decision(state) & canonical_ids)
-                for state in NotifyStatus.values
-            },
-            "extraction_tiers": list(
-                articles.values("extraction_tier").annotate(count=Count("id")).order_by()
-            ),
-            "node_outcomes": [
-                {**row, "cost": float(row["cost"] or 0)} for row in by_node
-            ],
-            "cost_by_day": [
-                {"day": row["day"], "cost": float(row["cost"]), "calls": row["calls"]}
-                for row in cost_by_day
-            ],
-            "budget": {
-                "run_ceiling_usd": settings.NEWS_RUN_BUDGET_USD,
-                "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
-                "spent_today_usd": budget.day_spend(),
-            },
-            "sources": SourceSerializer(Source.objects.all(), many=True).data,
-            # The prefilter is the one change that can silently lose a story, so its
-            # effect is reported rather than assumed. `articles` is the evidence you would
-            # need to justify turning a rule off again.
-            "prefilter_rules": [
-                {
-                    "source": rule.source_id, "native_category": rule.native_category,
-                    "label": rule.label, "enabled": rule.enabled, "note": rule.note,
-                    "articles": Article.objects.filter(
-                        source_id=rule.source_id, native_category=rule.native_category
+        return Response(
+            {
+                "window_days": (timezone.now() - since).days,
+                "funnel": {
+                    "fetched": articles.count(),
+                    "canonical": articles.filter(duplicate_of__isnull=True).count(),
+                    "duplicates": articles.filter(duplicate_of__isnull=False).count(),
+                    "prefiltered": articles.exclude(prefilter_reason="").count(),
+                    "quality_rejected": articles.exclude(quality_flag="").count(),
+                    "classified": articles.filter(classifications__isnull=False).distinct().count(),
+                    "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
+                },
+                "notify": {
+                    state: len(articles_with_decision(state, canonical_ids))
+                    for state in NotifyStatus.values
+                },
+                "extraction_tiers": list(
+                    articles.values("extraction_tier").annotate(count=Count("id")).order_by()
+                ),
+                "node_outcomes": [{**row, "cost": float(row["cost"] or 0)} for row in by_node],
+                "cost_by_day": [
+                    {"day": row["day"], "cost": float(row["cost"]), "calls": row["calls"]}
+                    for row in cost_by_day
+                ],
+                "budget": {
+                    "run_ceiling_usd": settings.NEWS_RUN_BUDGET_USD,
+                    "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
+                    "spent_today_usd": budget.day_spend(),
+                },
+                "sources": SourceSerializer(Source.objects.all(), many=True).data,
+                # The prefilter is the one change that can silently lose a story, so its
+                # effect is reported rather than assumed. `articles` is the evidence you would
+                # need to justify turning a rule off again.
+                "prefilter_rules": [
+                    {
+                        "source": rule.source_id,
+                        "native_category": rule.native_category,
+                        "label": rule.label,
+                        "enabled": rule.enabled,
+                        "note": rule.note,
+                        "articles": Article.objects.filter(
+                            source_id=rule.source_id, native_category=rule.native_category
+                        ).count(),
+                    }
+                    for rule in PrefilterRule.objects.select_related("source")
+                ],
+                "images": list(
+                    Article.objects.values("image__status").annotate(count=Count("id")).order_by()
+                ),
+                "dead_letters": list(
+                    DeadLetter.objects.filter(resolved_at__isnull=True)
+                    .values("node", "error_class")
+                    .annotate(count=Count("id"))
+                    .order_by("-count")
+                ),
+                "recent_runs": RunSerializer(Run.objects.all()[:10], many=True).data,
+                "provider_circuit": circuit.snapshot(),
+                "url_health": {
+                    "gone_articles": Article.objects.filter(url_status=UrlStatus.GONE).count(),
+                    "dropped_articles": Article.objects.filter(
+                        url_status=UrlStatus.DROPPED
                     ).count(),
-                }
-                for rule in PrefilterRule.objects.select_related("source")
-            ],
-            "images": list(
-                Article.objects.values("image__status").annotate(count=Count("id")).order_by()
-            ),
-            "dead_letters": list(
-                DeadLetter.objects.filter(resolved_at__isnull=True)
-                .values("node", "error_class")
-                .annotate(count=Count("id"))
-                .order_by("-count")
-            ),
-            "recent_runs": RunSerializer(Run.objects.all()[:10], many=True).data,
-            "provider_circuit": circuit.snapshot(),
-            "url_health": {
-                "gone_articles": Article.objects.filter(url_status=UrlStatus.GONE).count(),
-                "dropped_articles": Article.objects.filter(url_status=UrlStatus.DROPPED).count(),
-            },
-        })
+                },
+                "backups": backup_health(),
+            }
+        )
 
 
 class KPIView(APIView):
@@ -565,63 +654,76 @@ class KPIView(APIView):
                 case.confidence_occurrence, case.gold_price_impact, case.security_relevance
             ).notify
             machine_notify = evaluation.decision.notify
-            key = {(True, True): "tp", (False, True): "fp",
-                   (False, False): "tn", (True, False): "fn"}[(human_notify, machine_notify)]
+            key = {
+                (True, True): "tp",
+                (False, True): "fp",
+                (False, False): "tn",
+                (True, False): "fn",
+            }[(human_notify, machine_notify)]
             notify_confusion[key] += 1
 
         outcomes = PredictionOutcome.objects.exclude(direction_correct__isnull=True)
         scored = outcomes.count()
-        return Response({
-            "labelled_articles": len(labelled),
-            "category_agreement": {
-                "compared": category_total,
-                "agreed": category_hits,
-                "rate": round(category_hits / category_total, 3) if category_total else None,
-            },
-            "agreement_by_stratum": [
-                {**row, "rate": round(row["agreed"] / row["compared"], 3)}
-                for row in per_stratum.values() if row["compared"]
-            ],
-            "axis_agreement": [
-                {
-                    "axis": axis,
-                    **stats,
-                    "exact_rate": round(stats["exact"] / stats["compared"], 3)
-                    if stats["compared"] else None,
-                    "within_one_rate": round(stats["within_one"] / stats["compared"], 3)
-                    if stats["compared"] else None,
-                }
-                for axis, stats in axis_stats.items()
-            ],
-            "notify_confusion": notify_confusion,
-            # A false negative is a missed security alert - the exact failure this rebuild
-            # exists to prevent - so it is reported on its own, not buried in an accuracy
-            # figure that a mostly-quiet corpus would inflate.
-            "notify_recall": (
-                round(
-                    notify_confusion["tp"] / (notify_confusion["tp"] + notify_confusion["fn"]), 3
-                )
-                if (notify_confusion["tp"] + notify_confusion["fn"]) else None
-            ),
-            "backtest": {
-                "scored_predictions": scored,
-                "directional_accuracy": round(
-                    outcomes.filter(direction_correct=True).count() / scored, 3
-                ) if scored else None,
-                "mean_realized_pct": outcomes.aggregate(v=Avg("realized_pct"))["v"],
-                "by_window": list(
-                    outcomes.values("window_trading_days")
-                    .annotate(
-                        n=Count("id"),
-                        correct=Count("id", filter=Q(direction_correct=True)),
+        return Response(
+            {
+                "labelled_articles": len(labelled),
+                "category_agreement": {
+                    "compared": category_total,
+                    "agreed": category_hits,
+                    "rate": round(category_hits / category_total, 3) if category_total else None,
+                },
+                "agreement_by_stratum": [
+                    {**row, "rate": round(row["agreed"] / row["compared"], 3)}
+                    for row in per_stratum.values()
+                    if row["compared"]
+                ],
+                "axis_agreement": [
+                    {
+                        "axis": axis,
+                        **stats,
+                        "exact_rate": round(stats["exact"] / stats["compared"], 3)
+                        if stats["compared"]
+                        else None,
+                        "within_one_rate": round(stats["within_one"] / stats["compared"], 3)
+                        if stats["compared"]
+                        else None,
+                    }
+                    for axis, stats in axis_stats.items()
+                ],
+                "notify_confusion": notify_confusion,
+                # A false negative is a missed security alert - the exact failure this rebuild
+                # exists to prevent - so it is reported on its own, not buried in an accuracy
+                # figure that a mostly-quiet corpus would inflate.
+                "notify_recall": (
+                    round(
+                        notify_confusion["tp"] / (notify_confusion["tp"] + notify_confusion["fn"]),
+                        3,
                     )
-                    .order_by("window_trading_days")
+                    if (notify_confusion["tp"] + notify_confusion["fn"])
+                    else None
                 ),
-                "unscored_neutral": PredictionOutcome.objects.filter(
-                    direction_correct__isnull=True
-                ).count(),
-            },
-        })
+                "backtest": {
+                    "scored_predictions": scored,
+                    "directional_accuracy": round(
+                        outcomes.filter(direction_correct=True).count() / scored, 3
+                    )
+                    if scored
+                    else None,
+                    "mean_realized_pct": outcomes.aggregate(v=Avg("realized_pct"))["v"],
+                    "by_window": list(
+                        outcomes.values("window_trading_days")
+                        .annotate(
+                            n=Count("id"),
+                            correct=Count("id", filter=Q(direction_correct=True)),
+                        )
+                        .order_by("window_trading_days")
+                    ),
+                    "unscored_neutral": PredictionOutcome.objects.filter(
+                        direction_correct__isnull=True
+                    ).count(),
+                },
+            }
+        )
 
 
 class MarketView(APIView):
@@ -630,23 +732,27 @@ class MarketView(APIView):
         symbol = request.query_params.get("symbol", Symbol.GOLD_18K)
         if symbol not in Symbol.values:
             raise ValidationError({"symbol": f"must be one of {Symbol.values}"})
-        series = PriceSnapshot.objects.filter(
-            symbol=symbol, observed_at__gte=since
-        ).order_by("observed_at")
+        series = PriceSnapshot.objects.filter(symbol=symbol, observed_at__gte=since).order_by(
+            "observed_at"
+        )
         outcomes = (
             PredictionOutcome.objects.filter(computed_at__gte=since)
             .select_related("evaluation")
             .order_by("-computed_at")[:200]
         )
-        return Response({
-            "symbol": symbol,
-            "symbols": [{"value": value, "label": label} for value, label in Symbol.choices],
-            "series": PriceSnapshotSerializer(series, many=True).data,
-            "latest": PriceSnapshotSerializer(
-                PriceSnapshot.objects.filter(symbol=symbol).order_by("-observed_at").first()
-            ).data if series.exists() else None,
-            "outcomes": PredictionOutcomeSerializer(outcomes, many=True).data,
-        })
+        return Response(
+            {
+                "symbol": symbol,
+                "symbols": [{"value": value, "label": label} for value, label in Symbol.choices],
+                "series": PriceSnapshotSerializer(series, many=True).data,
+                "latest": PriceSnapshotSerializer(
+                    PriceSnapshot.objects.filter(symbol=symbol).order_by("-observed_at").first()
+                ).data
+                if series.exists()
+                else None,
+                "outcomes": PredictionOutcomeSerializer(outcomes, many=True).data,
+            }
+        )
 
 
 class ExportListView(APIView):
@@ -668,21 +774,23 @@ class ExportListView(APIView):
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
-        return Response([
-            {
-                # Relative to EXPORT_DIR, so the subdirectory is part of the name and the
-                # download URL round-trips through the `<path:name>` route unchanged.
-                "name": path.relative_to(directory).as_posix(),
-                "size_bytes": path.stat().st_size,
-                "modified_at": timezone.datetime.fromtimestamp(
-                    path.stat().st_mtime, tz=timezone.get_current_timezone()
-                ),
-                # Relative for the same reason media URLs are: the caller may be a server
-                # component that reached this API on an internal hostname.
-                "download_url": f"/api/exports/{path.relative_to(directory).as_posix()}/",
-            }
-            for path in files
-        ])
+        return Response(
+            [
+                {
+                    # Relative to EXPORT_DIR, so the subdirectory is part of the name and the
+                    # download URL round-trips through the `<path:name>` route unchanged.
+                    "name": path.relative_to(directory).as_posix(),
+                    "size_bytes": path.stat().st_size,
+                    "modified_at": timezone.datetime.fromtimestamp(
+                        path.stat().st_mtime, tz=timezone.get_current_timezone()
+                    ),
+                    # Relative for the same reason media URLs are: the caller may be a server
+                    # component that reached this API on an internal hostname.
+                    "download_url": f"/api/exports/{path.relative_to(directory).as_posix()}/",
+                }
+                for path in files
+            ]
+        )
 
 
 class ExportDownloadView(APIView):

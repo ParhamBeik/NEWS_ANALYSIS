@@ -90,10 +90,15 @@ jobs:
           echo "${{ secrets.VPS_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      # backup.sh ships with the compose file because the `backup` service bind-mounts it
+      # from the host. A compose file that names a script the host does not have is a
+      # service that restart-loops on "no such file", which on a backup job means no
+      # backups and no obvious symptom.
       - name: Ship compose files
         run: |
           scp -i ~/.ssh/id_deploy \
             deploy/docker-compose.prod.yml \
+            deploy/backup.sh \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/apps/news-intel/deploy/
 
       - name: Pull and restart

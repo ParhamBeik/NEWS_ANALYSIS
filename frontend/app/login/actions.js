@@ -1,9 +1,19 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
+
+async function authHeaders() {
+  const result = { "Content-Type": "application/json" };
+  // Enabled only behind the private Caddy edge, which replaces untrusted forwarded IPs.
+  if (process.env.TRUST_PROXY_HEADERS === "1") {
+    const forwarded = (await headers()).get("x-forwarded-for");
+    if (forwarded) result["X-Forwarded-For"] = forwarded;
+  }
+  return result;
+}
 
 /**
  * The post-login destination, or "/" if it is not one of ours.
@@ -54,9 +64,10 @@ export async function login(_previous, formData) {
   try {
     response = await fetch(`${API_ORIGIN}/api/auth/token/`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders(),
       body: JSON.stringify({ username, password }),
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     // Distinguished from a rejected password on purpose: "the API is down" and "you typed
@@ -65,6 +76,10 @@ export async function login(_previous, formData) {
   }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      return { error: "Too many attempts. Please wait before trying again." };
+    }
+    if (response.status >= 500) return { error: "Sign in is temporarily unavailable." };
     if (response.status === 400) {
       const message = firstError(await response.json().catch(() => null));
       if (message) {
@@ -101,19 +116,25 @@ export async function signup(_previous, formData) {
   try {
     response = await fetch(`${API_ORIGIN}/api/auth/signup/`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authHeaders(),
       body: JSON.stringify({ username, email, password }),
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     return { error: "Cannot reach the API. Is the backend running?" };
   }
 
-  const body = await response.json();
+  const body = await response.json().catch(() => null);
   if (!response.ok) {
+    if (response.status === 429) {
+      return { error: "Too many attempts. Please wait before trying again." };
+    }
     const message = firstError(body);
     return { error: message || "Could not create the account." };
   }
+
+  if (!body?.token) return { error: "Account creation is temporarily unavailable." };
 
   await storeToken(body.token);
   redirect(safeNext(next));

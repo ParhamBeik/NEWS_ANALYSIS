@@ -78,6 +78,9 @@ jobs:
 
       - run: pytest -q
       - run: ruff check .
+      - run: pip-audit -r requirements.txt
+      - name: Backup failure paths
+        run: python -m unittest discover -s ../deploy/tests -v
 
   frontend:
     runs-on: ubuntu-latest
@@ -95,6 +98,8 @@ jobs:
       # minor version than the one this build validated, which makes CI green for an
       # artifact that is not the artifact being deployed.
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=low
+      - run: npm test
       - run: npm run build
 
   # The Dockerfiles were previously validated for the first time by `deploy.yml`, which

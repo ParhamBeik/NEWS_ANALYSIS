@@ -25,30 +25,58 @@ export default function AppShell({ children }) {
 
   return (
     <div className="min-h-screen bg-slate-950">
+      {/* Seven nav links sit above the content on every page. Without this, reaching the
+          page itself costs eight tab presses after every single navigation. Visible only
+          on focus, so it stays out of the way of everyone who does not need it. */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-emerald-500 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-slate-950"
+      >
+        Skip to content
+      </a>
       <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/85 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-3 py-3 sm:gap-6 sm:px-5">
           <Link href="/" className="shrink-0 text-sm font-semibold tracking-tight text-slate-100">
             News<span className="text-emerald-400">Intel</span>
           </Link>
-          <nav className="flex min-w-0 flex-1 flex-wrap gap-1 text-sm">
-            {NAV.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="rounded-md px-2 py-1 text-slate-400 transition hover:bg-slate-900 hover:text-slate-100"
-              >
-                {item.label}
-              </Link>
-            ))}
+          <nav aria-label="Main" className="flex min-w-0 flex-1 flex-wrap gap-1 text-sm">
+            {NAV.map((item) => {
+              // Exact match for the feed, prefix match for everything else - otherwise "/"
+              // is a prefix of every route and every tab renders as the current one.
+              const active =
+                item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  // `aria-current` is what tells a screen reader which tab is the current
+                  // page. The colour alone conveys it to sighted users only, and on a
+                  // seven-item nav "where am I" is the question being answered.
+                  aria-current={active ? "page" : undefined}
+                  className={`rounded-md px-2 py-1 transition ${
+                    active
+                      ? "bg-slate-900 text-slate-100"
+                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
           </nav>
           <form action="/logout" method="post" className="shrink-0">
-            <button className="text-xs text-slate-500 transition hover:text-slate-300">
+            <button
+              type="submit"
+              className="text-xs text-slate-500 transition hover:text-slate-300"
+            >
               Sign out
             </button>
           </form>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-3 py-6 sm:px-5 sm:py-8">{children}</main>
+      <main id="main" className="mx-auto max-w-7xl px-3 py-6 sm:px-5 sm:py-8">
+        {children}
+      </main>
     </div>
   );
 }

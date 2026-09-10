@@ -21,6 +21,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from api.filters import articles_with_decision
 from core.scoring import decide
 from core.vocabulary import Category, GoldTrend, Level, NotifyStatus
 from inference.models import Classification, Evaluation, PromptVariant, Summary
@@ -34,11 +35,33 @@ def client(user) -> APIClient:
     return api
 
 
+@pytest.fixture
+def throttle_rates(monkeypatch):
+    """Set a throttle rate for the duration of one test.
+
+    Not `settings.REST_FRAMEWORK`: DRF binds `THROTTLE_RATES` onto the throttle class at
+    IMPORT time, so overriding the setting afterwards changes nothing and the test passes
+    against a limit that was never applied. The class attribute is the live value.
+    """
+    from api.views import LoginThrottle, SignupThrottle
+
+    def _apply(**rates):
+        for throttle in (LoginThrottle, SignupThrottle):
+            monkeypatch.setattr(throttle, "THROTTLE_RATES", {**throttle.THROTTLE_RATES, **rates})
+
+    return _apply
+
+
 def classify(article, variant, category=Category.SECURITY, **kwargs):
     return Classification.objects.create(
-        article=article, variant=variant, category=category,
-        confidence=Level.HIGH, prompt_version="ptest", provider="gapgpt",
-        model=variant.model, **kwargs,
+        article=article,
+        variant=variant,
+        category=category,
+        confidence=Level.HIGH,
+        prompt_version="ptest",
+        provider="gapgpt",
+        model=variant.model,
+        **kwargs,
     )
 
 
@@ -51,21 +74,38 @@ def evaluate(article, variant, **scores):
     }
     fields.update(scores)
     return Evaluation.objects.create(
-        article=article, variant=variant, prompt_version="ptest",
-        provider="gapgpt", model=variant.model, **fields,
+        article=article,
+        variant=variant,
+        prompt_version="ptest",
+        provider="gapgpt",
+        model=variant.model,
+        **fields,
     )
 
 
 class TestAuthentication:
-    def test_health_is_public(self):
+    def test_health_is_public(self, db):
         """The container healthcheck and the edge proxy hit this before any login exists."""
         assert APIClient().get("/api/health/").status_code == 200
+
+    def test_health_reports_a_dependency_outage(self, monkeypatch):
+        def unavailable(_key):
+            raise OSError("redis is unavailable")
+
+        monkeypatch.setattr("api.views.cache.get", unavailable)
+        response = APIClient().get("/api/health/")
+        assert response.status_code == 503
+        assert response.json() == {"status": "unavailable"}
 
     def test_signup_creates_a_regular_user_and_returns_a_working_token(self, db):
         api = APIClient()
         response = api.post(
             "/api/auth/signup/",
-            {"username": "new-analyst", "email": "analyst@example.com", "password": "Mango-River-47-Orbit"},
+            {
+                "username": "new-analyst",
+                "email": "analyst@example.com",
+                "password": "Mango-River-47-Orbit",
+            },
             format="json",
         )
         assert response.status_code == 201
@@ -83,10 +123,34 @@ class TestAuthentication:
         assert response.status_code == 400
         assert not get_user_model().objects.filter(username="weak-user").exists()
 
+    def test_signup_turns_a_concurrent_username_claim_into_a_field_error(self, db, monkeypatch):
+        from django.db import IntegrityError
+
+        def already_claimed(_serializer):
+            raise IntegrityError("duplicate key")
+
+        monkeypatch.setattr("api.views.SignupSerializer.save", already_claimed)
+        response = APIClient().post(
+            "/api/auth/signup/",
+            {"username": "racing-user", "password": "Mango-River-47-Orbit"},
+            format="json",
+        )
+        assert response.status_code == 400
+        assert response.json() == {"username": ["This username is already in use."]}
+
     @pytest.mark.parametrize(
         "path",
-        ["/api/articles/", "/api/feed-stats/", "/api/ops/", "/api/kpi/", "/api/market/",
-         "/api/exports/", "/api/ab/pairs/", "/api/reviews/", "/api/sources/"],
+        [
+            "/api/articles/",
+            "/api/feed-stats/",
+            "/api/ops/",
+            "/api/kpi/",
+            "/api/market/",
+            "/api/exports/",
+            "/api/ab/pairs/",
+            "/api/reviews/",
+            "/api/sources/",
+        ],
     )
     def test_everything_else_requires_login(self, db, path):
         assert APIClient().get(path).status_code in {401, 403}
@@ -101,11 +165,98 @@ class TestAuthentication:
         body = response.json()
         assert "username" in body or "password" in body or "non_field_errors" in body
 
+    def test_password_guessing_is_rate_limited(self, db, user, throttle_rates):
+        """The login endpoint is the only place a stranger learns whether a password is
+        right. Unthrottled, every account is worth exactly one online brute-force run."""
+        throttle_rates(login="3/min")
+        api = APIClient()
+        attempt = {"username": user.get_username(), "password": "not-the-password"}
+        codes = [api.post("/api/auth/token/", attempt, format="json").status_code for _ in range(4)]
+        assert codes[:3] == [400, 400, 400], codes
+        assert codes[3] == 429, "the fourth guess should have been throttled"
+
+    def test_a_forged_forwarded_header_does_not_buy_a_fresh_allowance(
+        self, db, user, settings, throttle_rates
+    ):
+        """Behind the edge, the throttle identity comes from X-Forwarded-For - which the
+        CLIENT can also send. DRF's default reads the whole header, so a caller inventing a
+        new value per request gets a new bucket per request and the limit stops existing.
+        NUM_PROXIES pins the identity to the last hop, the one Caddy itself appended."""
+        settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, "NUM_PROXIES": 1}
+        throttle_rates(login="2/min")
+        api = APIClient()
+        attempt = {"username": user.get_username(), "password": "not-the-password"}
+        codes = [
+            api.post(
+                "/api/auth/token/",
+                attempt,
+                format="json",
+                # A different forged prefix each time; the real peer is the trailing entry.
+                HTTP_X_FORWARDED_FOR=f"10.0.0.{n}, 203.0.113.7",
+            ).status_code
+            for n in range(3)
+        ]
+        assert codes == [400, 400, 429], codes
+
+    def test_account_creation_is_rate_limited(self, db, throttle_rates):
+        """Registration is open, so the only thing standing between a stranger and an
+        unbounded number of user rows is this limit."""
+        throttle_rates(signup="2/hour")
+        api = APIClient()
+        codes = [
+            api.post(
+                "/api/auth/signup/",
+                {"username": f"flood-{n}", "password": "Mango-River-47-Orbit"},
+                format="json",
+            ).status_code
+            for n in range(3)
+        ]
+        assert codes == [201, 201, 429], codes
+        assert get_user_model().objects.filter(username__startswith="flood-").count() == 2
+
+    def test_signing_out_revokes_the_token_rather_than_just_the_cookie(self, db, user):
+        """A DRF token never expires. If sign-out only drops the browser cookie, the string
+        it held stays a working credential for the whole corpus forever."""
+        api = APIClient()
+        token = api.post(
+            "/api/auth/token/",
+            {"username": user.get_username(), "password": "test-pass"},
+            format="json",
+        ).json()["token"]
+
+        api.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        assert api.get("/api/auth/me/").status_code == 200
+        assert api.post("/api/auth/logout/").status_code == 204
+        assert api.get("/api/auth/me/").status_code == 401
+
+    def test_a_valid_token_cannot_bypass_signup_throttling(self, db, user, throttle_rates):
+        from rest_framework.authtoken.models import Token
+
+        throttle_rates(signup="1/hour")
+        api = APIClient()
+        api.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=user).key}")
+        codes = [
+            api.post(
+                "/api/auth/signup/",
+                {
+                    "username": f"extra-{n}",
+                    "password": "Mango-River-47-Orbit",
+                },
+                format="json",
+            ).status_code
+            for n in range(2)
+        ]
+        assert codes == [201, 429]
+
+    def test_signing_out_twice_is_not_an_error(self, db, user):
+        api = APIClient()
+        api.force_authenticate(user=user)
+        assert api.post("/api/auth/logout/").status_code == 204
+        assert api.post("/api/auth/logout/").status_code == 204
+
 
 class TestFeed:
-    def test_card_carries_the_persian_value_and_an_english_label(
-        self, client, article, variant
-    ):
+    def test_card_carries_the_persian_value_and_an_english_label(self, client, article, variant):
         """The stored value must survive the round trip unchanged - it is the only string
         the team's Excel dropdown accepts. The English gloss rides alongside, never
         instead."""
@@ -131,9 +282,7 @@ class TestFeed:
         row = client.get("/api/articles/").json()["results"][0]
         assert row["decision"]["reason"]
 
-    def test_duplicates_are_hidden_by_default_and_countable_on_request(
-        self, client, make_article
-    ):
+    def test_duplicates_are_hidden_by_default_and_countable_on_request(self, client, make_article):
         canonical = make_article()
         make_article(duplicate_of=canonical, duplicate_score=0.9)
         assert client.get("/api/articles/").json()["count"] == 1
@@ -141,8 +290,13 @@ class TestFeed:
 
     def test_summary_title_wins_over_the_original(self, client, article, variant):
         Summary.objects.create(
-            article=article, variant=variant, optimized_title="تیتر بهینه",
-            one_line="خلاصه", prompt_version="ptest", provider="gapgpt", model=variant.model,
+            article=article,
+            variant=variant,
+            optimized_title="تیتر بهینه",
+            one_line="خلاصه",
+            prompt_version="ptest",
+            provider="gapgpt",
+            model=variant.model,
         )
         assert client.get("/api/articles/").json()["results"][0]["title"] == "تیتر بهینه"
 
@@ -169,8 +323,13 @@ class TestNoNPlusOne:
             classify(article, variant)
             evaluate(article, variant)
             Summary.objects.create(
-                article=article, variant=variant, optimized_title="ت", one_line="خ",
-                prompt_version="ptest", provider="gapgpt", model=variant.model,
+                article=article,
+                variant=variant,
+                optimized_title="ت",
+                one_line="خ",
+                prompt_version="ptest",
+                provider="gapgpt",
+                model=variant.model,
             )
         with django_assert_max_num_queries(12):
             response = client.get("/api/articles/?limit=20")
@@ -193,8 +352,13 @@ class TestNoNPlusOne:
             classify(article, variant)
             evaluate(article, variant)
             Summary.objects.create(
-                article=article, variant=variant, optimized_title="ت", one_line="خ",
-                prompt_version="ptest", provider="gapgpt", model=variant.model,
+                article=article,
+                variant=variant,
+                optimized_title="ت",
+                one_line="خ",
+                prompt_version="ptest",
+                provider="gapgpt",
+                model=variant.model,
             )
             ReviewCase.objects.create(article=article, stratum="round_robin")
         # Six today. The bound is what matters, not the number: a regression here is
@@ -205,6 +369,14 @@ class TestNoNPlusOne:
 
 
 class TestNotifyFilterMatchesTheRule:
+    def test_scoped_decision_only_considers_requested_articles(self, make_article, variant):
+        inside = make_article()
+        outside = make_article()
+        evaluate(inside, variant)
+        evaluate(outside, variant)
+
+        assert articles_with_decision(NotifyStatus.NOTIFY, {inside.id}) == {inside.id}
+
     def test_the_sql_filter_returns_exactly_what_decide_returns(
         self, client, make_article, variant
     ):
@@ -224,8 +396,11 @@ class TestNotifyFilterMatchesTheRule:
         for confidence, gold, security in combinations:
             article = make_article()
             evaluate(
-                article, variant, confidence_occurrence=confidence,
-                gold_price_impact=gold, security_relevance=security,
+                article,
+                variant,
+                confidence_occurrence=confidence,
+                gold_price_impact=gold,
+                security_relevance=security,
             )
             expected[decide(confidence, gold, security).status].add(article.id)
 
@@ -243,8 +418,11 @@ class TestNotifyFilterMatchesTheRule:
         """
         article = make_article()
         evaluate(
-            article, variant, confidence_occurrence=Level.HIGH,
-            gold_price_impact=Level.HIGH, security_relevance=None,
+            article,
+            variant,
+            confidence_occurrence=Level.HIGH,
+            gold_price_impact=Level.HIGH,
+            security_relevance=None,
         )
         assert client.get(f"/api/articles/?notify={NotifyStatus.NOTIFY}").json()["count"] == 1
 
@@ -253,14 +431,19 @@ class TestABBlinding:
     @pytest.fixture
     def pair(self, db, article, variant):
         challenger = PromptVariant.objects.create(
-            name="semantic-memory", model="gemini-3.1-flash-lite",
-            memory_strategy="semantic", memory_k=5,
+            name="semantic-memory",
+            model="gemini-3.1-flash-lite",
+            memory_strategy="semantic",
+            memory_k=5,
         )
         for arm in (variant, challenger):
             classify(article, arm)
             evaluate(article, arm)
         return ABPair.objects.create(
-            article=article, variant_a=variant, variant_b=challenger, shown_as_left=Side.B,
+            article=article,
+            variant_a=variant,
+            variant_b=challenger,
+            shown_as_left=Side.B,
         )
 
     def test_the_response_never_names_the_variants(self, client, pair):
@@ -332,10 +515,12 @@ class TestReview:
         prediction, because it is permanent."""
         response = client.post(
             f"/api/reviews/{case.id}/submit/",
-            {"reviewed_category": Category.SECURITY,
-             "confidence_occurrence": Level.HIGH,
-             "gold_price_impact": "",
-             "security_relevance": Level.HIGH},
+            {
+                "reviewed_category": Category.SECURITY,
+                "confidence_occurrence": Level.HIGH,
+                "gold_price_impact": "",
+                "security_relevance": Level.HIGH,
+            },
         )
         assert response.status_code == 200
         case.refresh_from_db()
@@ -377,7 +562,9 @@ class TestKPI:
         reviewer's omission and make the metric drift with reviewer fatigue."""
         evaluate(article, variant)
         ReviewCase.objects.create(
-            article=article, stratum="round_robin", status=ReviewStatus.APPROVED,
+            article=article,
+            stratum="round_robin",
+            status=ReviewStatus.APPROVED,
             reviewed_category=Category.SECURITY,
             confidence_occurrence=Level.HIGH,
             gold_price_impact=None,
@@ -396,14 +583,15 @@ class TestKPI:
         vs «خیلی کم», and an exact-match-only metric hides that difference entirely."""
         evaluate(article, variant, security_relevance=Level.VERY_HIGH)
         ReviewCase.objects.create(
-            article=article, stratum="round_robin", status=ReviewStatus.APPROVED,
+            article=article,
+            stratum="round_robin",
+            status=ReviewStatus.APPROVED,
             reviewed_category=Category.SECURITY,
-            confidence_occurrence=Level.HIGH, security_relevance=Level.HIGH,
+            confidence_occurrence=Level.HIGH,
+            security_relevance=Level.HIGH,
             reviewed_at=timezone.now(),
         )
-        by_axis = {
-            row["axis"]: row for row in client.get("/api/kpi/").json()["axis_agreement"]
-        }
+        by_axis = {row["axis"]: row for row in client.get("/api/kpi/").json()["axis_agreement"]}
         assert by_axis["security_relevance"]["exact_rate"] == 0.0
         assert by_axis["security_relevance"]["within_one_rate"] == 1.0
 
@@ -491,6 +679,44 @@ class TestOps:
 
         assert client.get("/api/ops/?days=1").json()["notify"][NotifyStatus.NOTIFY] == 1
         assert client.get("/api/ops/?days=30").json()["notify"][NotifyStatus.NOTIFY] == 2
+
+    def test_a_missing_backup_directory_reports_unconfigured_rather_than_erroring(
+        self, client, settings, tmp_path
+    ):
+        """A deployment without the backup volume mounted must still render /ops. An
+        exception here would take the whole operational dashboard down over a missing
+        directory, which is the moment you most need the dashboard."""
+        settings.BACKUP_DIR = tmp_path / "nowhere"
+        backups = client.get("/api/ops/").json()["backups"]
+        assert backups == {
+            "configured": False,
+            "last_success_at": None,
+            "age_hours": None,
+            "retained": 0,
+        }
+
+    def test_backup_age_comes_from_an_existing_archive(self, client, settings, tmp_path):
+        import os
+
+        dump = tmp_path / "newsintel-20260908-030000.dump"
+        dump.write_bytes(b"PGDMP")
+        two_days_ago = (timezone.now() - timedelta(days=2)).timestamp()
+        os.utime(dump, (two_days_ago, two_days_ago))
+        # Neither a fresh success marker nor an in-progress dump makes the old dump fresh.
+        (tmp_path / ".last-success").write_text("2026-09-08T03:00:00Z")
+        (tmp_path / "incomplete.dump.partial").write_bytes(b"partial")
+        (tmp_path / "empty.dump").touch()
+        settings.BACKUP_DIR = tmp_path
+
+        backups = client.get("/api/ops/").json()["backups"]
+        assert backups["configured"] is True
+        assert backups["retained"] == 1
+        assert backups["age_hours"] == 48.0
+
+        dump.unlink()
+        backups = client.get("/api/ops/").json()["backups"]
+        assert backups["age_hours"] is None
+        assert backups["retained"] == 0
 
 
 @pytest.mark.django_db

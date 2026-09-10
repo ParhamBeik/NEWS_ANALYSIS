@@ -179,6 +179,22 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 30,
+    # Applied per view, not globally: a reviewer paging the feed is not the traffic worth
+    # limiting. These two are, because they are the only endpoints an unauthenticated
+    # caller can reach, and both cost something a stranger should not get for free -
+    # a password guess and a user row.
+    "DEFAULT_THROTTLE_RATES": {
+        "login": env("THROTTLE_LOGIN", "10/min"),
+        "signup": env("THROTTLE_SIGNUP", "5/hour"),
+    },
+    # How many reverse proxies sit in front of this process, so a throttle can identify the
+    # CLIENT rather than the proxy. This is a correctness setting, not tuning: DRF's default
+    # (None) hashes the WHOLE X-Forwarded-For header when one is present, so a caller who
+    # invents a new value per request gets a new throttle bucket per request and the limit
+    # stops existing. With 1, DRF takes the last hop - the address Caddy actually observed,
+    # which a client cannot forge - and falls back to REMOTE_ADDR when there is no header.
+    # 0 for a process reached directly, with no proxy in front.
+    "NUM_PROXIES": env_int("DRF_NUM_PROXIES", 0),
 }
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
@@ -201,6 +217,32 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TIMEZONE = "UTC"
 
 REDIS_URL = CELERY_BROKER_URL
+
+
+def redis_db(url: str, index: int) -> str:
+    """The same Redis server, a different logical database."""
+    head, _, tail = url.rpartition("/")
+    return f"{head}/{index}" if tail.isdigit() else f"{url.rstrip('/')}/{index}"
+
+
+# --------------------------------------------------------------------------------- cache
+
+# Redis, not the LocMemCache default, because the only thing in this cache is rate-limit
+# state and LocMemCache is PER PROCESS. Gunicorn runs three workers, so a "5/hour" signup
+# limit was really fifteen, and it reset to zero on every deploy and every worker respawn.
+# A shared counter is the whole point of a rate limit.
+#
+# A DIFFERENT logical database from Celery's (db 1 against db 0): `cache.clear()` issues
+# FLUSHDB, and pointing it at the broker's database would delete every queued task. Redis
+# runs with `maxmemory-policy noeviction` for exactly that queue, which is also why nothing
+# but small, expiring counters belongs here.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("CACHE_URL", redis_db(REDIS_URL, 1)),
+        "KEY_PREFIX": "newsintel",
+    }
+}
 
 # ---------------------------------------------------------------------- pipeline config
 
@@ -226,9 +268,7 @@ NEWS_MAX_OUTPUT_TOKENS = env_int("NEWS_MAX_OUTPUT_TOKENS", 350)
 NEWS_ROLLING_WINDOW_DAYS = env_int("NEWS_ROLLING_WINDOW_DAYS", 14)
 NEWS_CRAWL_LIMIT_PER_SOURCE = env_int("NEWS_CRAWL_LIMIT_PER_SOURCE", 40)
 NEWS_HTTP_TIMEOUT = env_int("NEWS_HTTP_TIMEOUT", 20)
-NEWS_USER_AGENT = env(
-    "NEWS_USER_AGENT", "news-intel/2.0 (+research pipeline; contact via site)"
-)
+NEWS_USER_AGENT = env("NEWS_USER_AGENT", "news-intel/2.0 (+research pipeline; contact via site)")
 
 GAPGPT_API_KEY = env("GAPGPT_API_KEY")
 GAPGPT_BASE_URL = env("GAPGPT_BASE_URL", "https://api.gapgpt.app/v1")
@@ -251,6 +291,10 @@ WORKBOOK_TEMPLATE_PATH = BASE_DIR / "exports" / "assets" / "workbook_template.xl
 # ExportDownloadView, which requires a login; keeping them off that volume is what makes
 # that the only way in.
 EXPORT_DIR = Path(env("EXPORT_DIR", str(BASE_DIR / "var" / "exports")))
+# Where the nightly pg_dump lands, mounted READ-ONLY into this process. The app never
+# writes here; it only reports how old the newest dump is, because a backup job that
+# stopped silently is indistinguishable from a working one until a restore is attempted.
+BACKUP_DIR = Path(env("BACKUP_DIR", str(BASE_DIR / "var" / "backups")))
 
 LOGGING = {
     "version": 1,

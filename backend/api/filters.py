@@ -29,11 +29,15 @@ from core.vocabulary import NotifyStatus
 from inference.models import Classification, Evaluation
 
 
-def articles_with_decision(status: str) -> set[int]:
-    """Article ids whose LATEST evaluation reaches `status`, according to `decide` itself."""
-    rows = (
-        Evaluation.objects.latest_per_article()
-        .only("article_id", "confidence_occurrence", "gold_price_impact", "security_relevance")
+def articles_with_decision(status: str, article_ids: set[int] | None = None) -> set[int]:
+    """Article ids whose latest evaluation reaches `status`, according to `decide` itself."""
+    if article_ids is not None and not article_ids:
+        return set()
+    rows = Evaluation.objects.latest_per_article()
+    if article_ids is not None:
+        rows = rows.filter(article_id__in=article_ids)
+    rows = rows.only(
+        "article_id", "confidence_occurrence", "gold_price_impact", "security_relevance"
     )
     return {row.article_id for row in rows if row.decision.status == status}
 
@@ -65,9 +69,7 @@ class ArticleFilter(filters.FilterSet):
         """Latest classification only. Filtering on ANY classification would surface an
         article under a category a superseded run assigned it."""
         latest = Classification.objects.latest_ids()
-        return queryset.filter(
-            classifications__pk__in=latest, classifications__category=value
-        )
+        return queryset.filter(classifications__pk__in=latest, classifications__category=value)
 
     def filter_notify(self, queryset: QuerySet, name: str, value: str) -> QuerySet:
         return queryset.filter(pk__in=articles_with_decision(value))
