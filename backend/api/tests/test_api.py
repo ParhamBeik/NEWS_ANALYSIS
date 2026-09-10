@@ -136,7 +136,7 @@ class TestAuthentication:
             format="json",
         )
         assert response.status_code == 400
-        assert response.json() == {"username": ["This username is already in use."]}
+        assert response.json() == {"username": "This username is already in use."}
 
     @pytest.mark.parametrize(
         "path",
