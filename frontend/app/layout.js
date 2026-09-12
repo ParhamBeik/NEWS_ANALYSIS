@@ -1,4 +1,5 @@
 import AppShell from "@/components/AppShell";
+import { currentUser } from "@/lib/api";
 import "./globals.css";
 
 export const metadata = {
@@ -14,11 +15,13 @@ export const metadata = {
  * direction at the content boundary is the smaller, correct change.
  */
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  const user = await currentUser();
+
   return (
     <html lang="en" dir="ltr">
       <body className="min-h-screen bg-slate-950 text-slate-100 antialiased">
-        <AppShell>{children}</AppShell>
+        <AppShell user={user}>{children}</AppShell>
       </body>
     </html>
   );

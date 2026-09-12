@@ -18,16 +18,13 @@ export default async function ExportsPage() {
     <>
       <h1 className="mb-1 text-2xl font-semibold text-slate-100">Exports</h1>
       <p className="mb-6 text-sm text-slate-500">
-        The team&rsquo;s Persian analyst workbook, built by a scheduled task at 23:50 Tehran
-        time and kept byte-compatible with the template — including the{" "}
-        <code className="text-slate-400">extLst</code> block openpyxl drops, which is what
-        the dropdown validations live in.
+        Download the team&rsquo;s Persian analyst workbook and category feeds. New files are
+        prepared nightly at 23:50 Tehran time.
       </p>
 
       {files.length === 0 ? (
         <EmptyState title="No workbooks yet.">
-          The exporter runs nightly. Trigger one manually with{" "}
-          <code>manage.py run_pipeline workbook</code>.
+          The next scheduled export will appear here after it completes.
         </EmptyState>
       ) : (
         <Card className="p-4">

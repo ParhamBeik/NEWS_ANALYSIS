@@ -14,7 +14,7 @@ import { NextResponse } from "next/server";
  * about to 403, not to be the security boundary. The security boundary is Django.
  */
 
-const PUBLIC = ["/login", "/signup", "/_next", "/favicon.ico"];
+const PUBLIC = ["/login", "/signup", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
 
 function withPathname(request, pathname) {
   const requestHeaders = new Headers(request.headers);

@@ -375,7 +375,7 @@ export default async function OpsPage({ searchParams }) {
                       className={`py-1.5 text-right text-xs ${
                         run.status === "failed" ? "text-rose-400" : "text-slate-400"
                       }`}
-                      title={run.error || ""}
+                      aria-label={`Run ${run.status}`}
                     >
                       {run.status}
                     </td>

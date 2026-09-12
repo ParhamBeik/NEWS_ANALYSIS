@@ -57,7 +57,7 @@ function AxisRow({ axis, value, modelValue, onChange }) {
           }`}
           title="This axis cannot be judged from this article. Stored as NULL, never as a level."
         >
-          not assessed
+          Not assessed
         </button>
       </div>
     </div>
@@ -109,7 +109,7 @@ export default function ReviewForm({ initialCase }) {
         <p className="mt-2 text-sm text-slate-500">
           {done > 0
             ? `You labelled ${done} article${done === 1 ? "" : "s"} this session.`
-            : "The sampler queues articles hourly — disagreements, `other` verdicts, unscored chains and a category round-robin. Run one now with manage.py run_pipeline sample-review."}
+            : "The queue refreshes hourly with disagreements, unscored articles, and a balanced category sample."}
         </p>
       </Card>
     );

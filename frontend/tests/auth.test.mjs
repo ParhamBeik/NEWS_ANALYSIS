@@ -53,6 +53,10 @@ test('a stale cookie can reach login instead of cycling between home and login',
     nextUrl: new URL('http://localhost/login'), cookies: { get: () => 'revoked-token' },
     headers: new Headers(), url: 'http://localhost/login',
   }), 'continue');
+  assert.equal(middleware.middleware({
+    nextUrl: new URL('http://localhost/robots.txt'), cookies: { get: () => undefined },
+    headers: new Headers(), url: 'http://localhost/robots.txt',
+  }), 'continue');
 });
 
 test('dashboard API reads have a bounded server-side deadline', async () => {
@@ -73,4 +77,69 @@ test('dashboard API reads have a bounded server-side deadline', async () => {
 
   await api.apiFetch('/api/health/');
   assert.ok(sent.signal instanceof AbortSignal);
+});
+
+// The root layout renders on /login too, so an unauthenticated read here must be a normal
+// null rather than the redirect apiGet would issue - that redirect targets the very page
+// whose layout produced it.
+test('the signed-in identity resolves to null instead of redirecting a signed-out visitor', async () => {
+  let calls = 0;
+  const loadApi = (token, respond) => load('../lib/api.js', {
+    process: { env: {} },
+    fetch: async () => {
+      calls += 1;
+      return respond();
+    },
+  }, {
+    'next/headers': {
+      cookies: async () => ({ get: (name) => (token && name === 'news_token' ? { value: token } : undefined) }),
+      headers: async () => new Headers(),
+    },
+    'next/navigation': { redirect: () => { throw new Error('unexpected redirect'); } },
+  });
+
+  const anonymous = await loadApi(null, () => null);
+  assert.equal(await anonymous.currentUser(), null);
+  assert.equal(calls, 0, 'no cookie means no call to the API at all');
+
+  const revoked = await loadApi('stale', () => ({ ok: false, status: 401, json: async () => ({}) }));
+  assert.equal(await revoked.currentUser(), null);
+
+  const unreachable = await loadApi('good', () => { throw new Error('ECONNREFUSED'); });
+  assert.equal(await unreachable.currentUser(), null);
+
+  // Field by field, not deepEqual: the module runs in its own vm realm, so the object it
+  // returns has a different Object.prototype and fails a strict structural comparison.
+  const staff = await loadApi('good', () => ({ ok: true, status: 200, json: async () => ({ username: 'parham', is_staff: true }) }));
+  const admin = await staff.currentUser();
+  assert.equal(admin.username, 'parham');
+  assert.equal(admin.isStaff, true);
+
+  // Django omits nothing here, but a plain user's is_staff must never arrive as undefined
+  // and light up the admin link by accident.
+  const analyst = await loadApi('good', () => ({ ok: true, status: 200, json: async () => ({ username: 'demo1' }) }));
+  const plain = await analyst.currentUser();
+  assert.equal(plain.username, 'demo1');
+  assert.equal(plain.isStaff, false);
+});
+
+test('the Django admin link is an anchor the Next router cannot swallow', async () => {
+  const shell = await readFile(new URL('../components/AppShell.js', import.meta.url), 'utf8');
+  assert.match(shell, /<a\s+href="\/admin\/"/, 'a next/link to /admin/ would 404 in the Next router');
+  assert.match(shell, /user\?\.isStaff \?/, 'the admin link is gated on is_staff');
+});
+
+test('the Quality dashboard imports every shared component it renders', async () => {
+  const page = await readFile(new URL('../app/kpi/page.js', import.meta.url), 'utf8');
+  assert.match(page, /import\s*\{[^}]*\bMetric\b[^}]*\}\s*from\s*["']@\/components\/primitives["']/);
+});
+
+test('dashboard cards can contain scrollable content without widening their grid', async () => {
+  const primitives = await readFile(new URL('../components/primitives.js', import.meta.url), 'utf8');
+  assert.match(primitives, /className=\{`min-w-0 rounded-xl border/);
+});
+
+test('the skip link target accepts programmatic keyboard focus', async () => {
+  const shell = await readFile(new URL('../components/AppShell.js', import.meta.url), 'utf8');
+  assert.match(shell, /<main id="main" tabIndex=\{-1\}/);
 });

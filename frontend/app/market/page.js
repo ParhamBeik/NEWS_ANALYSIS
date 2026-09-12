@@ -149,7 +149,7 @@ export default async function MarketPage({ searchParams }) {
                       <bdi>{row.gold_trend || "—"}</bdi>
                     </td>
                     <td className="persian hidden py-1.5 text-right text-slate-400 sm:table-cell">
-                      <bdi>{row.gold_price_impact || "not assessed"}</bdi>
+                      <bdi>{row.gold_price_impact || "Not assessed"}</bdi>
                     </td>
                     <td className="py-1.5 text-right tabular text-slate-500">
                       {row.window_trading_days}d

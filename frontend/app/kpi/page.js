@@ -1,4 +1,4 @@
-import { Card, SectionTitle, TableScroll } from "@/components/primitives";
+import { Card, Metric, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { AXIS_LABEL, number, percent } from "@/lib/display";
 

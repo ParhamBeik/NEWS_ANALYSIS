@@ -62,6 +62,27 @@ export async function apiPost(path, body) {
   return response.status === 204 ? null : response.json();
 }
 
+/**
+ * Who is signed in, or null.
+ *
+ * Deliberately not built on `apiGet`: this runs in the root layout, which also renders
+ * /login and /signup. `apiGet` redirects to /login on a 401, and redirecting to a page
+ * whose own layout issues the same redirect is an infinite loop. A signed-out visitor is
+ * the normal case here, not an error, so every failure - no cookie, revoked token, API
+ * down - collapses to null and the shell renders without a name.
+ */
+export async function currentUser() {
+  if (!(await cookies()).get("news_token")) return null;
+  try {
+    const response = await apiFetch("/api/auth/me/");
+    if (!response.ok) return null;
+    const { username, is_staff: isStaff } = await response.json();
+    return { username, isStaff: Boolean(isStaff) };
+  } catch {
+    return null;
+  }
+}
+
 /** Turn a params object into a query string, dropping empty values rather than sending
  *  `?source=` - which django-filter would treat as a real filter on the empty string. */
 export function query(params) {

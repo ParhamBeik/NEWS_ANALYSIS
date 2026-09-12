@@ -14,13 +14,13 @@ export default async function LoginPage({ searchParams }) {
   return (
     <div className="mx-auto mt-24 max-w-sm px-3">
       <h1 className="text-xl font-semibold text-slate-100">News Intelligence</h1>
-      <p className="mt-1 mb-6 text-sm text-slate-500">
+      <p className="mt-1 mb-6 text-sm text-slate-400">
         Persian security and macroeconomic news analysis.
       </p>
       <LoginForm next={next} />
-      <p className="mt-4 text-center text-sm text-slate-500">
+      <p className="mt-4 text-center text-sm text-slate-400">
         No account?{" "}
-        <Link href={signupHref} className="text-emerald-400 hover:underline">
+        <Link href={signupHref} className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">
           Create one
         </Link>
       </p>

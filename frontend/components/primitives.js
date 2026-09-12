@@ -21,7 +21,7 @@ import {
 export function Card({ children, className = "" }) {
   return (
     <div
-      className={`rounded-xl border border-slate-800 bg-slate-900/60 ${className}`}
+      className={`min-w-0 rounded-xl border border-slate-800 bg-slate-900/60 ${className}`}
     >
       {children}
     </div>
@@ -74,7 +74,7 @@ export function ScoreChip({ score, axis }) {
             <span className="ml-2 text-[10px] opacity-70 tabular">{ordinal}/5</span>
           </>
         ) : (
-          "not assessed"
+          "Not assessed"
         )}
       </span>
     </div>

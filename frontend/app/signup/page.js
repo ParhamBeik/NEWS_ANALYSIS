@@ -14,13 +14,13 @@ export default async function SignupPage({ searchParams }) {
   return (
     <div className="mx-auto mt-24 max-w-sm px-3">
       <h1 className="text-xl font-semibold text-slate-100">Create account</h1>
-      <p className="mt-1 mb-6 text-sm text-slate-500">
+      <p className="mt-1 mb-6 text-sm text-slate-400">
         Join the News Intelligence workspace.
       </p>
       <SignupForm next={next} />
-      <p className="mt-4 text-center text-sm text-slate-500">
+      <p className="mt-4 text-center text-sm text-slate-400">
         Already registered?{" "}
-        <Link href={loginHref} className="text-emerald-400 hover:underline">
+        <Link href={loginHref} className="text-emerald-400 underline underline-offset-2 hover:text-emerald-300">
           Sign in
         </Link>
       </p>

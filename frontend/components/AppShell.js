@@ -15,7 +15,7 @@ const NAV = [
 
 const AUTH_PATHS = ["/login", "/signup"];
 
-export default function AppShell({ children }) {
+export default function AppShell({ children, user = null }) {
   const pathname = usePathname();
   const isAuth = AUTH_PATHS.some((path) => pathname.startsWith(path));
 
@@ -64,17 +64,37 @@ export default function AppShell({ children }) {
               );
             })}
           </nav>
-          <form action="/logout" method="post" className="shrink-0">
-            <button
-              type="submit"
-              className="text-xs text-slate-500 transition hover:text-slate-300"
-            >
-              Sign out
-            </button>
-          </form>
+          <div className="flex shrink-0 items-center gap-3">
+            {/* Which account this window is signed in as. Two people on the same product
+                look identical without it, and the sign-out button below reads as a threat
+                to whoever cannot tell whose session they are about to end. */}
+            {user ? (
+              <span className="max-w-[12ch] truncate text-xs text-slate-400 sm:max-w-none">
+                {user.username}
+              </span>
+            ) : null}
+            {/* A plain anchor, not next/link: /admin/ is Django's, and a client-side
+                navigation to it would 404 in the Next router before the request leaves. */}
+            {user?.isStaff ? (
+              <a
+                href="/admin/"
+                className="text-xs text-slate-500 transition hover:text-slate-300"
+              >
+                Admin
+              </a>
+            ) : null}
+            <form action="/logout" method="post">
+              <button
+                type="submit"
+                className="text-xs text-slate-500 transition hover:text-slate-300"
+              >
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
       </header>
-      <main id="main" className="mx-auto max-w-7xl px-3 py-6 sm:px-5 sm:py-8">
+      <main id="main" tabIndex={-1} className="mx-auto max-w-7xl px-3 py-6 sm:px-5 sm:py-8">
         {children}
       </main>
     </div>
