@@ -1,10 +1,18 @@
-import { apiGet } from "@/lib/api";
+import { EmptyState } from "@/components/primitives";
+import { apiGet, currentStaffUser } from "@/lib/api";
 import ReviewForm from "./ReviewForm";
 
 export const metadata = { title: "Review · News Intelligence" };
 export const dynamic = "force-dynamic";
 
 export default async function ReviewPage() {
+  if (!(await currentStaffUser())) {
+    return (
+      <EmptyState title="Staff access required">
+        Review labels are shared training evidence and are reserved for staff reviewers.
+      </EmptyState>
+    );
+  }
   const initialCase = await apiGet("/api/reviews/next/");
   return (
     <>

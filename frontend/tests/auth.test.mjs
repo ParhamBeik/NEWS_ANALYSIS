@@ -1,26 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import vm from 'node:vm';
-
-// Execute the actual server modules with request-scoped framework and network boundaries.
-async function load(path, globals, imports) {
-  const context = vm.createContext({ URL, Headers, AbortSignal, ...globals });
-  const module = new vm.SourceTextModule(await readFile(new URL(path, import.meta.url), 'utf8'), { context });
-  await module.link((name) => {
-    const values = imports[name];
-    return new vm.SyntheticModule(Object.keys(values), function () {
-      for (const [key, value] of Object.entries(values)) this.setExport(key, value);
-    }, { context });
-  });
-  await module.evaluate();
-  return module.namespace;
-}
+import { loadServerModule } from './helpers.mjs';
 
 test('auth actions preserve trusted client identity and distinguish throttling from bad credentials', async () => {
   let sent;
   const environment = { TRUST_PROXY_HEADERS: '1' };
-  const actions = await load('../app/login/actions.js', {
+  const actions = await loadServerModule('../app/login/actions.js', {
     process: { env: environment },
     fetch: async (url, options) => {
       sent = options;
@@ -46,7 +32,7 @@ test('auth actions preserve trusted client identity and distinguish throttling f
 });
 
 test('a stale cookie can reach login instead of cycling between home and login', async () => {
-  const middleware = await load('../middleware.js', {}, {
+  const middleware = await loadServerModule('../middleware.js', {}, {
     'next/server': { NextResponse: { next: () => 'continue', redirect: () => 'redirect' } },
   });
   assert.equal(middleware.middleware({
@@ -61,7 +47,7 @@ test('a stale cookie can reach login instead of cycling between home and login',
 
 test('dashboard API reads have a bounded server-side deadline', async () => {
   let sent;
-  const api = await load('../lib/api.js', {
+  const api = await loadServerModule('../lib/api.js', {
     process: { env: {} },
     fetch: async (_url, options) => {
       sent = options;
@@ -84,7 +70,7 @@ test('dashboard API reads have a bounded server-side deadline', async () => {
 // whose layout produced it.
 test('the signed-in identity resolves to null instead of redirecting a signed-out visitor', async () => {
   let calls = 0;
-  const loadApi = (token, respond) => load('../lib/api.js', {
+  const loadApi = (token, respond) => loadServerModule('../lib/api.js', {
     process: { env: {} },
     fetch: async () => {
       calls += 1;

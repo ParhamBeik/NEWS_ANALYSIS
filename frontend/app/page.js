@@ -2,8 +2,8 @@ import Link from "next/link";
 import ArticleCard from "@/components/ArticleCard";
 import AsyncPanel, { Skeleton } from "@/components/AsyncPanel";
 import FeedFilters from "@/components/FeedFilters";
-import { CircuitBanner, EmptyState, Metric } from "@/components/primitives";
-import { apiGet, query } from "@/lib/api";
+import { CircuitBanner, EmptyState, Metric, QueryError } from "@/components/primitives";
+import { ApiError, apiGet, query } from "@/lib/api";
 import { money, number } from "@/lib/display";
 
 export const metadata = { title: "Feed · News Intelligence" };
@@ -96,18 +96,30 @@ async function Filters({ params }) {
 }
 
 async function FeedList({ params, offset }) {
-  const feed = await apiGet(
-    `/api/articles/${query({
-      limit: PAGE_SIZE,
-      offset: offset || undefined,
-      source: params.source,
-      category: params.category,
-      notify: params.notify,
-      q: params.q,
-      unanalysed: params.unanalysed,
-      include_duplicates: params.include_duplicates,
-    })}`,
-  );
+  let feed;
+  try {
+    feed = await apiGet(
+      `/api/articles/${query({
+        limit: PAGE_SIZE,
+        offset: offset || undefined,
+        source: params.source,
+        category: params.category,
+        notify: params.notify,
+        q: params.q,
+        unanalysed: params.unanalysed,
+        include_duplicates: params.include_duplicates,
+      })}`,
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return (
+        <QueryError title="Invalid feed filter.">
+          Clear the invalid filter and try again.
+        </QueryError>
+      );
+    }
+    throw error;
+  }
 
   return (
     <>

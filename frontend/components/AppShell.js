@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 
 const NAV = [
   { href: "/", label: "Feed" },
-  { href: "/ab", label: "A/B lab" },
-  { href: "/review", label: "Review" },
+  { href: "/ab", label: "A/B lab", staffOnly: true },
+  { href: "/review", label: "Review", staffOnly: true },
   { href: "/kpi", label: "Quality" },
   { href: "/market", label: "Market" },
   { href: "/ops", label: "Ops" },
@@ -40,7 +40,7 @@ export default function AppShell({ children, user = null }) {
             News<span className="text-emerald-400">Intel</span>
           </Link>
           <nav aria-label="Main" className="flex min-w-0 flex-1 flex-wrap gap-1 text-sm">
-            {NAV.map((item) => {
+            {NAV.filter((item) => !item.staffOnly || user?.isStaff).map((item) => {
               // Exact match for the feed, prefix match for everything else - otherwise "/"
               // is a prefix of every route and every tab renders as the current one.
               const active =

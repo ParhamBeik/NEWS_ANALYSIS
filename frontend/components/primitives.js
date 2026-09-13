@@ -144,6 +144,15 @@ export function EmptyState({ title, children }) {
   );
 }
 
+export function QueryError({ title, children }) {
+  return (
+    <Card role="alert" className="border-amber-900/60 bg-amber-950/20 p-10 text-center">
+      <p className="text-amber-200">{title}</p>
+      {children && <p className="mt-2 text-sm text-amber-200/70">{children}</p>}
+    </Card>
+  );
+}
+
 /** Horizontal scroll for tables on narrow viewports without breaking card layout. */
 export function TableScroll({ children, className = "" }) {
   return (

@@ -19,6 +19,15 @@ import { redirect } from "next/navigation";
 
 const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 
+export class ApiError extends Error {
+  constructor(path, status, detail = "") {
+    super(`${path} failed: ${status}${detail ? ` ${detail}` : ""}`);
+    this.name = "ApiError";
+    this.path = path;
+    this.status = status;
+  }
+}
+
 async function loginRedirect() {
   const pathname = (await headers()).get("x-pathname");
   if (pathname && pathname !== "/login" && pathname !== "/signup") {
@@ -45,17 +54,17 @@ export async function apiFetch(path, options = {}) {
 /** Fetch JSON, sending an expired or missing session back to the login screen. */
 export async function apiGet(path) {
   const response = await apiFetch(path);
-  if (response.status === 401 || response.status === 403) await loginRedirect();
+  if (response.status === 401) await loginRedirect();
   if (response.status === 204) return null;
   if (!response.ok) {
-    throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
+    throw new ApiError(path, response.status, await response.text());
   }
   return response.json();
 }
 
 export async function apiPost(path, body) {
   const response = await apiFetch(path, { method: "POST", body: JSON.stringify(body) });
-  if (response.status === 401 || response.status === 403) await loginRedirect();
+  if (response.status === 401) await loginRedirect();
   if (!response.ok) {
     throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
   }
@@ -81,6 +90,13 @@ export async function currentUser() {
   } catch {
     return null;
   }
+}
+
+/** Return the signed-in operator when a server-rendered route is staff-only. */
+export async function currentStaffUser() {
+  const user = await currentUser();
+  if (!user) await loginRedirect();
+  return user?.isStaff ? user : null;
 }
 
 /** Turn a params object into a query string, dropping empty values rather than sending

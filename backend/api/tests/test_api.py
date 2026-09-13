@@ -30,6 +30,15 @@ from review.models import ABFeedback, ABPair, ReviewCase, ReviewStatus, Side
 
 @pytest.fixture
 def client(user) -> APIClient:
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
+    api = APIClient()
+    api.force_authenticate(user=user)
+    return api
+
+
+@pytest.fixture
+def regular_client(user) -> APIClient:
     api = APIClient()
     api.force_authenticate(user=user)
     return api
@@ -154,6 +163,11 @@ class TestAuthentication:
     )
     def test_everything_else_requires_login(self, db, path):
         assert APIClient().get(path).status_code in {401, 403}
+
+    @pytest.mark.parametrize("path", ["/api/ab/pairs/next/", "/api/reviews/next/"])
+    def test_shared_evaluation_workflows_require_staff(self, regular_client, path):
+        """A public signup must never be able to alter shared training evidence."""
+        assert regular_client.get(path).status_code == 403
 
     def test_empty_login_credentials_return_field_errors(self, db):
         response = APIClient().post(

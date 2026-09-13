@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Card, EmptyState, Metric, SectionTitle, TableScroll } from "@/components/primitives";
-import { apiGet } from "@/lib/api";
+import { Card, EmptyState, Metric, QueryError, SectionTitle, TableScroll } from "@/components/primitives";
+import { ApiError, apiGet } from "@/lib/api";
 import { number, percent, tehranTime } from "@/lib/display";
 
 export const metadata = { title: "Market · News Intelligence" };
@@ -43,13 +43,28 @@ function Sparkline({ points }) {
 export default async function MarketPage({ searchParams }) {
   const params = await searchParams;
   const symbol = params?.symbol || "gold_18k";
-  const market = await apiGet(`/api/market/?symbol=${encodeURIComponent(symbol)}&days=30`);
+  let market;
+  try {
+    market = await apiGet(`/api/market/?symbol=${encodeURIComponent(symbol)}&days=30`);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return (
+        <QueryError title="Unknown market symbol.">
+          Choose one of the symbols listed on the Market page.
+        </QueryError>
+      );
+    }
+    throw error;
+  }
 
   const series = market.series;
   const first = series[0] ?? null;
   const last = series.at(-1) ?? null;
   const change =
     first && last ? (Number(last.price) - Number(first.price)) / Number(first.price) : null;
+  const scoredPredictions = market.outcomes.filter(
+    (outcome) => outcome.direction_correct !== null,
+  ).length;
 
   return (
     <>
@@ -96,7 +111,7 @@ export default async function MarketPage({ searchParams }) {
               tone={change > 0 ? "text-emerald-400" : change < 0 ? "text-rose-400" : ""}
             />
             <Metric label="Snapshots" value={number(series.length)} />
-            <Metric label="Scored predictions" value={number(market.outcomes.length)} />
+            <Metric label="Scored predictions" value={number(scoredPredictions)} />
           </div>
 
           <Card className="mb-6 p-4">

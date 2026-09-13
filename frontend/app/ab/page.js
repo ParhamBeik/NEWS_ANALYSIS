@@ -1,6 +1,6 @@
 import AsyncPanel, { Skeleton } from "@/components/AsyncPanel";
 import { Card, SectionTitle, TableScroll } from "@/components/primitives";
-import { apiGet } from "@/lib/api";
+import { apiGet, currentStaffUser } from "@/lib/api";
 import { percent } from "@/lib/display";
 import ABLab from "./ABLab";
 
@@ -152,6 +152,16 @@ async function Standings() {
 }
 
 export default async function ABPage() {
+  if (!(await currentStaffUser())) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="text-slate-300">Staff access required</p>
+        <p className="mt-2 text-sm text-slate-500">
+          A/B judgements are shared experiment evidence and are reserved for staff reviewers.
+        </p>
+      </Card>
+    );
+  }
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div>

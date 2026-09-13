@@ -32,7 +32,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
@@ -292,6 +292,9 @@ class VariantViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class ReviewViewSet(viewsets.ReadOnlyModelViewSet):
+    # Review labels become model-training evidence. Public signup accounts may read the
+    # dashboard, but only staff may create or alter that shared ground truth.
+    permission_classes = [IsAdminUser]
     serializer_class = ReviewCaseSerializer
 
     def get_queryset(self):
@@ -347,6 +350,8 @@ class ReviewViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class ABPairViewSet(viewsets.ReadOnlyModelViewSet):
+    # A/B votes are shared experiment evidence, not per-account preferences.
+    permission_classes = [IsAdminUser]
     serializer_class = ABPairSerializer
 
     def get_queryset(self):

@@ -1,5 +1,5 @@
-import { Card, CircuitBanner, Metric, SectionTitle, TableScroll } from "@/components/primitives";
-import { apiGet } from "@/lib/api";
+import { Card, CircuitBanner, Metric, QueryError, SectionTitle, TableScroll } from "@/components/primitives";
+import { ApiError, apiGet } from "@/lib/api";
 import { money, number, percent, tehranTime } from "@/lib/display";
 
 export const metadata = { title: "Ops · News Intelligence" };
@@ -75,7 +75,19 @@ function BackupHealth({ backups }) {
 export default async function OpsPage({ searchParams }) {
   const params = await searchParams;
   const days = params?.days || 14;
-  const ops = await apiGet(`/api/ops/?days=${days}`);
+  let ops;
+  try {
+    ops = await apiGet(`/api/ops/?days=${days}`);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 400) {
+      return (
+        <QueryError title="Invalid time window.">
+          Choose one of 1, 7, 14, or 30 days.
+        </QueryError>
+      );
+    }
+    throw error;
+  }
 
   const { funnel, budget } = ops;
   const maxCost = Math.max(...ops.cost_by_day.map((row) => row.cost), 0.0001);

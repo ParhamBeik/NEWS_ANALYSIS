@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import {
   Card,
   CategoryBadge,
@@ -7,7 +8,7 @@ import {
   SectionTitle,
   TrendBadge,
 } from "@/components/primitives";
-import { apiGet } from "@/lib/api";
+import { ApiError, apiGet } from "@/lib/api";
 import { AXIS_LABEL, tehranTime } from "@/lib/display";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +36,23 @@ function Provenance({ row }) {
 
 export default async function ArticlePage({ params }) {
   const { id } = await params;
+  if (!/^[1-9]\d*$/.test(id)) notFound();
+
   // The neighbours are a best-effort extra: an article with no embedding yet is normal,
   // and letting that 500 the whole detail page would be absurd.
-  const [article, similar] = await Promise.all([
-    apiGet(`/api/articles/${id}/`),
-    apiGet(`/api/articles/${id}/similar/`).catch(() => []),
+  let article;
+  let similar;
+  try {
+    [article, similar] = await Promise.all([
+      apiGet(`/api/articles/${id}/`),
+      apiGet(`/api/articles/${id}/similar/`).catch(() => []),
   ]);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 404)) {
+      notFound();
+    }
+    throw error;
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
