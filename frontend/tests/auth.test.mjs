@@ -43,6 +43,10 @@ test('a stale cookie can reach login instead of cycling between home and login',
     nextUrl: new URL('http://localhost/robots.txt'), cookies: { get: () => undefined },
     headers: new Headers(), url: 'http://localhost/robots.txt',
   }), 'continue');
+  assert.equal(middleware.middleware({
+    nextUrl: new URL('http://localhost/logout'), cookies: { get: () => undefined },
+    headers: new Headers(), url: 'http://localhost/logout',
+  }), 'continue');
 });
 
 test('dashboard API reads have a bounded server-side deadline', async () => {

@@ -14,7 +14,10 @@ import { NextResponse } from "next/server";
  * about to 403, not to be the security boundary. The security boundary is Django.
  */
 
-const PUBLIC = ["/login", "/signup", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
+// `/logout` must reach its route even after the cookie has already been cleared. Otherwise a
+// second click is redirected to `/login?next=/logout`, which turns the next sign-in into a
+// misleading round-trip through the logout URL.
+const PUBLIC = ["/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
 
 function withPathname(request, pathname) {
   const requestHeaders = new Headers(request.headers);
