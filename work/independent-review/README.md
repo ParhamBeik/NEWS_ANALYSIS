@@ -20,4 +20,4 @@ compose services are healthy, and internal health returns 200. The prior current
 passed a full `pg_restore --file=/dev/null` readback.
 
 See the claim ledger, change inventory, findings, verification evidence, browser evidence,
-and deployment state in this directory.
+performance observations, questions and decisions, and deployment state in this directory.
