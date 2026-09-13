@@ -37,6 +37,11 @@ The authenticated Operations page still reports that inference is paused. This i
 availability condition, not a passing pipeline result and not safely repairable in this
 repository without operator authority.
 
+Read-only VPS inspection confirms this is not a scheduler failure: the circuit is
+`open_budget` with a budget error kind, the configured retry delay is seven days, and the
+enabled `weekly-circuit-probe` task is present. Restoring credit is the only safe path that
+can close the circuit; the scheduled probe will then reopen inference automatically.
+
 ## Verified: committed release parity and backup readback
 
 Read-only VPS inspection confirms backend and frontend image tags both equal `0569caa`, all

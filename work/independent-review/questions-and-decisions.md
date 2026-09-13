@@ -12,7 +12,7 @@
 
 | Item | Why it needs owner direction | Current state |
 | --- | --- | --- |
-| Provider wallet restoration | It may require purchasing or changing a third-party provider plan. | Inference remains paused; no financial or provider-account action was taken. |
+| Provider wallet restoration | It may require purchasing or changing a third-party provider plan. | Inference remains paused; the enabled weekly probe and seven-day budget-circuit delay were verified on the VPS. No financial or provider-account action was taken. |
 | HSTS at the edge | The active hostname is an `sslip.io` address and edge policy is outside the repository; changing it needs hostname and TLS-policy review. | Existing CSP, frame, MIME, permissions, and referrer headers remain present; HSTS remains absent. |
 
 No product, compatibility, data-retention, or architecture preference was needed for the code
