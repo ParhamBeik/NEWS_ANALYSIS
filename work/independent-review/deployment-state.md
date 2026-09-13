@@ -12,3 +12,6 @@
 | CI for remediation | No remote SHA exists | NO |
 | Deployed remediation | Live browser still reproduces the pre-fix behavior | NO |
 | Direct deployed revision/service/log/backup inspection | Read-only VPS inspection: healthy services, internal health 200, zero recent error-pattern lines, full current-archive readback | VERIFIED |
+| Released remediation | `13044694482f1a8e9726b8dc9aed502361e09e54`; CI `34740032943`, Deploy `34740032951` | VERIFIED |
+| Released sign-out correction | `f9001acfb6b2b34eb831b98bcd01db80dce1bc94`; CI `34740197939`, Deploy `34740197935` | VERIFIED |
+| Current VPS parity | Backend and frontend images pinned to `f9001ac`; backend/frontend/db/redis healthy; internal health 200 | VERIFIED |

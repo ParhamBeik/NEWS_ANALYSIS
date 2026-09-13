@@ -7,15 +7,23 @@ still pass. The test now executes the actual API module with a controlled 400 re
 asserts that route code receives `ApiError` with the expected status and path. This is a unit
 check of the shared API boundary; the controlled rendered probes cover the route integration.
 
-## Fixed locally: a public signup could alter shared evaluation evidence
+## Fixed and deployed: a public signup could alter shared evaluation evidence
 
 The disposable non-staff account created during this review could open the live Review queue
 and was presented Approve label and Skip controls for a real pending case. Neither action was
 submitted, so no production label changed. Review labels feed both
 quality reporting and retrieval memory; A/B votes are also shared experiment evidence. Both
 viewsets now require staff, and non-staff navigation/direct pages provide a clear access state
-instead of a misleading login redirect. The release CI must verify this correction with
-PostgreSQL before deployment.
+instead of a misleading login redirect. The current release CI passed its PostgreSQL suite and
+the live disposable account now receives the staff-only state for both workflows.
+
+## Fixed and deployed: repeat sign-out could leave a bad login destination
+
+The first sign-out correctly revoked the disposable session, but a second immediate request
+without a cookie was intercepted as a protected `/logout` navigation and produced
+`/login?next=/logout`. The logout route is now public to middleware while retaining its own
+POST-only handler. A regression test locks that routing boundary, and the deployed account
+completed a clean sign-in followed by server-side sign-out back to `/login`.
 
 ## Open: local fixes are not deployed
 
@@ -34,7 +42,8 @@ repository without operator authority.
 Read-only VPS inspection confirms backend and frontend image tags both equal `0569caa`, all
 services are healthy, internal health returns 200, recent backend/frontend logs contain zero
 error-pattern lines, and the latest 35.8 MB archive passes `pg_restore --file=/dev/null`.
-This evidence applies to the committed release only, not the uncommitted local remediation.
+This evidence applies to the prior committed release. The current release separately confirms
+the new image pins, healthy services, and internal health.
 
 ## Open external finding: HSTS remains absent
 
