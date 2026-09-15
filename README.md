@@ -30,42 +30,48 @@ deploy/             docker-compose for dev and prod, plus the Caddy site block
 .github/workflows/  ci.yml (tests, lint, deploy checks) and deploy.yml (build → VPS)
 ```
 
+`ARCHITECTURE.md` has the layer diagram, the four rules a contributor must not break, and
+the list of things that look dead to static analysis but are reachable by string.
+
 ## Setup
 
-```bash
-cd backend
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env          # then fill in GAPGPT_API_KEY
-
-docker compose -f ../deploy/docker-compose.dev.yml up -d   # postgres + redis
-.venv/bin/python manage.py migrate
-.venv/bin/python manage.py seed_sources
-.venv/bin/python manage.py seed_variants
-.venv/bin/python manage.py createsuperuser
-.venv/bin/python manage.py runserver
-```
+Needs [uv](https://docs.astral.sh/uv/), Node 24 and Docker.
 
 ```bash
-cd frontend && npm ci && npm run dev      # http://localhost:3000
+make setup    # backend/.venv on Python 3.13, npm ci, backend/.env from the example
+              # then set GAPGPT_API_KEY in backend/.env
+
+make services                                   # postgres + redis
+backend/.venv/bin/python backend/manage.py migrate
+cd backend && ../backend/.venv/bin/python manage.py seed_sources && \
+              ../backend/.venv/bin/python manage.py seed_variants && \
+              ../backend/.venv/bin/python manage.py createsuperuser
+
+make dev      # API on :8000 and dashboard on :3000, together
 ```
+
+`make help` lists everything. `make ci` runs the same gates as the pipeline — lint, Django
+checks including the strict deploy set, migration drift, both test suites, and the
+production build — which is what to run before pushing, because `main` deploys on merge.
 
 Credentials come from the environment only. There is no fallback default for any secret —
 the pipeline this replaced shipped a live API key as an `os.getenv` default and it reached
 a public git history. `config/settings/base.py` raises at import time on a missing one.
+`backend/.env.example` documents every key the settings read.
 
-## Commands
+## Operator commands
+
+Everything routine is a `make` target. These are the ones that only make sense by hand,
+run as `backend/.venv/bin/python manage.py <command>` from `backend/`:
 
 ```bash
-python manage.py check --deploy --fail-level WARNING   # what CI runs against prod settings
-python manage.py setup_schedule            # install the beat schedule (idempotent)
-python manage.py check_provider            # which key is in effect, and does it have money
-python manage.py seed_sources              # load sources/fixtures/sources.yaml (upsert)
-python manage.py run_pipeline crawl        # queues to Celery; --now runs it inline
-python manage.py run_pipeline inference --limit 20
-python manage.py run_pipeline workbook     # --rebuild-all ignores the rolling window
-python manage.py benchmark_models          # bake off candidate models on real articles
-pytest                                     # offline; every provider call is mocked
-ruff check .
+manage.py setup_schedule            # install the beat schedule (idempotent)
+manage.py check_provider            # which key is in effect, and does it have money
+manage.py seed_sources              # load sources/fixtures/sources.yaml (upsert)
+manage.py run_pipeline crawl        # queues to Celery; --now runs it inline
+manage.py run_pipeline inference --limit 20
+manage.py run_pipeline workbook     # --rebuild-all ignores the rolling window
+manage.py benchmark_models          # bake off candidate models on real articles
 ```
 
 Celery does the real work on a schedule; `run_pipeline` exists for the abnormal paths —
