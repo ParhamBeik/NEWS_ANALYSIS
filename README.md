@@ -167,7 +167,19 @@ default. The security boundary is Django, not the middleware.
 `main` → CI → GHCR → VPS. `deploy.yml` builds both images tagged with the commit SHA,
 writes those exact tags into `/opt/apps/news-intel/deploy/.env`, and runs `compose up -d`;
 a one-shot `migrate` service runs migrations and `collectstatic` before anything serves.
-Roll back by re-running the workflow with a previous SHA as the `tag` input.
+
+**Nothing deploys unless CI passed.** Deploy triggers on CI's completion, not on the push,
+and builds the exact commit CI tested — so a second push while CI is running cannot ship
+code no test ever saw. A red CI means no deploy at all; the previous release keeps serving.
+
+**A failed deploy rolls itself back.** The tags currently serving are written to
+`deploy/.rollback` *before* anything changes. After `up -d` the workflow polls `/login`
+(expects 200) and `/ops` (expects 307 — it is behind the login gate); if either fails for
+two minutes it restores the recorded tags, brings the previous release back, and fails the
+run. Old images are never pruned with `-a`, so the rollback target always exists.
+
+To roll back by hand, run the Deploy workflow with a previous SHA as the `tag` input. That
+path deliberately still works when CI is red, because a red CI is when you need it.
 
 ## Backup and restore
 

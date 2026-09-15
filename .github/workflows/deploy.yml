@@ -1,7 +1,18 @@
 name: Deploy
 
+# GATED ON CI, not on the push.
+#
+# This used to trigger on `push: branches: [main]`, which meant CI and Deploy started at the
+# same instant and raced. A commit whose tests failed still shipped, because nothing
+# connected the two - the red X appeared next to a release that was already serving users.
+# `workflow_run` is the only trigger that waits for another workflow to finish.
+#
+# GitHub always takes the workflow_run definition from the DEFAULT BRANCH, so this file
+# governs deploys of every commit regardless of where it was authored.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -20,6 +31,11 @@ env:
 
 jobs:
   build:
+    # The gate. A manual dispatch is always allowed - that is the rollback path, and it must
+    # keep working when CI is red, because a red CI is exactly when you need to roll back.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,11 +54,16 @@ jobs:
           - name: frontend
             context: ./frontend
     steps:
+      # The commit CI actually tested, not whatever main points at now. Under workflow_run
+      # those can differ: a second push while CI was running moves the branch, and building
+      # the newer commit would ship code no test ever saw.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - id: tag
         run: |
-          echo "value=${{ github.event.inputs.tag || github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "value=${{ github.event.inputs.tag || github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
           # Docker refuses a repository name containing uppercase, and this repository is
           # `ParhamBeik/NEWS_ANALYSIS`. `github.repository` cannot be lowercased in an
           # expression, so it has to happen in the shell.
@@ -78,6 +99,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Authorise SSH
         run: |
@@ -101,6 +124,22 @@ jobs:
             deploy/backup.sh \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/apps/news-intel/deploy/
 
+      # Written BEFORE anything changes, because a rollback target you record after the fact
+      # is the broken version. `.rollback` is the only record of what was serving; nothing
+      # else on the box remembers the previous tag once .env has been rewritten.
+      - name: Record the version currently serving
+        run: |
+          ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
+            cd /opt/apps/news-intel/deploy
+            touch .env
+            {
+              grep '^BACKEND_IMAGE='  .env || true
+              grep '^FRONTEND_IMAGE=' .env || true
+            } > .rollback
+            echo "will roll back to:"
+            cat .rollback
+          EOF
+
       - name: Pull and restart
         run: |
           ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<EOF
@@ -122,24 +161,68 @@ jobs:
             # land before anything serves them.
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-            docker image prune -f --filter "until=168h"
+            # Dangling images only (no -a). The previous release stays TAGGED, so it is never
+            # a prune candidate and is always there to roll back to. Removing -a is the whole
+            # point: 'prune -a' would delete the last working image to save disk.
+            docker image prune -f
           EOF
 
       - name: Verify the deploy actually serves
+        id: verify
         run: |
           # Poll rather than sleep-and-hope: gunicorn plus migrations can take 30s, and a
           # fixed sleep either wastes time or reports success before the app is up.
+          #
+          # Two URLs, not one. /login proved only that Next was answering, which is how a
+          # broken sign-out and any /ops or /kpi regression shipped green. /ops is behind the
+          # login gate, so 307 is the correct healthy answer - a 500 there means the
+          # dashboard blew up and must not stay deployed.
+          check() {
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ secrets.NEWS_DOMAIN }}$1" || true)
+            [ "$code" = "$2" ]
+          }
           for attempt in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ secrets.NEWS_DOMAIN }}/login" || true)
-            if [ "$code" = "200" ]; then
+            if check /login 200 && check /ops 307; then
               echo "live after ${attempt} attempts"
               exit 0
             fi
-            echo "attempt ${attempt}: HTTP ${code}"
+            echo "attempt ${attempt}: not healthy yet"
             sleep 6
           done
-          echo "::error::site did not return 200 after deploy"
-          # Surface why, in the log that is about to be the only evidence.
-          ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            'cd /opt/apps/news-intel/deploy && docker compose -f docker-compose.prod.yml ps && docker compose -f docker-compose.prod.yml logs --tail=80 backend frontend'
+          echo "::error::site did not pass its health checks after deploy"
+          exit 1
+
+      # Only on a failed verify. Restores the tags recorded before the switch and brings the
+      # previous release back up, so production is never left on a version that did not pass.
+      # Fix forward afterwards; this step buys the time to do that calmly.
+      - name: Roll back to the previous version
+        if: failure() && steps.verify.outcome == 'failure'
+        run: |
+          echo "::warning::deploy failed its health checks - rolling back"
+          ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
+            cd /opt/apps/news-intel/deploy
+            echo "--- why it failed ---"
+            docker compose -f docker-compose.prod.yml ps
+            docker compose -f docker-compose.prod.yml logs --tail=80 backend frontend
+
+            if [ ! -s .rollback ]; then
+              echo "no previous version recorded - leaving the stack as it is"
+              exit 1
+            fi
+            echo "--- restoring ---"
+            cat .rollback
+            sed -i '/^BACKEND_IMAGE=/d;/^FRONTEND_IMAGE=/d' .env
+            cat .rollback >> .env
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          EOF
+
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ secrets.NEWS_DOMAIN }}/login" || true)
+            if [ "$code" = "200" ]; then
+              echo "::notice::rolled back; the previous version is serving again"
+              exit 1
+            fi
+            sleep 6
+          done
+          echo "::error::ROLLBACK ALSO FAILED - the site is down and needs a human"
           exit 1
