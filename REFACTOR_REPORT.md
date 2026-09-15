@@ -3,6 +3,9 @@
 Ten batches, ten commits, all on `main`, each one deployed to production and verified green
 before the next was started. Baseline `a36a0a8`, head `8696ebf`.
 
+Two follow-ups landed after the pass, at your request: `4e9bb02` fixes the sign-out redirect
+recorded below as bug 1, and the local-only cleanup described under "Suspected dead" is done.
+
 ## The honest headline
 
 **This codebase did not need dramatic simplification, and did not get it.** Phase 0 recon
@@ -119,34 +122,46 @@ stdlib imports too. Hoisting a cherry-picked six would have made the codebase *l
 consistent, spent real risk on import-order failures at Django and Celery startup, and
 delivered nothing a reader would notice. Left alone and documented in `ARCHITECTURE.md`.
 
-## Suspected dead — needs runtime confirmation
+## Suspected dead
 
-Nothing was deleted on suspicion. These remain:
+Nothing was deleted on suspicion during the pass itself. Afterwards, on your instruction:
 
-- **Root `var/` (11 MB)** — the pre-Django pipeline's output tree. It is the legacy workbook
-  corpus, so it is data. Untracked and gitignored, so this is a local-disk decision, not a
-  commit. *Confirm by:* checking whether any of those workbooks are still the reference
-  outputs before removing them.
-- **Root `.venv/` (190 MB)** — the dead FastAPI-era environment (`fastapi`, `httpx`, no
-  Django). It is what a bare shell picks up first and is why the backend gates did not work
-  at the start. Untracked; safe to delete locally, but that is your machine, not the repo.
+- **Root `.venv/` (190 MB) — deleted.** The dead FastAPI-era environment (`fastapi`,
+  `httpx`, no Django). It was what a bare shell picked up first, and why the backend gates
+  did not work at the start. Untracked, so a disk operation rather than a commit.
+  `make setup` builds the correct `backend/.venv` on Python 3.13.
+- **Root `var/` (11 MB) — archived, then deleted.** Not build output: it held `news.db`,
+  the 9.9 MB pre-Django SQLite corpus that `manage.py import_legacy` reads, alongside three
+  generated workbooks and four category feeds. Archived first to
+  `~/Downloads/news-analysis-legacy-var-20260915.tar.gz` (2.5 MB, 17 entries, verified to
+  contain `news.db`) because no other copy existed — the repository history never tracked
+  it, and the offsite tarball it was believed to be in is not there.
+- **`backend/.venv13/` — deleted.** Scratch toolchain built during the pass.
+
+Still open:
+
 - **`django.contrib.admin`** — no app defines an `admin.py`, so `/admin/` exposes only
   Users, Tokens and beat schedules. That looks deliberate (the README sends you there to
   activate an A/B variant). *Confirm by:* using it once before anyone proposes removing it.
-- **`backend/.venv13/`** — created during this pass to get a working toolchain. Delete it;
-  `make setup` builds `backend/.venv` correctly now.
 
-## Bugs found, not fixed
+## Bugs found
 
-1. **Sign-out redirects to an unreachable host.** `frontend/app/logout/route.js:37` does
+1. **Sign-out redirected to an unreachable host — FIXED in `4e9bb02`, after this pass.**
+   `frontend/app/logout/route.js` built its target with
    `NextResponse.redirect(new URL("/login", request.url), { status: 303 })`. Behind the
-   proxy, `request.url` resolves from the container's bind address, so production returns
-   `Location: https://0.0.0.0:3000/login`. Reproduced against the live site:
-   `curl -X POST https://<domain>/logout` → `303, Location: https://0.0.0.0:3000/login`.
-   Pre-existing — verified by diffing the line against `HEAD~1` during Batch 5, which
-   touched only the import above it. The middleware gets this right by using
-   `nextUrl.clone()`; this handler should do the same, or build the URL from the forwarded
-   host. **This is the highest-value item in this list.**
+   proxy `request.url` carries the address Next bound to inside the container, so production
+   replied `Location: https://0.0.0.0:3000/login` and every sign-out navigated nowhere. The
+   edge passes Location through untouched and the deploy health check only polls `/login`,
+   so nothing caught it. Pre-existing, confirmed by diffing the line against `HEAD~1`.
+
+   Fixed by returning a relative `Location`, which RFC 7231 permits and the browser resolves
+   against the URL it actually requested — correct behind any proxy, with no forwarded-host
+   parsing to keep in sync with the edge. Verified live: `303`, `Location: /login`,
+   `Set-Cookie` expiring the token, and following the redirect lands on
+   `https://<domain>/login` with `200`. Covered by a regression test.
+
+The rest below remain open.
+
 2. **Celery task names are inconsistent across apps.** All five `articles` tasks use a full
    module path; every other app uses app-level names. Unifying them is a behaviour change,
    not a rename — the string is a routing key, it is persisted in the VPS beat table, and a
@@ -165,24 +180,23 @@ Nothing was deleted on suspicion. These remain:
 
 ## Recommended follow-ups, ranked
 
-1. **Fix the sign-out redirect** (bug 1). It is a live, user-facing break with a two-line fix.
-2. **Widen the deploy health gate.** The only check is one 200 on `/login`, so a regression
+1. **Widen the deploy health gate.** The only check is one 200 on `/login`, so a regression
    in `/ops`, `/kpi`, the workbook exporter or any Celery worker deploys green. Note that
    `/api/health/` is *not* publicly routed — Caddy sends everything but `/media`, `/admin`
    and `/static` to Next, and `next.config.mjs` deliberately declines to proxy `/api/*`. The
    gate should therefore poll an authenticated dashboard route, or run the check inside the
    container. *(This corrects the recommendation in `REFACTOR_PLAN.md`, which suggested
    `/api/health/` before I had confirmed the routing.)*
-3. **Get the backend test gate working locally.** `make setup` now does it; running
+2. **Get the backend test gate working locally.** `make setup` now does it; running
    `make ci` before a push is the difference between catching a problem before or after it
    deploys.
-4. **Copy the `backups` volume off the box.** The README already says this. Dumps sitting on
+3. **Copy the `backups` volume off the box.** The README already says this. Dumps sitting on
    the same host as the database cover a bad migration but not a dead disk, and that volume
    holds the human review labels — the one thing the pipeline cannot regenerate.
-5. **Decide about `ruff format`.** `make fmt` exists but CI does not enforce formatting and
+4. **Decide about `ruff format`.** `make fmt` exists but CI does not enforce formatting and
    the codebase has never been through it. It is a ~9,000-line diff and needs its own commit
    plus a CI step — which touches the pipeline definition, so it needs your approval.
-6. **Unify the Celery task names** (bug 2), as a deliberate multi-deploy project.
+5. **Unify the Celery task names** (bug 2), as a deliberate multi-deploy project.
 
 ## What was deliberately left alone
 
