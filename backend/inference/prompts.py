@@ -1,6 +1,6 @@
 """Prompt policy, output schemas, and message assembly.
 
-FROZEN INVARIANT (3/4). Policy text lives in `inference/prompts/*.md` so it can be tuned
+FROZEN INVARIANT (3/4). Policy text lives in `inference/prompt_texts/*.md` so it can be tuned
 without touching code, and `prompt_version` is a sha256 of that text. Editing a prompt
 therefore changes future output *and* marks prior output as having come from a different
 prompt. A hand-maintained version constant gets forgotten on exactly the edit you most need

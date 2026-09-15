@@ -285,7 +285,13 @@ GAPGPT_EMBEDDING_DIM = env_int("GAPGPT_EMBEDDING_DIM", 1536)
 GAPGPT_INPUT_USD_PER_MILLION = env_float("GAPGPT_INPUT_USD_PER_MILLION", 0.10)
 GAPGPT_OUTPUT_USD_PER_MILLION = env_float("GAPGPT_OUTPUT_USD_PER_MILLION", 0.40)
 
-PROMPTS_DIR = BASE_DIR / "inference" / "prompts"
+# prompt_texts/, not prompts/: inference/prompts.py is a module, and a sibling directory
+# of the same name is a namespace package waiting to shadow it. Python resolves the module
+# today only because that directory has no __init__.py - adding one would silently redirect
+# every `from .prompts import ...` in the app. A missing policy file does not raise either;
+# load_policy falls back to a built-in default, so the failure would show up as a changed
+# prompt_version and nothing else.
+PROMPTS_DIR = BASE_DIR / "inference" / "prompt_texts"
 WORKBOOK_TEMPLATE_PATH = BASE_DIR / "exports" / "assets" / "workbook_template.xlsx"
 # OUTSIDE MEDIA_ROOT, deliberately. The edge file-serves the whole media volume at /media/*
 # so that images do not tie up a gunicorn worker each - which means anything under

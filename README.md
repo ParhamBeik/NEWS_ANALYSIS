@@ -136,7 +136,7 @@ nothing the money ceiling can see.
 false positive silently drops a real story from the workbook; a false negative just prints
 a duplicate row.
 
-**Prompts are files, and the version is their hash.** `inference/prompts/*.md` hold the
+**Prompts are files, and the version is their hash.** `inference/prompt_texts/*.md` hold the
 policy text; `prompt_version` is a sha256 of their contents, stamped on every row. A
 hand-maintained version constant gets forgotten on exactly the edit you most need to trace.
 
