@@ -16,7 +16,7 @@ import { API_ORIGIN } from "@/lib/api";
  * second is recoverable, so failure closes.
  */
 
-export async function POST(request) {
+export async function POST() {
   const jar = await cookies();
   const token = jar.get("news_token")?.value;
 
@@ -34,5 +34,15 @@ export async function POST(request) {
   }
 
   jar.delete("news_token");
-  return NextResponse.redirect(new URL("/login", request.url), { status: 303 });
+  // A RELATIVE Location, deliberately.
+  //
+  // NextResponse.redirect() demands an absolute URL, and the only origin this handler can
+  // see is the one Next bound to inside the container - so `new URL("/login", request.url)`
+  // produced `https://0.0.0.0:3000/login` in production and sent every sign-out to an
+  // address that does not exist. The edge does not rewrite Location, so nothing caught it.
+  //
+  // RFC 7231 allows Location to be a relative reference, which the browser resolves against
+  // the URL it actually requested. That is right behind any proxy, needs no forwarded-host
+  // parsing, and cannot drift from the edge configuration.
+  return new NextResponse(null, { status: 303, headers: { Location: "/login" } });
 }

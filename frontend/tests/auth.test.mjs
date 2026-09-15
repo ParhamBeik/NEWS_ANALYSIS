@@ -32,6 +32,46 @@ test('auth actions preserve trusted client identity and distinguish throttling f
   }
 });
 
+// Regression: this handler used `new URL("/login", request.url)`, and behind the Caddy edge
+// request.url carries the address Next bound to inside the container - so production replied
+// `Location: https://0.0.0.0:3000/login` and every sign-out navigated nowhere.
+test('sign-out sends a relative Location, not the container address', async () => {
+  const deleted = [];
+  let revoked = null;
+  class FakeResponse {
+    constructor(body, init) {
+      this.body = body;
+      this.status = init.status;
+      this.headers = init.headers;
+    }
+  }
+  const route = await loadServerModule('../app/logout/route.js', {
+    fetch: async (url, options) => { revoked = { url, options }; return { ok: true }; },
+  }, {
+    'next/headers': {
+      cookies: async () => ({
+        get: () => ({ value: 'a-live-token' }),
+        delete: (name) => deleted.push(name),
+      }),
+    },
+    'next/server': { NextResponse: FakeResponse },
+    '@/lib/api': { API_ORIGIN: 'http://backend:8000' },
+  });
+
+  const response = await route.POST();
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.Location, '/login');
+  assert.doesNotMatch(
+    response.headers.Location,
+    /^[a-z]+:\/\//,
+    'an absolute Location is resolved from the container bind address, not the public host',
+  );
+  // The token is revoked server-side and the cookie dropped; dropping it alone is not a
+  // sign-out, because a DRF token has no expiry.
+  assert.equal(revoked.url, 'http://backend:8000/api/auth/logout/');
+  assert.deepEqual(deleted, ['news_token']);
+});
+
 test('a stale cookie can reach login instead of cycling between home and login', async () => {
   const middleware = await loadServerModule('../middleware.js', {}, {
     'next/server': { NextResponse: { next: () => 'continue', redirect: () => 'redirect' } },
