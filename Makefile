@@ -17,9 +17,10 @@ help: ## Show this help
 
 setup: ## Create backend/.venv on Python 3.13 and install both dependency sets
 	@command -v uv >/dev/null || { echo "uv not found: https://docs.astral.sh/uv/"; exit 1; }
-	@# Recreates backend/.venv. It is a virtualenv, not data - but note that it replaces
-	@# whatever is there, which is deliberate: a venv on the wrong Python is worse than none.
-	uv venv --python 3.13 backend/.venv
+	@# --clear is required: uv refuses to write into an existing venv, and without it this
+	@# target fails on every machine that has already run it once. Recreating is deliberate -
+	@# a venv on the wrong Python is worse than no venv, and it is regenerable by definition.
+	uv venv --clear --python 3.13 backend/.venv
 	uv pip install --python backend/.venv -r backend/requirements.txt -r backend/requirements-dev.txt
 	cd frontend && npm ci
 	@test -f backend/.env || { cp backend/.env.example backend/.env; echo "→ created backend/.env; set GAPGPT_API_KEY"; }
