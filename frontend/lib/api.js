@@ -17,7 +17,16 @@ import { redirect } from "next/navigation";
  * budget figure from ten minutes ago is worse than a slow one.
  */
 
-const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
+/**
+ * Where Django lives, declared once.
+ *
+ * The fallback is the local `manage.py runserver` address; in every deployed environment
+ * compose sets API_ORIGIN to the internal hostname. It is exported because the two routes
+ * that deliberately bypass `apiGet` - sign-in, which runs before a token exists, and
+ * sign-out, which must not redirect on failure - still have to reach the same server. They
+ * import the constant, not the client, so they keep their own fetch semantics.
+ */
+export const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 
 export class ApiError extends Error {
   constructor(path, status, detail = "") {

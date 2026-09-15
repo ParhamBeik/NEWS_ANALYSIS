@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { API_ORIGIN } from "@/lib/api";
+
 /**
  * Sign out: revoke the token server-side, THEN drop the cookie.
  *
@@ -13,8 +15,6 @@ import { NextResponse } from "next/server";
  * then either works with a token they thought was gone, or 401s into the login screen. The
  * second is recoverable, so failure closes.
  */
-
-const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 
 export async function POST(request) {
   const jar = await cookies();

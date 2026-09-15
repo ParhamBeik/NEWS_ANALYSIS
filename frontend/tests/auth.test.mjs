@@ -15,6 +15,7 @@ test('auth actions preserve trusted client identity and distinguish throttling f
   }, {
     'next/headers': { cookies: async () => ({}), headers: async () => new Headers({ 'x-forwarded-for': '203.0.113.7' }) },
     'next/navigation': { redirect: () => { throw new Error('unexpected redirect'); } },
+    '@/lib/api': { API_ORIGIN: 'http://backend:8000' },
   });
   const form = new FormData();
   form.set('username', 'analyst');

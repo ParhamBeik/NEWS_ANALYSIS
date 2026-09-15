@@ -10,6 +10,11 @@
  *
  * `/media/*` IS proxied, but only as the development fallback - in production Caddy serves
  * the shared media volume directly and never wakes Node to move image bytes.
+ *
+ * The API origin is spelled out here rather than imported from lib/api.js, which is where
+ * every runtime caller gets it. This file is evaluated by the Next CLI before the `@/`
+ * alias in jsconfig.json exists, so the import would resolve at build time only by
+ * accident. One deliberate copy, in the one place that cannot share.
  */
 const nextConfig = {
   output: "standalone",

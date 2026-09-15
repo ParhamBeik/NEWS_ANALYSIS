@@ -3,7 +3,7 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-const API_ORIGIN = process.env.API_ORIGIN || "http://127.0.0.1:8000";
+import { API_ORIGIN } from "@/lib/api";
 
 async function authHeaders() {
   const result = { "Content-Type": "application/json" };
