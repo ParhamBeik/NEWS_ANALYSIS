@@ -39,7 +39,7 @@ Verified: the repository currently has **zero** module-level import cycles.
 backend/
   config/       settings/{base,dev,prod,test}, celery, urls, wsgi, asgi
   core/         vocabulary, notify scoring, Persian text, error taxonomy, HTTP guards,
-                and the operator commands (run_pipeline, setup_schedule, import_legacy)
+                and the operator commands (run_pipeline, setup_schedule, check_provider)
   sources/      source registry, crawl strategies, extraction, prefilter
   articles/     Article/Image/Embedding storage, ingest, dedup, URL health
   inference/    prompt variants, providers, budget + circuit guards, the three LLM nodes

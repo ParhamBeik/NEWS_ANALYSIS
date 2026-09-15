@@ -81,9 +81,8 @@ every stage.
 
 The nightly workbook export only rebuilds days that could still have changed — a day can
 only change if one of its articles was fetched inside the rolling window, because that is
-the only set the inference cycle will re-answer. After a `manage.py import_legacy`, or on a
-fresh deployment with an existing corpus, `run_pipeline workbook --rebuild-all` is the way
-to produce the back catalogue once.
+the only set the inference cycle will re-answer. On a fresh deployment with an existing
+corpus, `run_pipeline workbook --rebuild-all` is the way to produce the back catalogue once.
 
 ## Pages
 
@@ -238,7 +237,10 @@ migration and a `docker volume rm dbdata`; it does not cover the disk dying. Cop
 ## History
 
 The pre-Django pipeline (FastAPI, SQLite, a single-process CLI) was removed in favour of
-this platform; its source is in git history and the four ~2,950-line scripts it in turn
-replaced are archived outside the repository. `manage.py import_legacy` carries the old
-SQLite corpus — articles, duplicate links and human review cases, but deliberately not its
-machine labels — into Postgres.
+this platform, and its source is in git history.
+
+The migration path off it is gone too. `manage.py import_legacy` read a SQLite corpus that
+no longer exists anywhere, so the command could not run; it was deleted rather than left as
+an entry in `--help` that fails on its first argument. Recover it from git history if the
+old database ever resurfaces. Nothing in the running system depends on it, and removing it
+left `core` with no imports into any app above it.
