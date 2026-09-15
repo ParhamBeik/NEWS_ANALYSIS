@@ -1,6 +1,22 @@
+# Everything here is shipped to the builder on every deploy, so anything that is not
+# needed to run the app is pure upload and pure layer weight. .ruff_cache alone was 46 MB.
 .venv
 __pycache__
 *.pyc
 .env
 media
 staticfiles
+
+# Tool caches. Regenerated on demand and meaningless inside an image.
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Exports and backups are named volumes at runtime; the image only needs the mount points,
+# which the Dockerfile creates itself.
+var
+
+# tests/ and conftest.py are deliberately NOT excluded: `docker compose exec backend pytest`
+# against the real image is the only way to reproduce a failure that CI cannot, and the
+# whole suite is a few hundred KB.
