@@ -115,7 +115,10 @@ WSGI_APPLICATION = "config.wsgi.application"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        # No project-level template directory. This project renders no templates of its
+        # own - the UI is Next.js - and the only templates that ever load are the admin's
+        # and DRF's browsable API's, which APP_DIRS finds inside those packages.
+        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
