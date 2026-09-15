@@ -1,4 +1,10 @@
-"""Article-level background work: image download, dedup sweeps, prefilter reapplication."""
+"""Article-level background work: image download, URL health, dedup sweeps, prefilter.
+
+Everything Celery runs for this app lives here, because `celery autodiscover_tasks` imports
+`tasks.py` and nothing else. A task defined in a sibling module is registered only if
+`tasks.py` happens to import it, and a task that is not registered is a name beat schedules
+and no worker answers - silence at 04:30 on a Sunday rather than an error anyone sees.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +14,7 @@ from io import BytesIO
 
 import requests
 from celery import Task, shared_task
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
@@ -17,9 +24,10 @@ from core.errors import Transient
 from core.net import BlockedURL, open_checked, read_capped
 from sources.extraction import build_session
 
-from .models import ArticleImage, ImageStatus
-from .url_health import check_stale_urls as check_stale_urls
+from .models import Article, ArticleImage, ImageStatus, UrlStatus
 
+# 404 and 410 both mean the outlet deleted or moved the story. Counting that is useful;
+# retrying it is not.
 GONE_HTTP = {404, 410}
 
 logger = logging.getLogger(__name__)
@@ -310,3 +318,68 @@ def reapply_prefilter() -> dict:
     from sources import prefilter
 
     return prefilter.reapply()
+
+
+# ------------------------------------------------------------------------------ url health
+
+
+def note_gone(url: str, http_status: int) -> bool:
+    """Mark a stored article gone. Returns True if a row was updated."""
+    now = timezone.now()
+    updated = Article.objects.filter(url=url).exclude(url_status=UrlStatus.GONE).update(
+        url_status=UrlStatus.GONE,
+        gone_at=now,
+        gone_http_status=http_status,
+    )
+    log_action("url.gone", "gone", url=url[:200], http_status=http_status, updated=updated)
+    return bool(updated)
+
+
+def _check_one(article: Article) -> str:
+    session = requests.Session()
+    session.headers.update({"User-Agent": settings.NEWS_USER_AGENT})
+    try:
+        response = open_checked(session, article.url, timeout=15, stream=True)
+        try:
+            status = response.status_code
+        finally:
+            response.close()
+    except BlockedURL:
+        return "blocked"
+    except requests.RequestException as exc:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        if status in GONE_HTTP:
+            note_gone(article.url, status)
+            return "gone"
+        return "transient"
+    if status in GONE_HTTP:
+        note_gone(article.url, status)
+        return "gone"
+    return "live"
+
+
+MAX_STALE_CHECK = 200
+
+
+@shared_task(name="articles.tasks.check_stale_urls")
+def check_stale_urls(limit: int = 100) -> dict:
+    """HEAD/GET articles that have fallen off the listing. 404 becomes GONE, once."""
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, MAX_STALE_CHECK))
+    cutoff = timezone.now() - timedelta(days=7)
+    stale = (
+        Article.objects.filter(url_status=UrlStatus.LIVE, fetched_at__lt=cutoff)
+        .order_by("fetched_at")
+        [:limit]
+    )
+    counts = {"checked": 0, "gone": 0, "live": 0, "transient": 0, "blocked": 0}
+    for article in stale:
+        counts["checked"] += 1
+        outcome = _check_one(article)
+        counts[outcome] = counts.get(outcome, 0) + 1
+    log_action("url.health", "done", **counts)
+    return counts

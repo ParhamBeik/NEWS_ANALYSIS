@@ -118,7 +118,7 @@ class TestUpsert:
     def test_a_404_marks_the_stored_url_gone(self, source):
         """Unit: deletion is a stored fact, so the next crawl does not treat it as live."""
         from articles.models import UrlStatus
-        from articles.url_health import note_gone
+        from articles.tasks import note_gone
 
         article, _ = upsert(raw(), source)
         assert note_gone(article.url, 404) is True
@@ -138,7 +138,7 @@ class TestUpsert:
     def test_a_listing_row_does_not_revive_a_gone_url(self, source):
         """Saba still upserts the feed row after a detail 404. That is not a resurrection."""
         from articles.models import ExtractionTier, UrlStatus
-        from articles.url_health import note_gone
+        from articles.tasks import note_gone
 
         article, _ = upsert(raw(), source)
         note_gone(article.url, 404)
@@ -149,7 +149,7 @@ class TestUpsert:
 
     def test_a_real_page_revives_a_gone_url(self, source):
         from articles.models import ExtractionTier, UrlStatus
-        from articles.url_health import note_gone
+        from articles.tasks import note_gone
 
         article, _ = upsert(raw(), source)
         note_gone(article.url, 404)

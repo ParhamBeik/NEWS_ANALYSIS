@@ -88,7 +88,9 @@ def fetch_text(session: requests.Session, url: str) -> str:
     response = open_checked(session, url, timeout=settings.NEWS_HTTP_TIMEOUT, stream=True)
     try:
         if response.status_code in {404, 410}:
-            from articles.url_health import note_gone
+            # Deferred on purpose: articles.tasks imports build_session from this
+            # module at import time, so a module-level import here is a real cycle.
+            from articles.tasks import note_gone
 
             note_gone(url, response.status_code)
             raise Gone(f"HTTP {response.status_code} for {url}")
