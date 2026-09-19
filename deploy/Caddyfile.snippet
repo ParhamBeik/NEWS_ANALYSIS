@@ -17,7 +17,10 @@
 #          newsintel_media:
 #            external: true
 #
-#    then in /opt/apps/vps-edge/.env:  NEWS_DOMAIN=news-89-106-206-4.sslip.io
+#    then in /opt/apps/vps-edge/.env:  NEWS_DOMAIN=news.example.com
+#
+# Use a real DNS name with a publicly trusted certificate. The retired VPS hostname must not be
+# reused, and sslip.io is currently poisoned or filtered on the intended Iranian client path.
 #
 # Why Caddy reads the volume instead of proxying /media to Django: with DEBUG=False,
 # Django does not serve MEDIA_URL at all - that is a development-only URL pattern. The

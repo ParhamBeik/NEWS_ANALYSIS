@@ -15,6 +15,7 @@ set -eu
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 INTERVAL_SECONDS="${BACKUP_INTERVAL_SECONDS:-86400}"
+RETRY_SECONDS="${BACKUP_RETRY_SECONDS:-300}"
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) backup: $*"; }
 
@@ -75,8 +76,15 @@ while true; do
         sweep_old || log "retention sweep failed"
     else
         result=1
-        log "continuing after a failed dump; next attempt in ${INTERVAL_SECONDS}s"
+        log "continuing after a failed dump; retrying in ${RETRY_SECONDS}s"
     fi
     [ "${BACKUP_ONCE:-0}" = 1 ] && exit "$result"
-    sleep "$INTERVAL_SECONDS"
+    if [ "$result" = 0 ]; then
+        sleep "$INTERVAL_SECONDS"
+    else
+        # Compose startup ordering is not replayed when the Docker daemon restarts existing
+        # containers. A host reboot can therefore start this service seconds before Postgres;
+        # waiting a whole day after that race silently loses the night's backup.
+        sleep "$RETRY_SECONDS"
+    fi
 done

@@ -103,9 +103,11 @@ export async function currentUser() {
 
 /** Return the signed-in operator when a server-rendered route is staff-only. */
 export async function currentStaffUser() {
-  const user = await currentUser();
-  if (!user) await loginRedirect();
-  return user?.isStaff ? user : null;
+  // This path is an authorization guard, so an API outage must remain an outage. Reusing
+  // currentUser() here made a 500 or timeout look like a signed-out session and sent staff
+  // to /login even though their cookie was still valid.
+  const { username, is_staff: isStaff } = await apiGet("/api/auth/me/");
+  return isStaff ? { username, isStaff: true } : null;
 }
 
 /** Turn a params object into a query string, dropping empty values rather than sending

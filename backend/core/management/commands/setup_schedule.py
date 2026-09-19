@@ -48,6 +48,11 @@ INTERVAL_TASKS = [
     ("finalize-stale-runs", "inference.finalize_stale_runs", 10, IntervalSchedule.MINUTES, {}),
     ("sample-review-cases", "review.sample_review_cases", 1, IntervalSchedule.HOURS, {}),
     ("build-ab-pairs", "review.build_ab_pairs", 1, IntervalSchedule.HOURS, {}),
+    # The circuit's next_probe_at is the one owner of the delay. Poll hourly so an arbitrary
+    # open time cannot miss a fixed weekly cron tick and stay paused for almost another week.
+    # Keep the legacy row name so setup_schedule updates the deployed task instead of leaving
+    # a second enabled schedule behind.
+    ("weekly-circuit-probe", "inference.probe_circuit", 1, IntervalSchedule.HOURS, {}),
 ]
 
 CRON_TASKS = [
@@ -57,9 +62,6 @@ CRON_TASKS = [
     # Dedup sweep at 03:00, when nothing else is competing for the worker.
     ("nightly-dedupe-sweep", "articles.tasks.backfill_dedupe", {"hour": "3", "minute": "0"},
      {"dry_run": False}),
-    # Weekly wallet probe: the only inference call allowed after the circuit opens.
-    ("weekly-circuit-probe", "inference.probe_circuit",
-     {"hour": "4", "minute": "0", "day_of_week": "0"}, {}),
     # Re-check articles that have fallen off listings; 404 becomes GONE, once.
     ("weekly-url-health", "articles.tasks.check_stale_urls",
      {"hour": "4", "minute": "30", "day_of_week": "0"}, {}),

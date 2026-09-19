@@ -30,15 +30,15 @@ from review.models import ABFeedback, ABPair, ReviewCase, ReviewStatus, Side
 
 @pytest.fixture
 def client(user) -> APIClient:
-    user.is_staff = True
-    user.save(update_fields=["is_staff"])
     api = APIClient()
     api.force_authenticate(user=user)
     return api
 
 
 @pytest.fixture
-def regular_client(user) -> APIClient:
+def staff_client(user) -> APIClient:
+    user.is_staff = True
+    user.save(update_fields=["is_staff"])
     api = APIClient()
     api.force_authenticate(user=user)
     return api
@@ -164,10 +164,20 @@ class TestAuthentication:
     def test_everything_else_requires_login(self, db, path):
         assert APIClient().get(path).status_code in {401, 403}
 
-    @pytest.mark.parametrize("path", ["/api/ab/pairs/next/", "/api/reviews/next/"])
-    def test_shared_evaluation_workflows_require_staff(self, regular_client, path):
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("get", "/api/ab/pairs/next/"),
+            ("get", "/api/ab/pairs/results/"),
+            ("post", "/api/ab/pairs/1/feedback/"),
+            ("get", "/api/reviews/next/"),
+            ("post", "/api/reviews/1/submit/"),
+            ("post", "/api/reviews/1/skip/"),
+        ],
+    )
+    def test_shared_evaluation_workflows_require_staff(self, client, method, path):
         """A public signup must never be able to alter shared training evidence."""
-        assert regular_client.get(path).status_code == 403
+        assert getattr(client, method)(path, {}, format="json").status_code == 403
 
     def test_empty_login_credentials_return_field_errors(self, db):
         response = APIClient().post(
@@ -350,7 +360,7 @@ class TestNoNPlusOne:
         assert len(response.json()["results"]) == 20
 
     def test_review_queue_query_count_does_not_grow_with_the_page(
-        self, client, django_assert_max_num_queries, make_article, variant
+        self, staff_client, django_assert_max_num_queries, make_article, variant
     ):
         """The review list prefetches the same three relations the feed does, and then the
         serializer has to actually READ them.
@@ -378,7 +388,7 @@ class TestNoNPlusOne:
         # Six today. The bound is what matters, not the number: a regression here is
         # 80 extra queries on this page, not one.
         with django_assert_max_num_queries(8):
-            response = client.get("/api/reviews/?limit=20")
+            response = staff_client.get("/api/reviews/?limit=20")
         assert len(response.json()["results"]) == 20
 
 
@@ -460,52 +470,58 @@ class TestABBlinding:
             shown_as_left=Side.B,
         )
 
-    def test_the_response_never_names_the_variants(self, client, pair):
+    def test_the_response_never_names_the_variants(self, staff_client, pair):
         """THE test for this feature.
 
         A leaked model name biases every judgement collected afterwards, and there is no
         way to clean that out of the data later - you can only throw the judgements away.
         """
-        payload = client.get("/api/ab/pairs/next/").content.decode()
+        payload = staff_client.get("/api/ab/pairs/next/").content.decode()
         assert "shown_as_left" not in payload
         assert pair.variant_a.name not in payload
         assert pair.variant_b.name not in payload
         assert pair.variant_b.model not in payload
 
-    def test_both_sides_carry_the_reasoning_being_judged(self, client, pair):
-        body = client.get("/api/ab/pairs/next/").json()
+    def test_both_sides_carry_the_reasoning_being_judged(self, staff_client, pair):
+        body = staff_client.get("/api/ab/pairs/next/").json()
         for side in ("left", "right"):
             assert body[side]["scores"] is not None
             assert body[side]["decision"]["reason"]
 
-    def test_the_winner_resolves_to_the_variant_that_held_that_position(self, client, pair):
+    def test_the_winner_resolves_to_the_variant_that_held_that_position(
+        self, staff_client, pair
+    ):
         """`shown_as_left=B` means the left card was variant_b. Storing the raw position
         and resolving it server-side is what makes position bias measurable at all."""
-        response = client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "left"})
+        response = staff_client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "left"})
         assert response.status_code == 201
         assert ABFeedback.objects.get().winning_variant == pair.variant_b
         # Unblinded only AFTER the judgement is stored.
         assert response.json()["revealed"]["chosen"] == pair.variant_b.name
 
-    def test_a_second_submission_edits_rather_than_double_votes(self, client, pair):
-        client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "left"})
-        client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "tie", "reasoning": "same"})
+    def test_a_second_submission_edits_rather_than_double_votes(self, staff_client, pair):
+        staff_client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "left"})
+        staff_client.post(
+            f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "tie", "reasoning": "same"}
+        )
         record = ABFeedback.objects.get()
         assert record.winner == "tie"
         assert record.winning_variant is None
 
-    def test_a_judged_pair_is_not_served_again_to_the_same_user(self, client, pair):
-        client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "right"})
-        assert client.get("/api/ab/pairs/next/").status_code == 204
+    def test_a_judged_pair_is_not_served_again_to_the_same_user(self, staff_client, pair):
+        staff_client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "right"})
+        assert staff_client.get("/api/ab/pairs/next/").status_code == 204
 
-    def test_results_report_position_bias(self, client, pair):
-        client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "left"})
-        body = client.get("/api/ab/pairs/results/").json()
+    def test_results_report_position_bias(self, staff_client, pair):
+        staff_client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "left"})
+        body = staff_client.get("/api/ab/pairs/results/").json()
         assert body["position_bias"]["left_share_of_decided"] == 1.0
         assert body["standings"][0]["variant"] == pair.variant_b.name
 
-    def test_an_invalid_winner_is_rejected(self, client, pair):
-        response = client.post(f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "middle"})
+    def test_an_invalid_winner_is_rejected(self, staff_client, pair):
+        response = staff_client.post(
+            f"/api/ab/pairs/{pair.id}/feedback/", {"winner": "middle"}
+        )
         assert response.status_code == 400
 
 
@@ -516,18 +532,18 @@ class TestReview:
         evaluate(article, variant)
         return ReviewCase.objects.create(article=article, stratum="disagreement")
 
-    def test_the_form_is_prefilled_with_the_models_own_answer(self, client, case):
+    def test_the_form_is_prefilled_with_the_models_own_answer(self, staff_client, case):
         """Correcting is faster and more consistent than filling a blank form, and it makes
         a disagreement a deliberate act rather than an omission."""
-        body = client.get("/api/reviews/next/").json()
+        body = staff_client.get("/api/reviews/next/").json()
         assert body["model_answer"]["category"] == Category.SECURITY
         assert body["model_answer"]["security_relevance"] == Level.VERY_HIGH
 
-    def test_a_blank_axis_is_stored_as_null(self, client, case):
+    def test_a_blank_axis_is_stored_as_null(self, staff_client, case):
         """The mirror of the feed test, on the ground-truth side. A sentinel written here
         would corrupt the labels the model is measured against - worse than a bad
         prediction, because it is permanent."""
-        response = client.post(
+        response = staff_client.post(
             f"/api/reviews/{case.id}/submit/",
             {
                 "reviewed_category": Category.SECURITY,
@@ -542,29 +558,31 @@ class TestReview:
         assert case.status == ReviewStatus.APPROVED
         assert case.reviewed_at is not None
 
-    def test_an_invented_level_is_rejected(self, client, case):
-        response = client.post(
+    def test_an_invented_level_is_rejected(self, staff_client, case):
+        response = staff_client.post(
             f"/api/reviews/{case.id}/submit/",
             {"reviewed_category": Category.SECURITY, "confidence_occurrence": "HIGH"},
         )
         assert response.status_code == 400
 
-    def test_the_reviewer_is_recorded(self, client, case, user):
-        client.post(
+    def test_the_reviewer_is_recorded(self, staff_client, case, user):
+        staff_client.post(
             f"/api/reviews/{case.id}/submit/",
             {"reviewed_category": Category.OTHER},
         )
         case.refresh_from_db()
         assert case.reviewer == user
 
-    def test_a_submitted_case_leaves_the_queue(self, client, case):
-        client.post(f"/api/reviews/{case.id}/submit/", {"reviewed_category": Category.OTHER})
-        assert client.get("/api/reviews/next/").status_code == 204
+    def test_a_submitted_case_leaves_the_queue(self, staff_client, case):
+        staff_client.post(
+            f"/api/reviews/{case.id}/submit/", {"reviewed_category": Category.OTHER}
+        )
+        assert staff_client.get("/api/reviews/next/").status_code == 204
 
-    def test_skipping_is_recorded_rather_than_discarded(self, client, case):
+    def test_skipping_is_recorded_rather_than_discarded(self, staff_client, case):
         """An article a human could not label is not one the model should be scored
         against, so the skip has to be a stored fact."""
-        client.post(f"/api/reviews/{case.id}/skip/", {"reviewer_notes": "ambiguous"})
+        staff_client.post(f"/api/reviews/{case.id}/skip/", {"reviewer_notes": "ambiguous"})
         case.refresh_from_db()
         assert case.status == ReviewStatus.SKIPPED
         assert not case.is_usable_truth

@@ -1,0 +1,18 @@
+# Previous-task claim ledger
+
+| Previous claim | Original evidence | Independent method | Result | Follow-up |
+|---|---|---|---|---|
+| The browser audit was incomplete before synthetic-account creation. | Audit status and browser notes. | Recovered deleted artifacts and task boundary from Git. | VERIFIED | None. |
+| The Market “Scored predictions” counter included unscored outcomes. | Rendered observation and local change. | Reviewed pre-fix computation, current implementation, and regression check. | VERIFIED | Current rendered recheck remains unavailable. |
+| Invalid Feed, Market, Operations, and Article parameters produced generic failures. | Browser screenshots/notes and local remediation. | Reviewed route boundaries and automated frontend checks. | VERIFIED | Current rendered recheck remains unavailable. |
+| Public signups could access shared Review and A/B workflows. | Production browser check with an isolated non-staff account. | Reviewed pre-fix permissions, current staff permissions, and expanded ordinary-user integration checks for every read/write action. | VERIFIED | Re-run non-staff browser flow after publication of this review's test hardening. |
+| Repeated sign-out could redirect back to sign-out. | Browser evidence and fix commit. | Reviewed middleware/logout history and current relative redirect implementation. | VERIFIED | Current rendered recheck remains unavailable. |
+| Frontend tests, production build, lint, and Django checks passed. | Command summaries in prior artifacts. | Re-ran the full local gate on 2026-09-19. | VERIFIED | None. |
+| Backend tests were blocked by unavailable PostgreSQL. | Local environment report. | Started the repository's PostgreSQL/Redis dependencies and ran the real suite: 427 passed. | VERIFIED AFTER CORRECTION | The historical blocker is closed. |
+| Review/A-B authorization regression coverage was adequate. | A pair of non-staff endpoint checks plus a passing suite. | Inspected fixture identity across the suite and all protected actions. | REFUTED | Corrected locally; the global fixture had become staff. |
+| Both remediation commits passed CI and deployment. | Four successful workflow runs. | Queried terminal workflow results and timestamps. | PARTIAL | Both succeeded, but deploy ran concurrently with CI; later commit `1d83dd3` added the missing gate and rollback. |
+| The reviewed revision was deployed and healthy. | VPS image tags, Compose health, and endpoint checks. | Read-only inspection plus normal-DNS and forced-IP client probes. | PARTIAL | The new VPS runs `87fddf5` and is internally healthy, but normal DNS is poisoned and trusted public TLS is unavailable. |
+| The latest production backup was readable. | `pg_restore` readback of the then-current archive. | Inspected current backup archive and post-reboot logs. | PARTIAL | The old archive remains readable, but the 2026-09-18 startup failure delayed the next attempt by a day. Local retry fix awaits release. |
+| Provider inference was intentionally paused by its budget circuit. | Operations UI/state evidence. | Queried production circuit state and periodic-task timing. | REFUTED | The probe became due on 2026-09-13 but the weekly task had already run; local hourly polling fix awaits release. |
+| HSTS was absent. | Header probe. | Re-probed the edge from the VPS and forced-IP client path. | VERIFIED | HSTS is secondary until a trusted public TLS path exists. |
+| Responsive coverage and performance conclusions were conclusive. | Tool limitation and sparse timings. | Connected-browser startup failed; public DNS/TLS is also blocked; no defensible benchmark was found. | NOT TESTED | Repeat after DNS, certificate trust, and browser access are restored. |

@@ -45,6 +45,19 @@ def test_an_unknown_stage_is_rejected_by_argparse(db):
         call_command("run_pipeline", "not-a-stage")
 
 
+def test_circuit_probe_schedule_checks_the_due_state_hourly(db):
+    """The persisted next_probe_at owns the delay; the scheduler only checks when it is due."""
+    from django_celery_beat.models import IntervalSchedule, PeriodicTask
+
+    call_command("setup_schedule")
+    task = PeriodicTask.objects.select_related("interval", "crontab").get(
+        name="weekly-circuit-probe"
+    )
+    assert task.interval.every == 1
+    assert task.interval.period == IntervalSchedule.HOURS
+    assert task.crontab is None
+
+
 class TestRebuildAll:
     def test_rebuild_all_reaches_the_workbook_task(self, monkeypatch):
         """The scheduled export is bounded to the rolling window, so the operator needs a

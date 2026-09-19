@@ -67,3 +67,22 @@ test("a signed-in user is not sent to login for a forbidden staff route", async 
     return true;
   });
 });
+
+test("the staff guard preserves an API outage instead of reporting a signed-out session", async () => {
+  const api = await loadServerModule("../lib/api.js", {
+    process: { env: {} },
+    fetch: async () => ({ ok: false, status: 503, text: async () => "unavailable" }),
+  }, {
+    "next/headers": {
+      cookies: async () => ({ get: () => ({ value: "synthetic-token" }) }),
+      headers: async () => new Headers({ "x-pathname": "/review" }),
+    },
+    "next/navigation": { redirect: () => { throw new Error("unexpected redirect"); } },
+  });
+
+  await assert.rejects(api.currentStaffUser(), (error) => {
+    assert.ok(error instanceof api.ApiError);
+    assert.equal(error.status, 503);
+    return true;
+  });
+});
