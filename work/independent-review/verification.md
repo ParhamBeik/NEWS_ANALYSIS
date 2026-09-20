@@ -17,6 +17,18 @@
 | Resolution from the Iran VPS | Correctly returned `45.139.10.12`, isolating the wrong answer to the client ISP path. |
 | Forced-IP HTTP/HTTPS and TLS SNI probe | HTTP/HTTPS answered; TLS 1.3 negotiated with an untrusted Caddy Local Authority certificate. |
 
+On 2026-09-20, an additional PostgreSQL integration test passed after seeding the exact legacy
+weekly cron row and asserting that schedule setup retains its identity, clears the cron, and
+assigns an hourly interval. This proves the deployed-row conversion path, not only fresh install.
+The complete `make ci` gate passed again after this change: Ruff, Django checks, strict deployment
+check, migration drift, the full backend suite, 14 frontend tests, and the production build.
+No tests were skipped or deselected. Workbook tests still emitted openpyxl warnings about removed
+conditional-formatting and data-validation extensions; this is a fidelity risk for edited source
+workbooks, not a failure of this scheduler change. Test settings also lack a staticfiles directory.
+At a fresh read-only VPS check at 2026-09-20 18:16Z, the same backend/frontend image SHA was
+healthy and the provider circuit had closed at the weekly probe's 00:30Z run. This is evidence of
+natural recovery, not evidence that the local hourly correction was deployed.
+
 The backend suite used the repository's PostgreSQL/pgvector and Redis services, not SQLite. No
 tests were skipped or deselected in the recorded full run.
 
@@ -46,6 +58,9 @@ an environment interruption, not a code pass or failure.
 ## Performance
 
 - No repeatable previous benchmark, sample distribution, or declared budget was recoverable.
+- Historical settled browser page samples were Feed 757/734/643 ms, Operations
+  1255/1265/1244 ms, and Market 885/705/803 ms; one category-filter sample was 457 ms. These
+  are leads from the prior audit, not independently repeated current measurements.
 - Five forced-IP `/login` samples returned HTTP 200. Median total time was 27 ms over HTTP and
   58 ms over HTTPS; median time-to-first-byte was 22 ms and 46 ms respectively. The first HTTP
   request was a 392 ms cold outlier.
@@ -61,4 +76,4 @@ an environment interruption, not a code pass or failure.
   for each changed behavior.
 - No new abstraction or dependency was introduced.
 - The persisted periodic-task name was deliberately retained so deployment updates the existing
-  row instead of enabling a duplicate schedule.
+  row instead of enabling a duplicate schedule. The regression test now seeds that legacy row.

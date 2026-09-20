@@ -47,12 +47,20 @@ def test_an_unknown_stage_is_rejected_by_argparse(db):
 
 def test_circuit_probe_schedule_checks_the_due_state_hourly(db):
     """The persisted next_probe_at owns the delay; the scheduler only checks when it is due."""
-    from django_celery_beat.models import IntervalSchedule, PeriodicTask
+    from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
+
+    legacy_cron = CrontabSchedule.objects.create(
+        minute="0", hour="4", day_of_week="0", timezone="Asia/Tehran"
+    )
+    legacy = PeriodicTask.objects.create(
+        name="weekly-circuit-probe", task="inference.probe_circuit", crontab=legacy_cron
+    )
 
     call_command("setup_schedule")
     task = PeriodicTask.objects.select_related("interval", "crontab").get(
         name="weekly-circuit-probe"
     )
+    assert task.pk == legacy.pk
     assert task.interval.every == 1
     assert task.interval.period == IntervalSchedule.HOURS
     assert task.crontab is None

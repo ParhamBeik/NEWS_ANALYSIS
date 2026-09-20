@@ -29,6 +29,7 @@
 | Backups | Any dump failure used the success interval. | Separate five-minute failure retry from daily success interval. | Committed locally on the review branch. |
 | Staff route failures | Permissive layout identity helper collapsed API outage into logout. | Use strict API lookup only in the staff guard. | Committed locally on the review branch. |
 | Edge deployment guidance | The example still named the decommissioned VPS and an ISP-filtered wildcard DNS service. | Replace it with a neutral real-domain example and state the trusted-certificate requirement. | Committed locally on the review branch. |
+| Scheduler upgrade test | A fresh-install assertion did not exercise the existing production cron row. | Seed the legacy row and prove in-place conversion to hourly. | Locally verified; included in the follow-up review commit. |
 | Review evidence | Deleted prior artifacts obscured the audit trail. | Recreate a compact current evidence package. | Committed locally on the review branch. |
 
 No migration, dependency, public API, schema, data, account, remote, or production mutation was

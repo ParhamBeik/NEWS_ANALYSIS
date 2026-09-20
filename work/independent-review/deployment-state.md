@@ -34,11 +34,17 @@
   image defect.
 - CSP, frame, content-type, permissions, and referrer headers were present; HSTS was absent. HSTS
   should not be enabled until the public hostname and trusted-certificate path are stable.
-- Provider circuit state was `open_budget`; `next_probe_at` was 2026-09-13 10:21:51Z, but the
-  weekly periodic task last ran at 00:30Z that day and did not become eligible again for a week.
-- Latest readable archive observed: `newsintel-20260918-091029.dump`. After the 2026-09-18 host
-  restart, `pg_dump` initially met a refused database connection and the running script deferred
-  its next attempt for 86,400 seconds.
+- On 2026-09-19 the provider circuit was `open_budget`; `next_probe_at` was
+  2026-09-13 10:21:51Z, but the weekly periodic task had last run at 00:30Z that day. At a fresh
+  read-only check on 2026-09-20 18:16Z the same task's run count had advanced to 2 with
+  `last_run_at=2026-09-20 00:30:00Z`; the circuit was `closed`, its last probe result was
+  `closed`, and its next probe time was null. The weekly cadence defect still exists in the
+  deployed revision, but the observed pause ended at the next tick.
+- After the 2026-09-18 host restart, `pg_dump` initially met a refused database connection and
+  the running script deferred its next attempt for 86,400 seconds. At 2026-09-19 21:18:44Z it
+  wrote `newsintel-20260919-211810.dump` (56,009,583 bytes). A full
+  `pg_restore --file=/dev/null` read of that exact archive exited 0. The immediate backup gap
+  recovered, but the failure-retry defect remains deployed.
 
 Verdict: **internally healthy, publicly blocked**. This review performed read-only inspection. It
 did not push, deploy, restart services, change configuration, alter permissions, or write data.
