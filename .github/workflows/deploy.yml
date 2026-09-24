@@ -106,13 +106,10 @@ jobs:
 
   deploy:
     needs: build
-    # GitHub-hosted runners cannot reach this VPS's SSH port. The dedicated runner
-    # is on the host and only this gated deploy job uses it.
-    runs-on: [self-hosted, Linux, X64, newsintel-deploy]
+    # GitHub-hosted runners cannot SSH to this VPS; its own runner loses the
+    # GitHub job connection. The Mac has working access to both endpoints.
+    runs-on: [self-hosted, macOS, ARM64, newsintel-deploy-mac]
     environment: production
-    permissions:
-      contents: read
-      packages: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -124,12 +121,13 @@ jobs:
       # backups and no obvious symptom.
       - name: Ship compose files
         run: |
-          cp \
+          scp -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
             deploy/docker-compose.prod.yml \
             deploy/backup.sh \
             deploy/copy-backup.sh \
             deploy/check-stack.sh \
-            /opt/apps/news-intel/deploy/
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/apps/news-intel/deploy/
 
       # Written BEFORE anything changes, because a rollback target you record after the fact
       # is the broken version. `.rollback` is the only record of what was serving; nothing
@@ -137,7 +135,7 @@ jobs:
       - name: Record the version currently serving
         id: record
         run: |
-          bash -euo pipefail <<'EOF'
+          ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
             cd /opt/apps/news-intel/deploy
             touch .env
             {
@@ -150,7 +148,7 @@ jobs:
 
       - name: Pull and restart
         run: |
-          bash -euo pipefail <<EOF
+          ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<EOF
             cd /opt/apps/news-intel/deploy
 
             # Log in to GHCR on the host. The package is private, so a bare pull would 401.
@@ -191,7 +189,8 @@ jobs:
           }
           for attempt in $(seq 1 20); do
             if check /login 200 && check /ops 307 && \
-               sh /opt/apps/news-intel/deploy/check-stack.sh; then
+               ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+                 'sh /opt/apps/news-intel/deploy/check-stack.sh'; then
               echo "live after ${attempt} attempts"
               exit 0
             fi
@@ -206,7 +205,7 @@ jobs:
         if: failure() && steps.record.outcome == 'success'
         run: |
           echo "::warning::deploy failed after recording previous tags - rolling back"
-          bash -euo pipefail <<'EOF'
+          ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
             cd /opt/apps/news-intel/deploy
             echo "--- why it failed ---"
             docker compose -f docker-compose.prod.yml ps
