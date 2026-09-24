@@ -119,3 +119,25 @@ an environment interruption, not a code pass or failure.
   Backend source-only coverage was 75% (3,451 statements, 858 missed); the aggregate
   diff was reviewed against `main` and passed `git diff --check`. No commit, push,
   CI run for this tree, deployment or live post-change check.
+
+## September 24 Mac off-host backup
+
+- The Mac has FileVault enabled and had 18 GiB free. `deploy/pull-backup.sh` copied the
+  newest published 85 MB VPS dump into `~/Backups/NEWS_ANALYSIS` (directory mode 0700,
+  archive mode 0600). Mac and VPS SHA-256 both matched
+  `2894c74ce83cc9ca0e9a07aaadd9edcaf2b61785a027495716c9a3bd28a07e9d`.
+  The VPS `.offsite-last` marker named that dump only after the copy was verified.
+- An isolated PostgreSQL 16/pgvector container, with no network or published port,
+  restored the Mac copy using `pg_restore --single-transaction --exit-on-error`.
+  It contained 69,995 articles, 1,356 review cases, 2,291 classifications and 54
+  migrations. Fingerprints of review cases 1–5 matched the current VPS records.
+  The snapshot is older than the live database, which had 1,748 review cases when checked.
+- A user LaunchAgent runs an installed copy from `~/Library/Application Support/NewsIntel`.
+  Its first attempt against the Downloads checkout failed macOS background access; after
+  moving the executable it ran twice with exit code 0, including an idempotent verification.
+  The calendar schedule runs hourly at minute 15 and catches a missed run on wake. The
+  Mac must be online or woken often enough to keep the copied dump within 36 hours.
+  Four backup shell tests pass, including corrupt transfer preservation and retention
+  after a successful copy. No application push or deployment occurred.
+  At 2026-09-24 13:45Z the scheduled agent also copied the newly published
+  `newsintel-20260924-123948.dump`; the VPS marker advanced to that same filename.

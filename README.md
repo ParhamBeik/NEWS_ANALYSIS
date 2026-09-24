@@ -233,24 +233,29 @@ docker compose -f docker-compose.prod.yml up -d
 command once the restored database has been confirmed good — an automatic drop turns a
 recoverable mistake into an unrecoverable one.
 
-**Before the next release**, configure an existing SSH-accessible destination with storage
-encryption, a restricted account, a pinned host key and a dedicated directory. On the VPS,
-as the Docker-capable deploy user, set `BACKUP_TARGET` (SSH alias or `user@host`) and
-`BACKUP_REMOTE_DIR` (absolute path), then run `sh deploy/copy-backup.sh`. It copies the
-newest verified archive, compares SHA-256 on both hosts before promotion, and records the
-copied filename for `/ops` and the deploy gate. Schedule it hourly under that user,
-loading those two values from a user-owned environment file; an identical remote copy is
-verified by hash and does not consume another full transfer. Keep SSH credentials
-and that file outside Git. Monitor timer failures and the `/ops` off-host age. Retain
-copies according to the destination's storage policy; this script never deletes remote
-archives.
+The off-host destination is the operator's FileVault-enabled Mac. `deploy/pull-backup.sh`
+connects to the VPS with the existing pinned SSH key, streams the newest published dump
+to a private directory, verifies its SHA-256 against the VPS copy, and only then promotes
+the file and writes the VPS `.offsite-last` marker used by `/ops` and the deploy gate. It
+keeps local dumps for 30 days. The installed copy runs from
+`~/Library/Application Support/NewsIntel/pull-backup.sh` under the user LaunchAgent
+`~/Library/LaunchAgents/com.parham.newsintel.offhost-backup.plist` at login, hourly at
+minute 15, and after a missed calendar run when the Mac wakes. Inspect its exit status
+with `launchctl print gui/$(id -u)/com.parham.newsintel.offhost-backup` and the logs at
+`~/Library/Logs/newsintel-backup.{out,err}.log`. After changing the repository script,
+install the update with `install -m 700 deploy/pull-backup.sh "$HOME/Library/Application Support/NewsIntel/pull-backup.sh"`.
+If the Mac remains off for more than 36 hours, the off-host age turns red and deployment
+fails closed. An always-on SSH destination can use `deploy/copy-backup.sh` from the VPS
+instead; it is not currently configured.
 
-Rehearse recovery on a separate PostgreSQL/pgvector instance: retrieve a copied archive,
-verify its checksum and restore with `pg_restore --single-transaction --exit-on-error`,
-then compare human review counts and representative records. Do this before treating
-off-host protection as complete. The existing public hostname is `news.parhambm.ir`;
+Recovery was rehearsed from the Mac copy on September 24, 2026 in a temporary PostgreSQL
+16/pgvector container without networking, using `pg_restore --single-transaction
+--exit-on-error --no-owner --no-privileges`. It restored 69,995 articles, 1,356 review
+cases, 2,291 classifications and 54 migrations; five early review-record fingerprints
+matched production. Repeat the rehearsal periodically and after backup format changes.
+The existing public hostname is `news.parhambm.ir`;
 DNS and trusted HTTPS worked from this workstation and the VPS on September 24, 2026.
-The off-host destination and a full browser check are still outstanding.
+A full authenticated browser check is still outstanding.
 
 ## History
 

@@ -9,9 +9,61 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'backup.sh'
 COPY_SCRIPT = SCRIPT.with_name('copy-backup.sh')
+PULL_SCRIPT = SCRIPT.with_name('pull-backup.sh')
 
 
 class BackupTests(unittest.TestCase):
+    def test_mac_pull_verifies_before_promotion_and_marker(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            binaries = root / 'bin'
+            local = root / 'off-host'
+            source = root / 'newsintel-20260924-010000.dump'
+            marker = root / 'marker'
+            binaries.mkdir()
+            local.mkdir()
+            source.write_bytes(b'complete verified archive')
+            target = local / source.name
+            target.write_bytes(b'previous copy')
+            expired = local / 'newsintel-20000101-000000.dump'
+            expired.write_bytes(b'old verified copy')
+            os.utime(expired, (1, 1))
+            ssh = binaries / 'ssh'
+            ssh.write_text('''#!/bin/sh
+case "$*" in
+  *'ls -t /backups/newsintel-'*) printf '/backups/%s\\n' "$(basename "$SOURCE_DUMP")" ;;
+  *'sha256sum '*) shasum -a 256 "$SOURCE_DUMP" ;;
+  *'stat -c %s '*) wc -c < "$SOURCE_DUMP" | tr -d ' ' ;;
+  *'backup cat '*) if [ "${CORRUPT:-0}" = 1 ]; then printf bad; else cat "$SOURCE_DUMP"; fi ;;
+  *'.offsite-last.partial'*) basename "$SOURCE_DUMP" > "$MARKER" ;;
+  *) exit 2 ;;
+esac
+''')
+            ssh.chmod(0o755)
+            env = {**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
+                   'BACKUP_SOURCE_HOST': 'source-test', 'BACKUP_SOURCE_KEY': str(root / 'key'),
+                   'BACKUP_LOCAL_DIR': str(local), 'SOURCE_DUMP': str(source),
+                   'MARKER': str(marker)}
+            failed = subprocess.run(['sh', str(PULL_SCRIPT)], env={**env, 'CORRUPT': '1'},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+            self.assertEqual(target.read_bytes(), b'previous copy')
+            self.assertFalse(marker.exists())
+            self.assertTrue(expired.exists())
+            self.assertEqual(list(local.glob('.*.partial')), [])
+
+            succeeded = subprocess.run(['sh', str(PULL_SCRIPT)], env=env,
+                                       capture_output=True, text=True, timeout=10)
+            self.assertEqual(succeeded.returncode, 0, succeeded.stdout + succeeded.stderr)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual(marker.read_text().strip(), source.name)
+            self.assertFalse(expired.exists())
+
+            again = subprocess.run(['sh', str(PULL_SCRIPT)], env={**env, 'CORRUPT': '1'},
+                                   capture_output=True, text=True, timeout=10)
+            self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+
     def test_offsite_copy_is_verified_before_replacing_the_last_good_copy(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
