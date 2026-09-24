@@ -167,6 +167,12 @@ default. The security boundary is Django, not the middleware.
 `main` → CI → GHCR → VPS. `deploy.yml` builds both images tagged with the commit SHA,
 writes those exact tags into `/opt/apps/news-intel/deploy/.env`, and runs `compose up -d`;
 a one-shot `migrate` service runs migrations and `collectstatic` before anything serves.
+The deploy job runs on the VPS's `newsintel-vps` GitHub runner, installed as the
+`newsdeploy` system user in `/opt/actions-runner-newsintel` and enabled under systemd.
+GitHub-hosted runners cannot reach this VPS's SSH port; CI and image builds still run
+on GitHub-hosted runners. Check the runner is online before expecting a deployment;
+an offline runner queues the job rather than deploying it. The runner's Docker group
+grants host-level access, so keep the deploy workflow restricted to reviewed `main`.
 
 **Nothing deploys unless CI passed.** Deploy triggers on CI's completion, not on the push,
 and builds the exact commit CI tested — so a second push while CI is running cannot ship
