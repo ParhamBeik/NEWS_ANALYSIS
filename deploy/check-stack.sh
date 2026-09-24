@@ -39,6 +39,9 @@ compose exec -T backup sh -c '
     find /backups -maxdepth 1 -type f -name "*.dump" -mmin -2160 -print -quit | grep -q .
     test -f /backups/.offsite-last
     find /backups/.offsite-last -mmin -2160 -print -quit | grep -q .
-    latest=$(ls -t /backups/*.dump | head -n 1)
-    test "$(cat /backups/.offsite-last)" = "${latest##*/}"
+    # A restart makes a new dump before the next hourly Mac pull. Accept the
+    # previously copied archive while its verified marker is still fresh.
+    copied=$(cat /backups/.offsite-last)
+    case "$copied" in newsintel-*.dump) ;; *) exit 1 ;; esac
+    test -s "/backups/$copied"
 '
