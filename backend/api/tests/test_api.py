@@ -21,7 +21,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.filters import articles_with_decision
+from api.filters import articles_with_decision, decision_counts
+from articles.models import Article
 from core.scoring import decide
 from core.vocabulary import Category, GoldTrend, Level, NotifyStatus
 from inference.models import Classification, Evaluation, PromptVariant, Summary
@@ -42,6 +43,14 @@ def staff_client(user) -> APIClient:
     api = APIClient()
     api.force_authenticate(user=user)
     return api
+
+
+@pytest.mark.django_db
+def test_release_probe_reads_data_without_creating_an_account():
+    api = APIClient(HTTP_HOST="localhost")
+    api.force_authenticate(user=get_user_model()(is_staff=True, is_active=True))
+    for path in ("/api/articles/", "/api/ops/", "/api/kpi/", "/api/market/", "/api/exports/"):
+        assert api.get(path).status_code == 200, path
 
 
 @pytest.fixture
@@ -332,6 +341,26 @@ class TestFeed:
         assert client.get("/api/articles/").json()["results"][0]["category"] == "security"
 
 
+class TestMarket:
+    def test_outcomes_follow_the_selected_price_symbol(self, client, article, variant):
+        from market.models import PredictionOutcome, Symbol
+
+        outcome = PredictionOutcome.objects.create(
+            evaluation=evaluate(article, variant),
+            symbol=Symbol.GOLD_18K,
+            baseline_price=100,
+            realized_price=110,
+            realized_pct=10,
+            direction_correct=True,
+        )
+
+        gold = client.get(f"/api/market/?symbol={Symbol.GOLD_18K}")
+        dollar = client.get(f"/api/market/?symbol={Symbol.USD_IRR}")
+        assert gold.status_code == dollar.status_code == 200
+        assert [row["id"] for row in gold.json()["outcomes"]] == [outcome.pk]
+        assert dollar.json()["outcomes"] == []
+
+
 class TestNoNPlusOne:
     def test_feed_query_count_does_not_grow_with_the_page(
         self, client, django_assert_max_num_queries, make_article, variant
@@ -393,6 +422,16 @@ class TestNoNPlusOne:
 
 
 class TestNotifyFilterMatchesTheRule:
+    def test_dashboard_counts_all_states_with_one_evaluation_query(
+        self, make_article, variant, django_assert_num_queries
+    ):
+        article = make_article()
+        evaluate(article, variant)
+        with django_assert_num_queries(1):
+            counts = decision_counts(Article.objects.filter(pk=article.pk))
+        assert counts[NotifyStatus.NOTIFY] == 1
+        assert sum(counts.values()) == 1
+
     def test_scoped_decision_only_considers_requested_articles(self, make_article, variant):
         inside = make_article()
         outside = make_article()
@@ -711,6 +750,9 @@ class TestOps:
 
         assert client.get("/api/ops/?days=1").json()["notify"][NotifyStatus.NOTIFY] == 1
         assert client.get("/api/ops/?days=30").json()["notify"][NotifyStatus.NOTIFY] == 2
+        assert client.get("/api/feed-stats/?days=1").json()["notify"] == (
+            client.get("/api/ops/?days=1").json()["notify"]
+        )
 
     def test_a_missing_backup_directory_reports_unconfigured_rather_than_erroring(
         self, client, settings, tmp_path
@@ -725,6 +767,7 @@ class TestOps:
             "last_success_at": None,
             "age_hours": None,
             "retained": 0,
+            "offsite_age_hours": None,
         }
 
     def test_backup_age_comes_from_an_existing_archive(self, client, settings, tmp_path):
@@ -744,7 +787,18 @@ class TestOps:
         assert backups["configured"] is True
         assert backups["retained"] == 1
         assert backups["age_hours"] == 48.0
+        assert backups["offsite_age_hours"] is None
 
+        (tmp_path / ".offsite-last").write_text(dump.name)
+        backups = client.get("/api/ops/").json()["backups"]
+        assert backups["offsite_age_hours"] == 0.0
+
+        newer_dump = tmp_path / "newsintel-new.dump"
+        newer_dump.write_bytes(b"PGDMP")
+        backups = client.get("/api/ops/").json()["backups"]
+        assert backups["offsite_age_hours"] is None
+
+        newer_dump.unlink()
         dump.unlink()
         backups = client.get("/api/ops/").json()["backups"]
         assert backups["age_hours"] is None

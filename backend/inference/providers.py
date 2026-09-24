@@ -226,11 +226,11 @@ class GapGPTProvider:
         return vectors, usage
 
 
-def provider_for(variant) -> GapGPTProvider:
+def provider_for(variant, model: str | None = None) -> GapGPTProvider:
     """Build the provider a variant is configured to use."""
     if variant.provider != "gapgpt":
         raise Fatal(
             f"unknown provider {variant.provider!r}; only 'gapgpt' is configured. "
             "Local inference needs RAM the VPS does not currently have."
         )
-    return GapGPTProvider(model=variant.model)
+    return GapGPTProvider(model=model or variant.model)

@@ -6,7 +6,7 @@ will be tuned against real cost, not a constant discovered at design time.
 
 Cadences and their reasons:
 
-- crawl every 30 minutes, matching the legacy loop. Crawling is free; only inference costs.
+- crawl every 5 minutes for the current feed cadence. Inference has its own budget gate.
 - inference on its own 30-minute cycle, OFFSET from the crawl by design. Running them
   together means the inference pass reads a half-written corpus and pays again next cycle
   for what it missed.
@@ -34,9 +34,8 @@ from django_celery_beat.models import CrontabSchedule, IntervalSchedule, Periodi
 TEHRAN = "Asia/Tehran"
 
 INTERVAL_TASKS = [
-    ("crawl-all-sources", "sources.crawl_all", 30, IntervalSchedule.MINUTES, {}),
+    ("crawl-all-sources", "sources.crawl_all", 5, IntervalSchedule.MINUTES, {}),
     ("inference-cycle", "inference.run_cycle", 30, IntervalSchedule.MINUTES, {}),
-    ("embed-missing", "inference.embed_missing", 30, IntervalSchedule.MINUTES, {}),
     ("poll-market-prices", "market.poll_prices", 15, IntervalSchedule.MINUTES, {}),
     ("backtest-predictions", "market.backtest_predictions", 1, IntervalSchedule.HOURS, {}),
     ("source-canary", "sources.canary", 1, IntervalSchedule.HOURS, {}),
@@ -114,6 +113,9 @@ class Command(BaseCommand):
                 },
             )
             self.stdout.write(f"  {name:28} at {cron['hour']}:{cron['minute']} {TEHRAN}")
+
+        # Preserve the live cost control: embeddings are only needed for semantic arms.
+        PeriodicTask.objects.filter(name="embed-missing").delete()
 
         state = "enabled" if enabled else "DISABLED"
         self.stdout.write(

@@ -171,7 +171,7 @@ services:
   # and the default prefetch would park long articles behind one busy child.
   worker-crawl:
     <<: *django
-    command: celery -A config.celery.app worker -Q crawl,default -Ofair --loglevel=INFO --concurrency=4
+    command: celery -A config.celery.app worker -Q crawl,default -Ofair --loglevel=INFO --concurrency=2
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_healthy}

@@ -1,5 +1,8 @@
 # Git, CI/CD, and deployment state
 
+Historical snapshot from September 20, 2026. See `verification.md` for the September 24
+read-only VPS continuation; image tags, ingress and provider state have since changed.
+
 ## Repository
 
 - Local branch: `review/independent-e2e-remediation`, one local review commit above `87fddf5`.
@@ -46,5 +49,5 @@
   `pg_restore --file=/dev/null` read of that exact archive exited 0. The immediate backup gap
   recovered, but the failure-retry defect remains deployed.
 
-Verdict: **internally healthy, publicly blocked**. This review performed read-only inspection. It
+Verdict on September 20: **internally healthy, publicly blocked**. This review performed read-only inspection. It
 did not push, deploy, restart services, change configuration, alter permissions, or write data.

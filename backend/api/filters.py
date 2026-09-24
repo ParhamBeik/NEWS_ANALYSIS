@@ -42,6 +42,17 @@ def articles_with_decision(status: str, article_ids: set[int] | None = None) -> 
     return {row.article_id for row in rows if row.decision.status == status}
 
 
+def decision_counts(articles: QuerySet[Article]) -> dict[str, int]:
+    """Count all notify states in one pass over the latest evaluations."""
+    counts = dict.fromkeys(NotifyStatus.values, 0)
+    rows = Evaluation.objects.filter(article__in=articles).latest_per_article().only(
+        "article_id", "confidence_occurrence", "gold_price_impact", "security_relevance"
+    )
+    for row in rows:
+        counts[row.decision.status] += 1
+    return counts
+
+
 class ArticleFilter(filters.FilterSet):
     source = filters.CharFilter(field_name="source_id")
     outlet = filters.CharFilter(field_name="original_outlet", lookup_expr="icontains")

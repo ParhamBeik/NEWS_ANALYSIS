@@ -8,9 +8,71 @@ import time
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'backup.sh'
+COPY_SCRIPT = SCRIPT.with_name('copy-backup.sh')
 
 
 class BackupTests(unittest.TestCase):
+    def test_offsite_copy_is_verified_before_replacing_the_last_good_copy(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            binaries = root / 'bin'
+            remote = root / 'remote'
+            binaries.mkdir()
+            remote.mkdir()
+            source = root / 'newsintel-20260924-010000.dump'
+            source.write_bytes(b'verified archive')
+            previous = remote / source.name
+            previous.write_bytes(b'previous copy')
+            commands = {
+                'docker': '''#!/bin/sh
+case " $* " in
+  *'.offsite-last.partial'*) basename "$SOURCE_DUMP" > "$(dirname "$SOURCE_DUMP")/.offsite-last" ;;
+  *' backup sh -c '*) printf '%s\\n' "$SOURCE_DUMP" ;;
+  *' backup sha256sum '*) [ "${FAIL_HASH:-0}" != 1 ] && shasum -a 256 "$SOURCE_DUMP" ;;
+  *' backup cat '*) if [ "${CORRUPT:-0}" = 1 ]; then printf bad; else cat "$SOURCE_DUMP"; fi ;;
+  *) exit 2 ;;
+esac
+''',
+                'ssh': '''#!/bin/sh
+shift 5
+sh -c "$1"
+''',
+                'sha256sum': '''#!/bin/sh
+shasum -a 256 "$@"
+''',
+            }
+            for name, body in commands.items():
+                target = binaries / name
+                target.write_text(body)
+                target.chmod(0o755)
+            env = {**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
+                   'BACKUP_TARGET': 'backup-test', 'BACKUP_REMOTE_DIR': str(remote),
+                   'SOURCE_DUMP': str(source)}
+            no_hash = subprocess.run(['sh', str(COPY_SCRIPT)], env={**env, 'FAIL_HASH': '1'},
+                                     capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(no_hash.returncode, 0)
+            self.assertEqual(previous.read_bytes(), b'previous copy')
+            self.assertFalse((root / '.offsite-last').exists())
+
+            failed = subprocess.run(['sh', str(COPY_SCRIPT)], env={**env, 'CORRUPT': '1'},
+                                    capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+            self.assertEqual(previous.read_bytes(), b'previous copy')
+            self.assertFalse((remote / (source.name + '.partial')).exists())
+            self.assertFalse((root / '.offsite-last').exists())
+
+            succeeded = subprocess.run(['sh', str(COPY_SCRIPT)], env=env,
+                                       capture_output=True, text=True, timeout=10)
+            self.assertEqual(succeeded.returncode, 0, succeeded.stdout + succeeded.stderr)
+            self.assertEqual(previous.read_bytes(), source.read_bytes())
+            self.assertTrue((root / '.offsite-last').exists())
+
+            again = subprocess.run(['sh', str(COPY_SCRIPT)], env={**env, 'CORRUPT': '1'},
+                                   capture_output=True, text=True, timeout=10)
+            self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
+            self.assertIn('verified existing', again.stdout)
+            self.assertEqual(previous.read_bytes(), source.read_bytes())
+
     def test_publication_and_retention_require_success(self):
         for failure in ('pg_dump', 'pg_restore', 'mv', ''):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as root:

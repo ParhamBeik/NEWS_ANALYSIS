@@ -68,6 +68,13 @@ function BackupHealth({ backups }) {
           backup</span>.
         </p>
       )}
+      <p className={`mt-3 text-xs ${
+        backups.offsite_age_hours == null || backups.offsite_age_hours > 36
+          ? "text-rose-300" : "text-emerald-400"
+      }`}>
+        Off-host copy: {backups.offsite_age_hours == null
+          ? "not verified" : `${backups.offsite_age_hours}h ago`}
+      </p>
     </Card>
   );
 }

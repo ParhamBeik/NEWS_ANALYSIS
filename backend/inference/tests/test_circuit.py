@@ -237,10 +237,17 @@ class TestProcessArticleRecordsTheHalt:
             def complete(self, *args, **kwargs):
                 raise Transient("503")
 
-        monkeypatch.setattr("inference.tasks.provider_for", lambda v: Fake())
+        variant.classify_model = "cheap-classifier"
+        variant.save()
+        selected = []
+        monkeypatch.setattr(
+            "inference.tasks.provider_for",
+            lambda v, model=None: selected.append(model) or Fake(),
+        )
         with pytest.raises(Transient):
             _run_node("classify", article.pk, variant.pk, "run-t", 1)
-        assert NodeEvent.objects.filter(status=NodeStatus.RETRY).exists()
+        assert selected == ["cheap-classifier"]
+        assert NodeEvent.objects.get(status=NodeStatus.RETRY).model == "cheap-classifier"
         assert circuit.current().consecutive_failures >= 1
 
     def test_embed_quota_opens_the_circuit(self, make_article, monkeypatch):

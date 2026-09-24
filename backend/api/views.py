@@ -38,7 +38,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from articles.models import Article, UrlStatus
-from core.vocabulary import AXES, NotifyStatus
+from core.vocabulary import AXES
 from inference import budget, circuit
 from inference.models import (
     Classification,
@@ -53,7 +53,7 @@ from market.models import PredictionOutcome, PriceSnapshot, Symbol
 from review.models import ABFeedback, ABPair, ReviewCase, ReviewStatus, Winner
 from sources.models import PrefilterRule, Source
 
-from .filters import ArticleFilter, articles_with_decision
+from .filters import ArticleFilter, decision_counts
 from .serializers import (
     ABPairSerializer,
     ArticleDetailSerializer,
@@ -471,17 +471,14 @@ class FeedStatsView(APIView):
     def get(self, request):
         since = window_start(request, default_days=1)
         articles = Article.objects.filter(fetched_at__gte=since)
-        canonical_ids = set(articles.filter(duplicate_of__isnull=True).values_list("id", flat=True))
+        canonical = articles.filter(duplicate_of__isnull=True)
         return Response(
             {
                 "funnel": {
                     "fetched": articles.count(),
                     "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
                 },
-                "notify": {
-                    state: len(articles_with_decision(state, canonical_ids))
-                    for state in NotifyStatus.values
-                },
+                "notify": decision_counts(canonical),
                 "budget": {
                     "spent_today_usd": budget.day_spend(),
                     "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
@@ -494,23 +491,33 @@ class FeedStatsView(APIView):
 def backup_health() -> dict:
     """Report actual archives; a leftover success marker cannot prove a dump still exists."""
     directory = Path(settings.BACKUP_DIR)
-    dumps = [path.stat() for path in directory.glob("*.dump") if path.is_file()]
-    dumps = [stat for stat in dumps if stat.st_size > 0]
+    offsite = directory / ".offsite-last"
+    dumps = [
+        path for path in directory.glob("*.dump") if path.is_file() and path.stat().st_size > 0
+    ]
+    newest = max(dumps, key=lambda path: path.stat().st_mtime) if dumps else None
+    offsite_age = (
+        round((timezone.now().timestamp() - offsite.stat().st_mtime) / 3600, 1)
+        if newest and offsite.is_file() and offsite.read_text().strip() == newest.name
+        else None
+    )
     if not dumps:
         return {
             "configured": directory.is_dir(),
             "last_success_at": None,
             "age_hours": None,
             "retained": 0,
+            "offsite_age_hours": offsite_age,
         }
     stamp = timezone.datetime.fromtimestamp(
-        max(stat.st_mtime for stat in dumps), tz=timezone.get_current_timezone()
+        newest.stat().st_mtime, tz=timezone.get_current_timezone()
     )
     return {
         "configured": True,
         "last_success_at": stamp,
         "age_hours": round((timezone.now() - stamp).total_seconds() / 3600, 1),
         "retained": len(dumps),
+        "offsite_age_hours": offsite_age,
     }
 
 
@@ -521,11 +528,9 @@ class OpsView(APIView):
         since = window_start(request)
         events = NodeEvent.objects.filter(created_at__gte=since)
         articles = Article.objects.filter(fetched_at__gte=since)
-        # `articles_with_decision` scans the LATEST evaluation of every article ever
-        # stored, so the notify counts have to be intersected back down to this window and
-        # to canonical rows. Without it the feed page renders an all-time, duplicate-
-        # inclusive total in a row labelled "(24h)", and it only ever grows.
-        canonical_ids = set(articles.filter(duplicate_of__isnull=True).values_list("id", flat=True))
+        # Count only canonical articles fetched within the selected window. The shared
+        # helper evaluates each latest verdict once for all three notify statuses.
+        canonical = articles.filter(duplicate_of__isnull=True)
 
         by_node = list(
             events.values("node", "status")
@@ -553,10 +558,7 @@ class OpsView(APIView):
                     "classified": articles.filter(classifications__isnull=False).distinct().count(),
                     "evaluated": articles.filter(evaluations__isnull=False).distinct().count(),
                 },
-                "notify": {
-                    state: len(articles_with_decision(state, canonical_ids))
-                    for state in NotifyStatus.values
-                },
+                "notify": decision_counts(canonical),
                 "extraction_tiers": list(
                     articles.values("extraction_tier").annotate(count=Count("id")).order_by()
                 ),
@@ -741,7 +743,7 @@ class MarketView(APIView):
             "observed_at"
         )
         outcomes = (
-            PredictionOutcome.objects.filter(computed_at__gte=since)
+            PredictionOutcome.objects.filter(symbol=symbol, computed_at__gte=since)
             .select_related("evaluation")
             .order_by("-computed_at")[:200]
         )

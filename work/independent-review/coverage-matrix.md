@@ -29,7 +29,7 @@ in this review; every rendered workflow still needs a fresh check on a trusted p
 | Review selection controls | Read-only pass | Rendered selection and submission rechecks blocked. |
 | A/B lab | Read-only pass | Staff authorization integration tests pass; rendered and judgement rechecks blocked. |
 | Quality/KPI | Pass | Rendered recheck blocked. |
-| Market | Pass with local fix | Counter computation and frontend check reviewed; rendered and data-consistency rechecks blocked. |
+| Market | Pass with local fix | Counter computation reviewed; PostgreSQL integration test reproduced alternate-symbol outcome leakage and passed after a local API filter. Rendered recheck blocked. |
 | Operations | Read-only pass | Production circuit independently inspected; rendered recheck blocked. |
 | Operations date range | Read-only pass | Rendered filter recheck blocked. |
 | Exports | Read-only pass | Rendered listing/download recheck blocked. |

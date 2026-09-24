@@ -7,7 +7,7 @@ Its reported UI, validation, authorization, logout, and market-counter defects w
 the corresponding fixes are present in the current deployed revision. The review was not
 conclusive, however: current rendered browser workflows could not be repeated because the
 connected-browser bridge was unavailable; historical timings are not a current benchmark;
-four locally corrected defects remain unreleased and the external ingress blocker remains.
+five locally corrected defects remain unreleased and the external ingress blocker remains.
 
 ## Findings
 
@@ -32,11 +32,16 @@ four locally corrected defects remain unreleased and the external ingress blocke
 5. **Medium — a staff API outage was presented as a signed-out session.** The root layout must
    tolerate identity lookup failure, but staff authorization guards must preserve a 5xx response.
    The staff guard now uses the strict API path, while 401 still redirects to sign-in.
+6. **Medium — alternate market symbols displayed gold outcomes.** The selected symbol scoped
+   the price series but not the prediction outcomes, so a dollar chart displayed gold verdicts
+   and a gold-derived scored count. A PostgreSQL API test failed before the one-field filter and
+   passed afterward. The correction is local, not deployed or browser-verified.
 
 ## Completion boundary
 
-- Locally fixed and fully test-verified: findings 2–5.
-- Committed locally on `review/independent-e2e-remediation`: findings 2–5 and this evidence package.
+- Locally fixed and test-verified: findings 2–6.
+- Committed locally on `review/independent-e2e-remediation`: findings 2–5 and the earlier evidence
+  package. Finding 6 is pending local commit; no reviewed corrections are published.
 - Pushed, deployed, or live-verified: none of this review's corrections.
 - The application stack on the new VPS is internally healthy at `87fddf5`, but normal public DNS,
   trusted TLS, and Iran-ISP reachability are blocked. The provider circuit was closed at the last

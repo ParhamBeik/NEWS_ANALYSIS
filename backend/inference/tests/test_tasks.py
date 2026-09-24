@@ -32,7 +32,7 @@ def _answer(model_class, article, variant, **extra):
         variant=variant,
         prompt_version=variant.prompt_version,
         provider=variant.provider,
-        model=variant.model,
+        model=variant.model_for_node(model_class.NODE_NAME),
         **extra,
     )
 
@@ -84,6 +84,18 @@ class TestAlreadyAnswered:
         variant.save()
         assert _already_answered("classify", article.pk, variant) is False
 
+    def test_each_node_matches_its_own_model_tier(self, article, variant):
+        _classify(article, variant)
+        variant.classify_model = "cheap"
+        variant.advanced_model = "advanced"
+        variant.save()
+        assert _already_answered("classify", article.pk, variant) is False
+        _classify(article, variant)
+        assert _already_answered("classify", article.pk, variant) is True
+        assert _already_answered("summarize", article.pk, variant) is False
+        _answer(Summary, article, variant, optimized_title="t", one_line="l")
+        assert _already_answered("summarize", article.pk, variant) is True
+
 
 class TestRunCycle:
     @pytest.fixture
@@ -116,6 +128,17 @@ class TestRunCycle:
         assert run_cycle()["dispatched"] == 0
         assert dispatched == []
 
+    def test_settled_newest_articles_do_not_hide_older_work(
+        self, make_article, variant, dispatched
+    ):
+        old = make_article(published_at=timezone.now() - timedelta(hours=3))
+        for _ in range(200):
+            newer = make_article(published_at=timezone.now())
+            _classify(newer, variant)
+            _answer(Summary, newer, variant, optimized_title="t", one_line="l")
+        assert run_cycle(limit=200)["dispatched"] == 1
+        assert dispatched[0][0] == old.pk
+
     def test_an_other_verdict_settles_without_a_summary(
         self, make_article, variant, dispatched
     ):
@@ -124,6 +147,15 @@ class TestRunCycle:
         article = make_article()
         _classify(article, variant, category="other")
         assert run_cycle()["dispatched"] == 0
+
+    def test_a_superseded_other_verdict_does_not_hide_unfinished_work(
+        self, make_article, variant, dispatched
+    ):
+        article = make_article()
+        _classify(article, variant, category="other")
+        _classify(article, variant, category="security")
+        assert run_cycle()["dispatched"] == 1
+        assert dispatched[0][0] == article.pk
 
     def test_a_chain_that_died_mid_way_is_picked_up_again(
         self, make_article, variant, dispatched

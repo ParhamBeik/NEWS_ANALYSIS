@@ -66,7 +66,12 @@ def _already_answered(node: str, article_id: int, variant: PromptVariant) -> boo
     a repeat cycle, and a second arm that happens to share the first arm's model is still
     asked its own question.
     """
-    return RESULT_MODELS[node].objects.for_variant(variant).filter(article_id=article_id).exists()
+    return (
+        RESULT_MODELS[node]
+        .objects.for_variant(variant, node=node)
+        .filter(article_id=article_id)
+        .exists()
+    )
 
 
 def _record(
@@ -93,7 +98,7 @@ def _record(
         tokens_out=getattr(usage, "tokens_out", 0),
         cost_usd=getattr(usage, "cost_usd", 0),
         provider=getattr(usage, "provider", "") or (variant.provider if variant else ""),
-        model=getattr(usage, "model", "") or (variant.model if variant else ""),
+        model=getattr(usage, "model", "") or (variant.model_for_node(node) if variant else ""),
         error_class=type(exc).__name__ if exc else "",
         error=(f"{exc}"[:2000] if exc else ""),
     )
@@ -185,8 +190,9 @@ def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt:
     category = None
     if node in {"evaluate"}:
         latest = (
-            Classification.objects.filter(article_id=article_id, variant=variant)
-            .order_by("-created_at")
+            Classification.objects.for_variant(variant)
+            .filter(article_id=article_id)
+            .order_by("-created_at", "-id")
             .values_list("category", flat=True)
             .first()
         )
@@ -194,7 +200,8 @@ def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt:
             raise Permanent(f"article {article_id} must be classified before evaluation")
         category = latest
 
-    provider = provider_for(variant)
+    node_model = variant.model_for_node(node)
+    provider = provider_for(variant, model=node_model)
     schema = TASKS[TASK_FOR_NODE[node]][0]
 
     started = timezone.now()
@@ -338,8 +345,9 @@ def process_article(self, article_id: int, variant_id: int, run_id: str) -> dict
         }
 
     category = (
-        Classification.objects.filter(article_id=article_id, variant_id=variant_id)
-        .order_by("-created_at")
+        Classification.objects.for_variant(PromptVariant.objects.get(pk=variant_id))
+        .filter(article_id=article_id)
+        .order_by("-created_at", "-id")
         .values_list("category", flat=True)
         .first()
     )
@@ -412,45 +420,34 @@ def embed_missing(limit: int = 200, run_id: str = "embeddings") -> dict:
     return {"queued": len(ids)}
 
 
-def _outstanding_for(variant: PromptVariant, article_ids: list[int]) -> list[int]:
-    """The subset of `article_ids` this variant still owes an answer for.
-
-    Computed BEFORE dispatch rather than discovered inside each task. Letting every task
-    find out for itself that it was already answered writes one SKIPPED NodeEvent per
-    article per node per variant on every cycle - tens of thousands of non-events a day on
-    a steady corpus - and every one of them lands in the `node_outcomes` counts on /ops.
-
-    An article is settled when it has this variant's classification AND either that
-    classification was `other` (the chain stops there by design) or this variant's summary
-    exists. Anything short of that is a chain that died mid-way - a worker killed between
-    two nodes - and re-dispatching it is how the cycle heals itself.
-    """
-    classified = dict(
-        Classification.objects.for_variant(variant)
-        .filter(article_id__in=article_ids)
-        .values_list("article_id", "category")
+def _outstanding_for(variant: PromptVariant, limit: int, window_days: int) -> list[int]:
+    """Select unfinished work before applying the batch limit, using current answers."""
+    quarantined = DeadLetter.objects.filter(resolved_at__isnull=True).values_list(
+        "article_id", flat=True
     )
-    summarised = set(
-        Summary.objects.for_variant(variant)
-        .filter(article_id__in=article_ids)
+    other_classified = (
+        Classification.objects.filter(
+            pk__in=Classification.objects.for_variant(variant).latest_ids()
+        )
+        .filter(category="other")
         .values_list("article_id", flat=True)
     )
-    # A permanently failed node is quarantined, not retried forever. Without this the
-    # unfinished chain above would re-dispatch every dead letter on every cycle.
-    quarantined = set(
-        DeadLetter.objects.filter(
-            article_id__in=article_ids, resolved_at__isnull=True
-        ).values_list("article_id", flat=True)
+    summarised = (
+        Summary.objects.for_variant(variant)
+        .values_list("article_id", flat=True)
     )
-    return [
-        article_id
-        for article_id in article_ids
-        if article_id not in quarantined
-        and (
-            article_id not in classified
-            or (classified[article_id] != "other" and article_id not in summarised)
-        )
-    ]
+
+    qs = (
+        Article.objects.eligible_for_inference()
+        .exclude(pk__in=quarantined)
+        .exclude(pk__in=other_classified)
+        .exclude(pk__in=summarised)
+    )
+    return list(
+        qs.in_window(window_days)
+        .order_by("-published_at", "-id")
+        .values_list("id", flat=True)[:limit]
+    )
 
 
 @shared_task(name="inference.run_cycle")
@@ -477,29 +474,26 @@ def run_cycle(limit: int | None = None, variant_names: list[str] | None = None) 
             "dispatched": 0,
         }
 
-    # Windowed, because an unbounded queryset re-offers the whole corpus forever: an old
-    # article nothing will ever answer (its source went away, its content is empty) would
-    # be re-examined on every cycle for the life of the deployment.
-    pending = (
-        Article.objects.eligible_for_inference()
-        .in_window(settings.NEWS_ROLLING_WINDOW_DAYS)
-        .order_by("-published_at")
-    )
-    article_ids = list(pending.values_list("id", flat=True)[: limit or 200])
+    batch_limit = limit or 200
+    window_days = settings.NEWS_ROLLING_WINDOW_DAYS
 
     work = [
         (variant, outstanding)
         for variant in variants
-        if (outstanding := _outstanding_for(variant, article_ids))
+        if (outstanding := _outstanding_for(variant, limit=batch_limit, window_days=window_days))
     ]
     if not work:
         # No Run row either. A run that dispatched nothing is not a run, and one per
         # 30 minutes forever is noise in the only table an operator reads for cost.
         return {
-            "articles": len(article_ids),
+            "articles": 0,
             "variants": [variant.name for variant in variants],
             "dispatched": 0,
         }
+
+    all_article_ids = set()
+    for _, outstanding in work:
+        all_article_ids.update(outstanding)
 
     run = Run.objects.create(mode="pipeline")
     budget.reset(run.run_id)
@@ -510,10 +504,10 @@ def run_cycle(limit: int | None = None, variant_names: list[str] | None = None) 
             process_article.delay(article_id, variant.pk, run.run_id)
             dispatched += 1
 
-    Run.objects.filter(pk=run.pk).update(articles_fetched=len(article_ids))
+    Run.objects.filter(pk=run.pk).update(articles_fetched=len(all_article_ids))
     return {
         "run_id": run.run_id,
-        "articles": len(article_ids),
+        "articles": len(all_article_ids),
         "variants": [variant.name for variant in variants],
         "dispatched": dispatched,
     }
@@ -593,5 +587,9 @@ def _status_from_events(run: Run) -> str:
 def probe_circuit() -> dict:
     """Weekly wallet check. The only inference-side call allowed while the circuit is open."""
     result = circuit.weekly_probe()
-    log_action("inference.probe", result.get("action", ""), status=result.get("status"))
+    status = result.get("status") or result.get("action") or "ok"
+    log_action(
+        "inference.probe", status,
+        **{k: v for k, v in result.items() if k not in ("action", "status")},
+    )
     return result

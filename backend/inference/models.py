@@ -42,6 +42,16 @@ class PromptVariant(models.Model):
     description = models.TextField(blank=True)
     provider = models.CharField(max_length=32, default="gapgpt")
     model = models.CharField(max_length=64)
+    classify_model = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Cheap model for category classification. If blank, uses model.",
+    )
+    advanced_model = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Advanced model for evaluation & summarization. If blank, uses model.",
+    )
     memory_strategy = models.CharField(
         max_length=32, choices=MemoryStrategy, default=MemoryStrategy.NONE
     )
@@ -66,6 +76,18 @@ class PromptVariant(models.Model):
 
         self.prompt_version = prompt_version()
         return super().save(*args, **kwargs)
+
+    def model_for_node(self, node: str) -> str:
+        """Resolve node-specific model tier, falling back to variant.model."""
+        if node == "classify" and self.classify_model:
+            return self.classify_model
+        if node in ("evaluate", "summarize") and self.advanced_model:
+            return self.advanced_model
+        return self.model
+
+    def identity_for(self, node: str) -> tuple[str, str, str]:
+        """Node-specific provenance identity."""
+        return (self.provider, self.model_for_node(node), self.prompt_version)
 
     @property
     def identity(self) -> tuple[str, str, str]:
@@ -203,7 +225,7 @@ class InferenceResultQuerySet(models.QuerySet):
     def latest_ids(self):
         return self.latest_per_article().values("pk")
 
-    def for_variant(self, variant: PromptVariant):
+    def for_variant(self, variant: PromptVariant, node: str | None = None):
         """Rows this exact variant produced under its CURRENT identity.
 
         Both halves are load-bearing. Without `variant`, two arms that share a provider,
@@ -213,7 +235,11 @@ class InferenceResultQuerySet(models.QuerySet):
         answer per article instead of two. Without the identity columns, re-pointing a
         variant at a new model would keep matching its old rows and never re-run.
         """
-        provider, model, prompt_version = variant.identity
+        node_name = node or getattr(self.model, "NODE_NAME", None)
+        if node_name and hasattr(variant, "identity_for"):
+            provider, model, prompt_version = variant.identity_for(node_name)
+        else:
+            provider, model, prompt_version = variant.identity
         return self.filter(
             variant=variant, provider=provider, model=model, prompt_version=prompt_version
         )
@@ -222,6 +248,8 @@ class InferenceResultQuerySet(models.QuerySet):
 class InferenceResult(models.Model):
     """Shared provenance. Every answer records what produced it, which is what makes the
     "already answered?" gate and A/B comparison work on the same columns."""
+
+    NODE_NAME: str = ""
 
     article = models.ForeignKey(
         "articles.Article", on_delete=models.CASCADE, related_name="%(class)ss"
@@ -250,6 +278,8 @@ class InferenceResult(models.Model):
 
 
 class Classification(InferenceResult):
+    NODE_NAME = "classify"
+
     category = models.CharField(max_length=32, choices=Category)
     confidence = models.CharField(max_length=16, choices=Level, blank=True)
     matched_keywords = models.JSONField(default=list, blank=True)
@@ -268,6 +298,8 @@ class Evaluation(InferenceResult):
     schema validator: an evaluation that assessed fewer than two axes cannot decide
     anything, so storing it as though it could is the failure mode being prevented.
     """
+
+    NODE_NAME = "evaluate"
 
     confidence_occurrence = models.CharField(max_length=16, choices=Level, null=True, blank=True)
     gold_price_impact = models.CharField(max_length=16, choices=Level, null=True, blank=True)
@@ -303,6 +335,8 @@ class Evaluation(InferenceResult):
 
 
 class Summary(InferenceResult):
+    NODE_NAME = "summarize"
+
     # Overridden purely for the accessor name: the abstract base's `%(class)ss` pattern
     # yields `article.summarys`, and a misspelled relation gets copied into every query
     # that touches it.

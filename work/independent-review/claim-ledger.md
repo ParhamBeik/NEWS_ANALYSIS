@@ -3,7 +3,7 @@
 | Previous claim | Original evidence | Independent method | Result | Follow-up |
 |---|---|---|---|---|
 | The browser audit was incomplete before synthetic-account creation. | Audit status and browser notes. | Recovered deleted artifacts and task boundary from Git. | VERIFIED | None. |
-| The Market “Scored predictions” counter included unscored outcomes. | Rendered observation and local change. | Reviewed pre-fix computation, current implementation, and regression check. | VERIFIED | Current rendered recheck remains unavailable. |
+| The Market “Scored predictions” counter included unscored outcomes. | Rendered observation and local change. | Reviewed pre-fix computation and regression check; also tested the adjacent alternate-symbol API behavior. | PARTIAL | The default-symbol count was corrected, but alternate symbols still received gold outcomes; local API fix awaits publication and rendered recheck. |
 | Invalid Feed, Market, Operations, and Article parameters produced generic failures. | Browser screenshots/notes and local remediation. | Reviewed route boundaries and automated frontend checks. | VERIFIED | Current rendered recheck remains unavailable. |
 | Public signups could access shared Review and A/B workflows. | Production browser check with an isolated non-staff account. | Reviewed pre-fix permissions, current staff permissions, and expanded ordinary-user integration checks for every read/write action. | VERIFIED | Re-run non-staff browser flow after publication of this review's test hardening. |
 | Repeated sign-out could redirect back to sign-out. | Browser evidence and fix commit. | Reviewed middleware/logout history and current relative redirect implementation. | VERIFIED | Current rendered recheck remains unavailable. |

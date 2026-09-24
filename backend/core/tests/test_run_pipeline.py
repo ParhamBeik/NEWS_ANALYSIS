@@ -66,6 +66,21 @@ def test_circuit_probe_schedule_checks_the_due_state_hourly(db):
     assert task.crontab is None
 
 
+def test_embedding_sweep_is_manual_and_crawl_cadence_is_preserved(db):
+    """An inactive semantic arm must not pay for every new article's embedding."""
+    from django_celery_beat.models import IntervalSchedule, PeriodicTask
+
+    old_interval = IntervalSchedule.objects.create(every=30, period=IntervalSchedule.MINUTES)
+    PeriodicTask.objects.create(
+        name="embed-missing", task="inference.embed_missing", interval=old_interval
+    )
+    call_command("setup_schedule")
+    assert not PeriodicTask.objects.filter(name="embed-missing").exists()
+    crawl = PeriodicTask.objects.select_related("interval").get(name="crawl-all-sources")
+    assert crawl.interval.every == 5
+    assert crawl.interval.period == IntervalSchedule.MINUTES
+
+
 class TestRebuildAll:
     def test_rebuild_all_reaches_the_workbook_task(self, monkeypatch):
         """The scheduled export is bounded to the rolling window, so the operator needs a

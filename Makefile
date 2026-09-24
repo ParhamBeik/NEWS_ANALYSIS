@@ -1,9 +1,8 @@
 # One entry point for every routine task. If a command belongs in a contributor's muscle
 # memory, it belongs here - and nowhere else, so there is one thing to keep true.
 #
-# The gates below are the same ones .github/workflows/ci.yml runs. `make ci` is the whole
-# set, and running it before a push is the difference between finding a problem here and
-# finding it after main has already deployed to production.
+# `make ci` covers the local source gates. GitHub CI also runs dependency audits,
+# backup shell tests and Docker image builds; see .github/workflows/ci.yml.
 
 SHELL := /bin/bash
 PY := backend/.venv/bin/python
@@ -55,7 +54,7 @@ migrations: ## Fail if a model change has no migration
 build: ## Production build of the dashboard
 	cd frontend && npm run build
 
-ci: lint check migrations test build ## Everything CI checks, in CI's order
+ci: lint check migrations test build ## Local source checks (CI also audits and builds images)
 
 fmt: ## Format the backend (NOT enforced by CI - see ARCHITECTURE.md before using)
 	cd backend && ../$(PY) -m ruff format .

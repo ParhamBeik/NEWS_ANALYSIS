@@ -17,8 +17,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to deploy (defaults to this commit). Use a previous SHA to roll back."
-        required: false
+        description: "Existing image tag to deploy (previous SHA for rollback)."
+        required: true
 
 concurrency:
   # NEVER cancel a deploy in progress. Two `docker compose up` runs against the same host
@@ -62,8 +62,16 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - id: tag
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          echo "value=${{ github.event.inputs.tag || github.event.workflow_run.head_sha || github.sha }}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [[ "$REQUESTED_TAG" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::tag must be a commit SHA"; exit 1; }
+            echo "value=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$TESTED_SHA" >> "$GITHUB_OUTPUT"
+          fi
           # Docker refuses a repository name containing uppercase, and this repository is
           # `ParhamBeik/NEWS_ANALYSIS`. `github.repository` cannot be lowercased in an
           # expression, so it has to happen in the shell.
@@ -79,7 +87,10 @@ jobs:
           # job, so a leaked workflow log cannot be replayed against the registry later.
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v7
+      # Manual rollback reuses the prior image. Rebuilding current source under an old
+      # SHA would silently turn the rollback into a redeploy.
+      - if: ${{ github.event_name != 'workflow_dispatch' }}
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           push: true
@@ -122,12 +133,15 @@ jobs:
           scp -i ~/.ssh/id_deploy \
             deploy/docker-compose.prod.yml \
             deploy/backup.sh \
+            deploy/copy-backup.sh \
+            deploy/check-stack.sh \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/apps/news-intel/deploy/
 
       # Written BEFORE anything changes, because a rollback target you record after the fact
       # is the broken version. `.rollback` is the only record of what was serving; nothing
       # else on the box remembers the previous tag once .env has been rewritten.
       - name: Record the version currently serving
+        id: record
         run: |
           ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
             cd /opt/apps/news-intel/deploy
@@ -182,7 +196,9 @@ jobs:
             [ "$code" = "$2" ]
           }
           for attempt in $(seq 1 20); do
-            if check /login 200 && check /ops 307; then
+            if check /login 200 && check /ops 307 && \
+               ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+                 'sh /opt/apps/news-intel/deploy/check-stack.sh'; then
               echo "live after ${attempt} attempts"
               exit 0
             fi
@@ -192,13 +208,11 @@ jobs:
           echo "::error::site did not pass its health checks after deploy"
           exit 1
 
-      # Only on a failed verify. Restores the tags recorded before the switch and brings the
-      # previous release back up, so production is never left on a version that did not pass.
-      # Fix forward afterwards; this step buys the time to do that calmly.
+      # After tags are recorded, a failed pull, restart or verification needs rollback.
       - name: Roll back to the previous version
-        if: failure() && steps.verify.outcome == 'failure'
+        if: failure() && steps.record.outcome == 'success'
         run: |
-          echo "::warning::deploy failed its health checks - rolling back"
+          echo "::warning::deploy failed after recording previous tags - rolling back"
           ssh -i ~/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
             cd /opt/apps/news-intel/deploy
             echo "--- why it failed ---"
