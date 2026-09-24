@@ -141,3 +141,7 @@ an environment interruption, not a code pass or failure.
   after a successful copy. No application push or deployment occurred.
   At 2026-09-24 13:45Z the scheduled agent also copied the newly published
   `newsintel-20260924-123948.dump`; the VPS marker advanced to that same filename.
+  Later that day, the local `deploy/check-stack.sh` was streamed read-only to the VPS and
+  exited 0 against the current `newsintel-backend:patch` stack. That proves the service,
+  staff-level API, schedule and fresh-backup checks work on the existing deployment;
+  it does not prove the unshipped application image, token-auth browser path or rollback.
