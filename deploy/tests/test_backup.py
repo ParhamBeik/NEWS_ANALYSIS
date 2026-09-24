@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -10,6 +12,7 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / 'backup.sh'
 COPY_SCRIPT = SCRIPT.with_name('copy-backup.sh')
 PULL_SCRIPT = SCRIPT.with_name('pull-backup.sh')
+HASH_COMMAND = 'sha256sum' if shutil.which('sha256sum') else 'shasum -a 256'
 
 
 class BackupTests(unittest.TestCase):
@@ -40,6 +43,10 @@ case "$*" in
 esac
 ''')
             ssh.chmod(0o755)
+            if not shutil.which('shasum'):
+                shim = binaries / 'shasum'
+                shim.write_text('#!/bin/sh\nshift 2\nexec sha256sum "$@"\n')
+                shim.chmod(0o755)
             env = {**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
                    'BACKUP_SOURCE_HOST': 'source-test', 'BACKUP_SOURCE_KEY': str(root / 'key'),
                    'BACKUP_LOCAL_DIR': str(local), 'SOURCE_DUMP': str(source),
@@ -89,13 +96,14 @@ esac
 shift 5
 sh -c "$1"
 ''',
-                'sha256sum': '''#!/bin/sh
-shasum -a 256 "$@"
+                'sha256sum': f'''#!/bin/sh
+{shutil.which('sha256sum') or '/usr/bin/shasum -a 256'} "$@"
 ''',
             }
             for name, body in commands.items():
                 target = binaries / name
-                target.write_text(body)
+                target.write_text(body.replace('shasum -a 256 "$SOURCE_DUMP"',
+                                               f'{HASH_COMMAND} "$SOURCE_DUMP"'))
                 target.chmod(0o755)
             env = {**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
                    'BACKUP_TARGET': 'backup-test', 'BACKUP_REMOTE_DIR': str(remote),
@@ -190,7 +198,7 @@ for arg; do case "$arg" in --file=*) printf archive > "${{arg#--file=}}";; esac;
 
             process = subprocess.Popen(
                 ['sh', str(SCRIPT)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True,
+                text=True, start_new_session=True,
                 env={**os.environ, 'PATH': f'{binaries}:{os.environ["PATH"]}',
                      'BACKUP_DIR': str(backups), 'POSTGRES_DB': 'newsintel',
                      'BACKUP_RETRY_SECONDS': '0', 'BACKUP_INTERVAL_SECONDS': '3600'},
@@ -202,7 +210,9 @@ for arg; do case "$arg" in --file=*) printf archive > "${{arg#--file=}}";; esac;
                 self.assertTrue(list(backups.glob('*.dump')), 'the failed startup dump was not retried')
                 self.assertGreaterEqual(int(attempts.read_text()), 2)
             finally:
-                process.terminate()
+                # Kill the shell and its sleep child; otherwise the child retains the
+                # stdout pipe and communicate waits for the full hour on Linux.
+                os.killpg(process.pid, signal.SIGTERM)
                 output, _ = process.communicate(timeout=3)
             self.assertIn('FAILED: pg_dump did not complete', output)
 
