@@ -53,6 +53,7 @@
 
 	# Django admin and DRF's browsable API, for the operator only. The Next app has no
 	# route for these and would render its own 404.
+	redir /admin /admin/ 308
 	handle /admin/* {
 		reverse_proxy backend:8000
 	}
