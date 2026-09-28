@@ -16,7 +16,7 @@ test("malformed query boundaries render contextual recovery states", async () =>
   const [api, primitives, feed, ops, market, article] = await Promise.all([
     readFile(new URL("../lib/api.js", import.meta.url), "utf8"),
     readFile(new URL("../components/primitives.js", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.js", import.meta.url), "utf8"),
+    readFile(new URL("../app/articles/page.js", import.meta.url), "utf8"),
     readFile(new URL("../app/ops/page.js", import.meta.url), "utf8"),
     readFile(new URL("../app/market/page.js", import.meta.url), "utf8"),
     readFile(new URL("../app/article/[id]/page.js", import.meta.url), "utf8"),

@@ -26,7 +26,11 @@ from django_celery_beat.models import PeriodicTask
 from rest_framework.test import APIClient
 client = APIClient(HTTP_HOST=settings.ALLOWED_HOSTS[0])
 client.force_authenticate(user=get_user_model()(is_staff=True, is_active=True))
-for path in ("/api/articles/", "/api/ops/", "/api/kpi/", "/api/market/", "/api/exports/"):
+for path in (
+    "/api/articles/", "/api/collection/", "/api/analysis-summary/?stage=classification",
+    "/api/analysis-summary/?stage=evaluation", "/api/ops/", "/api/kpi/",
+    "/api/market/", "/api/exports/",
+):
     response = client.get(path)
     assert response.status_code == 200, f"{path}: HTTP {response.status_code}"
 assert PeriodicTask.objects.filter(name__in=("crawl-all-sources", "inference-cycle", "weekly-circuit-probe"), enabled=True).count() == 3

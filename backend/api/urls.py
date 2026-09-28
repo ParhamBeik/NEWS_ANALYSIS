@@ -10,7 +10,9 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     ABPairViewSet,
+    AnalysisSummaryView,
     ArticleViewSet,
+    CollectionView,
     ExportDownloadView,
     ExportListView,
     FeedStatsView,
@@ -37,6 +39,8 @@ router.register("reviews", ReviewViewSet, basename="review")
 router.register("ab/pairs", ABPairViewSet, basename="ab-pair")
 
 urlpatterns = [
+    path("collection/", CollectionView.as_view(), name="collection"),
+    path("analysis-summary/", AnalysisSummaryView.as_view(), name="analysis-summary"),
     path("health/", HealthView.as_view(), name="health"),
     path("auth/token/", LoginView.as_view(), name="auth-token"),
     path("auth/signup/", SignupView.as_view(), name="auth-signup"),

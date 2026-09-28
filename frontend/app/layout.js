@@ -1,5 +1,6 @@
 import AppShell from "@/components/AppShell";
 import { currentUser } from "@/lib/api";
+import { language } from "@/lib/language";
 import "./globals.css";
 
 export const metadata = {
@@ -17,11 +18,12 @@ export const metadata = {
 
 export default async function RootLayout({ children }) {
   const user = await currentUser();
+  const lang = await language();
 
   return (
-    <html lang="en" dir="ltr">
+    <html lang={lang} dir={lang === "fa" ? "rtl" : "ltr"}>
       <body className="min-h-screen bg-slate-950 text-slate-100 antialiased">
-        <AppShell user={user}>{children}</AppShell>
+        <AppShell user={user} lang={lang}>{children}</AppShell>
       </body>
     </html>
   );

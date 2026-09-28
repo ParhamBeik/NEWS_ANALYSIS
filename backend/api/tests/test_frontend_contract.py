@@ -2,7 +2,7 @@
 
 `core.vocabulary` is declared once and imported everywhere on the Python side, so nothing
 in the backend can offer a value the workbook would reject. The frontend cannot import it.
-It re-declares the same four vocabularies in `lib/display.js` and `app/page.js` — for
+It re-declares the same four vocabularies in `lib/display.js` and `app/articles/page.js` — for
 ordering, colour and button labels — and there is no compiler, no type and no runtime check
 standing between the two copies.
 
@@ -69,7 +69,7 @@ def test_the_feeds_verdict_filter_offers_only_values_the_filter_accepts():
     that quietly matches nothing."""
     offered = re.findall(
         r'\["([^"]+)",\s*"(?:Notify|Quiet|Insufficient)"\]',
-        _source("app", "page.js"),
+        _source("app", "articles", "page.js"),
     )
     assert offered, "the feed's NOTIFY_STATES list moved; this test needs to follow it"
     assert offered == list(NotifyStatus.values)

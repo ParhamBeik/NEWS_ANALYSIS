@@ -57,8 +57,8 @@ export default async function ArticlePage({ params }) {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div>
-        <Link href="/" className="text-xs text-slate-500 hover:text-slate-300">
-          ← Back to feed
+        <Link href="/articles" className="text-xs text-slate-500 hover:text-slate-300">
+          ← Back to articles
         </Link>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">

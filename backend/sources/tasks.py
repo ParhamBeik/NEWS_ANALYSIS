@@ -16,6 +16,8 @@ import logging
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
 
 from articles.ingest import upsert
 from articles.models import ImageStatus
@@ -23,7 +25,7 @@ from core.errors import Permanent, Transient
 
 from . import strategies
 from .extraction import build_session
-from .models import Source
+from .models import CrawlAttempt, Source
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,7 @@ def _queue_image(article) -> int:
 
 
 @shared_task(
+    bind=True,
     name="sources.crawl_source",
     autoretry_for=(Transient,),
     retry_backoff=True,
@@ -70,7 +73,7 @@ def _queue_image(article) -> int:
     retry_jitter=True,
     max_retries=3,
 )
-def crawl_source(source_name: str, limit: int | None = None, run_id: str = "") -> dict:
+def crawl_source(self, source_name: str, limit: int | None = None, run_id: str = "") -> dict:
     """Fetch one source and store what it returns.
 
     `Permanent` is deliberately NOT in autoretry_for: a feed that stopped being XML or a
@@ -81,25 +84,48 @@ def crawl_source(source_name: str, limit: int | None = None, run_id: str = "") -
     if source is None:
         raise Permanent(f"no enabled source named {source_name!r}")
 
-    limit = limit or settings.NEWS_CRAWL_LIMIT_PER_SOURCE
-    session = build_session()
+    attempt = CrawlAttempt.objects.create(
+        source=source, task_id=self.request.id or "", retry=self.request.retries,
+    )
     try:
-        raw_articles = strategies.fetch(source, session, limit=limit)
+        stats = _crawl(source, limit or settings.NEWS_CRAWL_LIMIT_PER_SOURCE, run_id, attempt)
     except Exception as exc:
-        source.mark_degraded(str(exc))
+        # Store the class, not arbitrary HTTP exception text that can contain credentials.
+        attempt.status = "failed"
+        attempt.error = type(exc).__name__
+        source.mark_degraded(attempt.error)
         raise
+    finally:
+        attempt.finished_at = timezone.now()
+        attempt.save(update_fields=["status", "error", "finished_at"])
+    return stats
 
-    stats = {"source": source_name, "fetched": 0, "new": 0, "duplicate": 0, "rejected": 0,
+
+def _crawl(source, limit, run_id, attempt):
+    with build_session() as session:
+        raw_articles = strategies.fetch(source, session, limit=limit)
+
+    stats = {"source": source.name, "fetched": 0, "new": 0, "duplicate": 0, "rejected": 0,
              "prefiltered": 0, "images_queued": 0, "failed": 0}
     for raw in raw_articles:
         stats["fetched"] += 1
         try:
-            article, created = upsert(raw, source, run_id)
+            with transaction.atomic():
+                article, created = upsert(raw, source, run_id)
+                # Commit storage and its counter together, even if the worker dies next.
+                attempt.fetched += 1
+                attempt.new += int(created)
+                attempt.repeated += int(not created)
+                attempt.save(update_fields=["fetched", "new", "repeated"])
         except Exception:
             # One malformed row must not cost us the other 39. A single Khabarfoori URL
             # 1,090 characters long once failed an entire source's crawl this way, and
             # the loss looked exactly like the site being down.
             stats["failed"] += 1
+            attempt.refresh_from_db()
+            attempt.fetched += 1
+            attempt.failed += 1
+            attempt.save(update_fields=["fetched", "failed"])
             logger.warning("ingest failed for %s", raw.url[:200], exc_info=True)
             continue
         if not created:
@@ -113,8 +139,15 @@ def crawl_source(source_name: str, limit: int | None = None, run_id: str = "") -
             stats["prefiltered"] += 1
         stats["images_queued"] += _queue_image(article)
 
-    source.mark_healthy()
-    logger.info("crawl %s: %s", source_name, stats)
+    attempt.status = "partial" if stats["failed"] else "success" if stats["fetched"] else "empty"
+    if attempt.status == "success":
+        source.mark_healthy()
+    else:
+        attempt.error = (
+            "Some articles could not be stored" if stats["failed"] else "No articles found"
+        )
+        source.mark_degraded(attempt.error)
+    logger.info("crawl %s: %s", source.name, stats)
     return stats
 
 

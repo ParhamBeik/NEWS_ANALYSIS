@@ -112,6 +112,8 @@ class Article(models.Model):
     class Meta:
         ordering = ["-published_at", "-id"]
         indexes = [
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["source", "created_at"]),
             models.Index(fields=["source", "published_at"]),
             models.Index(fields=["duplicate_of"]),
             models.Index(fields=["original_outlet"]),

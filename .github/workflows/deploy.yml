@@ -162,6 +162,18 @@ jobs:
             echo "FRONTEND_IMAGE=${{ needs.build.outputs.image_base }}-frontend:${{ needs.build.outputs.tag }}" >> .env
 
             docker compose -f docker-compose.prod.yml pull
+            # A paused crawl worker has accumulated periodic jobs. Recreating it would
+            # immediately run every stale cycle. Preserve both queues under release-tagged
+            # keys, then let Beat enqueue fresh work for the replacement worker.
+            if docker inspect -f '{{.State.Paused}}' newsintel-worker-crawl-1 | grep -qx true; then
+              touch .crawl-was-paused-${{ needs.build.outputs.tag }}
+              if docker exec newsintel-redis-1 redis-cli EXISTS crawl | grep -qx 1; then
+                docker exec newsintel-redis-1 redis-cli RENAMENX crawl release-backlog-crawl-${{ needs.build.outputs.tag }} | grep -qx 1
+              fi
+              if docker exec newsintel-redis-1 redis-cli EXISTS default | grep -qx 1; then
+                docker exec newsintel-redis-1 redis-cli RENAMENX default release-backlog-default-${{ needs.build.outputs.tag }} | grep -qx 1
+              fi
+            fi
             # 'up -d' recreates only what changed. The 'migrate' service is a one-shot that
             # the app services wait on via service_completed_successfully, so schema changes
             # land before anything serves them.
@@ -220,6 +232,9 @@ jobs:
             sed -i '/^BACKEND_IMAGE=/d;/^FRONTEND_IMAGE=/d' .env
             cat .rollback >> .env
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            if [ -f .crawl-was-paused-${{ needs.build.outputs.tag }} ]; then
+              docker compose -f docker-compose.prod.yml pause worker-crawl
+            fi
           EOF
 
           for attempt in $(seq 1 20); do

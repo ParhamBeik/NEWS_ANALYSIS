@@ -22,9 +22,10 @@ denormalised column written BY `decide`, never a second copy of the logic.
 from __future__ import annotations
 
 import django_filters as filters
-from django.db.models import Q, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 
 from articles.models import Article
+from core.collection import day_bounds
 from core.vocabulary import NotifyStatus
 from inference.models import Classification, Evaluation
 
@@ -54,6 +55,9 @@ def decision_counts(articles: QuerySet[Article]) -> dict[str, int]:
 
 
 class ArticleFilter(filters.FilterSet):
+    stored_day = filters.DateFilter(method="filter_stored_day")
+    classified = filters.BooleanFilter(method="filter_classified")
+    evaluated = filters.BooleanFilter(method="filter_evaluated")
     source = filters.CharFilter(field_name="source_id")
     outlet = filters.CharFilter(field_name="original_outlet", lookup_expr="icontains")
     jalali_day = filters.CharFilter(field_name="published_at_jalali")
@@ -75,6 +79,20 @@ class ArticleFilter(filters.FilterSet):
     class Meta:
         model = Article
         fields: list[str] = []
+
+    def filter_stored_day(self, queryset, name, value):
+        start, end = day_bounds(value)
+        return queryset.filter(created_at__gte=start, created_at__lt=end)
+
+    def filter_classified(self, queryset, name, value):
+        return queryset.alias(has_result=Exists(
+            Classification.objects.filter(article_id=OuterRef("pk"))
+        )).filter(has_result=value)
+
+    def filter_evaluated(self, queryset, name, value):
+        return queryset.alias(has_result=Exists(
+            Evaluation.objects.filter(article_id=OuterRef("pk"))
+        )).filter(has_result=value)
 
     def filter_category(self, queryset: QuerySet, name: str, value: str) -> QuerySet:
         """Latest classification only. Filtering on ANY classification would surface an

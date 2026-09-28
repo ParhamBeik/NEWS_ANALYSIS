@@ -38,6 +38,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from articles.models import Article, UrlStatus
+from core.collection import analysis_summary, collection_summary
 from core.vocabulary import AXES
 from inference import budget, circuit
 from inference.models import (
@@ -124,6 +125,25 @@ class HealthView(APIView):
         return Response({"status": "ok"})
 
 
+class CollectionView(APIView):
+    def get(self, request):
+        try:
+            days = int(request.query_params.get("days", 14))
+        except ValueError as exc:
+            raise ValidationError({"days": "must be an integer"}) from exc
+        if days not in (1, 7, 14, 30):
+            raise ValidationError({"days": "choose 1, 7, 14, or 30"})
+        return Response(collection_summary(days))
+
+
+class AnalysisSummaryView(APIView):
+    def get(self, request):
+        stage = request.query_params.get("stage", "classification")
+        if stage not in ("classification", "evaluation"):
+            raise ValidationError({"stage": "choose classification or evaluation"})
+        return Response(analysis_summary(stage))
+
+
 class MeView(APIView):
     def get(self, request):
         return Response(
@@ -207,6 +227,8 @@ class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(duplicate_of__isnull=True)
         if self.action == "retrieve":
             queryset = queryset.prefetch_related("duplicates")
+        if self.request.query_params.get("order") == "stored":
+            queryset = queryset.order_by("-created_at", "-id")
         return queryset
 
     @action(detail=True, methods=["get"])

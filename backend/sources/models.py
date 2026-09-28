@@ -8,6 +8,32 @@ here too, so `/ops` can answer "is each source still alive?" without a crawl.
 from __future__ import annotations
 
 from django.db import models
+from django.utils import timezone
+
+
+class CrawlAttempt(models.Model):
+    """One task execution, including retries; counters survive a worker interruption."""
+
+    source = models.ForeignKey("Source", on_delete=models.PROTECT, related_name="crawl_attempts")
+    task_id = models.CharField(max_length=255, blank=True)
+    retry = models.PositiveSmallIntegerField(default=0)
+    started_at = models.DateTimeField(default=timezone.now, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, default="running", choices=[
+        (state, state) for state in ("running", "success", "partial", "empty", "failed")
+    ])
+    fetched = models.PositiveIntegerField(default=0)
+    new = models.PositiveIntegerField(default=0)
+    repeated = models.PositiveIntegerField(default=0)
+    failed = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-started_at", "-id"]
+        indexes = [models.Index(fields=["source", "-started_at"])]
+
+    def __str__(self):
+        return f"{self.source_id}: {self.status} ({self.started_at})"
 
 
 class Strategy(models.TextChoices):

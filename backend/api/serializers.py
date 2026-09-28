@@ -173,6 +173,7 @@ class ArticleListSerializer(serializers.ModelSerializer):
         model = Article
         fields = [
             "id", "url", "source", "outlet", "title", "lead", "image",
+            "created_at", "duplicate_of",
             "published_at", "published_at_jalali", "published_time", "date_uncertain",
             "extraction_tier", "native_category", "keywords",
             # On the CARD, not just the detail page: an analysed-looking article with no
