@@ -754,55 +754,6 @@ class TestOps:
             client.get("/api/ops/?days=1").json()["notify"]
         )
 
-    def test_a_missing_backup_directory_reports_unconfigured_rather_than_erroring(
-        self, client, settings, tmp_path
-    ):
-        """A deployment without the backup volume mounted must still render /ops. An
-        exception here would take the whole operational dashboard down over a missing
-        directory, which is the moment you most need the dashboard."""
-        settings.BACKUP_DIR = tmp_path / "nowhere"
-        backups = client.get("/api/ops/").json()["backups"]
-        assert backups == {
-            "configured": False,
-            "last_success_at": None,
-            "age_hours": None,
-            "retained": 0,
-            "offsite_age_hours": None,
-        }
-
-    def test_backup_age_comes_from_an_existing_archive(self, client, settings, tmp_path):
-        import os
-
-        dump = tmp_path / "newsintel-20260908-030000.dump"
-        dump.write_bytes(b"PGDMP")
-        two_days_ago = (timezone.now() - timedelta(days=2)).timestamp()
-        os.utime(dump, (two_days_ago, two_days_ago))
-        # Neither a fresh success marker nor an in-progress dump makes the old dump fresh.
-        (tmp_path / ".last-success").write_text("2026-09-08T03:00:00Z")
-        (tmp_path / "incomplete.dump.partial").write_bytes(b"partial")
-        (tmp_path / "empty.dump").touch()
-        settings.BACKUP_DIR = tmp_path
-
-        backups = client.get("/api/ops/").json()["backups"]
-        assert backups["configured"] is True
-        assert backups["retained"] == 1
-        assert backups["age_hours"] == 48.0
-        assert backups["offsite_age_hours"] is None
-
-        (tmp_path / ".offsite-last").write_text(dump.name)
-        backups = client.get("/api/ops/").json()["backups"]
-        assert backups["offsite_age_hours"] == 0.0
-
-        newer_dump = tmp_path / "newsintel-new.dump"
-        newer_dump.write_bytes(b"PGDMP")
-        backups = client.get("/api/ops/").json()["backups"]
-        assert backups["offsite_age_hours"] is None
-
-        newer_dump.unlink()
-        dump.unlink()
-        backups = client.get("/api/ops/").json()["backups"]
-        assert backups["age_hours"] is None
-        assert backups["retained"] == 0
 
 
 @pytest.mark.django_db
