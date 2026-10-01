@@ -34,7 +34,7 @@ from django.utils import timezone
 from articles.models import Article, EventAssessment, EventReview, NewsEvent, UrlStatus
 from core.actions import log_action
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
-from core.vocabulary import AXES
+from core.vocabulary import AXES, EVENT_CATEGORIES
 
 from . import budget, circuit, memory
 from .jev import configured as jev_configured
@@ -118,15 +118,7 @@ def assess_event(self, event_id: int) -> dict:
 
     try:
         category = answers["category"]["choice"]
-        if category not in {
-            "monetary",
-            "macro",
-            "sanctions_trade",
-            "geopolitics",
-            "energy",
-            "markets",
-            "other",
-        }:
+        if category not in EVENT_CATEGORIES:
             raise KeyError("category")
         iran_score, global_score = score("iran"), score("global")
         asset_scores = {

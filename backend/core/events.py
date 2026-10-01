@@ -17,6 +17,7 @@ from articles.models import (
     NewsEvent,
     UrlStatus,
 )
+from core.actions import log_action
 
 PRESENTATION_FIELDS = (
     "title_fa", "title_en", "brief_fa", "brief_en", "channels_fa", "channels_en",
@@ -126,6 +127,52 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
 
         transaction.on_commit(lambda event_id=target.pk: summarize_event.delay(event_id))
     return target
+
+
+@transaction.atomic
+def split_article_from_event(event_id: int, article_id: int) -> NewsEvent:
+    """Undo a wrong grouping: move one report, with its own copies, into a new event.
+
+    The remaining event keeps its assessments and review; the new one is unassessed and
+    queued for Jev like any fresh story.
+    """
+    event = NewsEvent.objects.select_for_update().get(pk=event_id)
+    members = list(event.articles.all())
+    moving = [a for a in members if article_id in (a.id, a.duplicate_of_id)]
+    article = next((a for a in moving if a.id == article_id), None)
+    if article is None:
+        raise ValueError("article is not part of this event")
+    remaining = [a for a in members if a not in moving]
+    if not remaining:
+        raise ValueError("an event's only report cannot be split out")
+    primary_changed = event.primary_article_id in {a.id for a in moving}
+    if primary_changed:
+        # OneToOne: the old event must let go of the article before the new one takes it.
+        event.primary_article = min(
+            remaining, key=lambda a: (a.published_at or a.fetched_at, a.id)
+        )
+        event.save(update_fields=["primary_article", "updated_at"])
+    event.articles.remove(*moving)
+    split = NewsEvent.objects.create(
+        primary_article=article,
+        event_time=article.published_at or article.fetched_at,
+        first_seen_at=article.created_at or timezone.now(),
+    )
+    split.articles.add(*moving)
+    refresh_event(split)
+    refresh_event(event)
+    had_presentation = bool(event.brief_fa)
+    if had_presentation:
+        invalidate_presentation(event, "event_split")
+    from inference.tasks import assess_event, summarize_event
+
+    transaction.on_commit(lambda event_id=split.pk: assess_event.delay(event_id))
+    if primary_changed:
+        transaction.on_commit(lambda event_id=event.pk: assess_event.delay(event_id))
+    elif had_presentation:
+        transaction.on_commit(lambda event_id=event.pk: summarize_event.delay(event_id))
+    log_action("event.split", "split", event=event.pk, article=article_id, new_event=split.pk)
+    return split
 
 
 def ranked_events(queryset, now=None):

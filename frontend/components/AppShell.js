@@ -10,6 +10,7 @@ const NAV = [
   { href: "/classification", en: "Classification", fa: "دسته‌بندی", staff: true },
   { href: "/evaluation", en: "Evaluation", fa: "ارزیابی", staff: true },
   { href: "/articles", en: "Articles", fa: "مقالات", staff: true },
+  { href: "/review/swipe", en: "Quick review", fa: "بازبینی سریع", staff: true },
 ];
 
 const AUTH_PATHS = ["/login", "/signup"];
