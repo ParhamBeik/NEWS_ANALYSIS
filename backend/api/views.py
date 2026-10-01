@@ -26,7 +26,9 @@ from django.db import IntegrityError, connection
 from django.db.models import Avg, Count, DecimalField, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.http import FileResponse, Http404
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
@@ -37,9 +39,10 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
-from articles.models import Article, UrlStatus
+from articles.models import Article, EventReview, NewsEvent, UrlStatus
 from core.collection import analysis_summary, collection_summary
-from core.events import priority_visibility
+from core.events import priority_visibility, split_article_from_event
+from core.review import SESSION_SIZE, record_decision, review_queue, review_stats, score_tier
 from core.vocabulary import AXES
 from inference import budget, circuit
 from inference.models import (
@@ -57,6 +60,7 @@ from review.models import ABFeedback, ABPair, ReviewCase, ReviewStatus, Winner
 from sources.models import PrefilterRule, Source
 
 from .filters import ArticleFilter, decision_counts
+from .public import event_document
 from .serializers import (
     ABPairSerializer,
     ArticleDetailSerializer,
@@ -368,6 +372,120 @@ class ReviewViewSet(viewsets.ReadOnlyModelViewSet):
         case.reviewer_notes = request.data.get("reviewer_notes", "")
         case.save()
         return Response({"status": case.status})
+
+
+def event_review_cards(queryset):
+    """The swipe card reads the reader document plus every article id a split can name."""
+    return queryset.select_related(
+        "event__primary_article__source", "event__primary_article__image"
+    ).prefetch_related("event__articles__source", "event__assessments")
+
+
+def event_review_card(review: EventReview) -> dict:
+    event = review.event
+    return {
+        **event_document(event),
+        "review_reason": review.reason,
+        "skipped": review.skipped_at is not None,
+        "iran_tier": score_tier(event.iran_score),
+        "global_tier": score_tier(event.global_score),
+        "articles": [
+            {
+                "id": article.id,
+                "title": article.original_title,
+                "source": article.source.display_name or article.source_id,
+                "published_at": article.published_at,
+                "is_primary": article.id == event.primary_article_id,
+            }
+            for article in sorted(
+                event.articles.all(), key=lambda row: (row.published_at or row.fetched_at, row.id)
+            )
+        ],
+    }
+
+
+class EventReviewQueueView(APIView):
+    """Swipe-review session: the most informative pending event reviews first."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        try:
+            limit = int(request.query_params.get("limit", SESSION_SIZE))
+        except ValueError as exc:
+            raise ValidationError({"limit": "must be an integer"}) from exc
+        queue = review_queue()
+        rows = event_review_cards(queue)[: max(1, min(limit, 100))]
+        return Response(
+            {"pending": queue.count(), "results": [event_review_card(row) for row in rows]}
+        )
+
+
+class EventReviewDecisionView(APIView):
+    """agree / fix / skip / undo for one event's review."""
+
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, event_id: int):
+        review = get_object_or_404(EventReview.objects.select_related("event"), event_id=event_id)
+        try:
+            record_decision(
+                review,
+                request.user,
+                request.data.get("action"),
+                category=request.data.get("category"),
+                iran_tier=request.data.get("iran_tier"),
+                global_tier=request.data.get("global_tier"),
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(
+            {
+                "event": event_id,
+                "status": review.status,
+                "skipped": review.skipped_at is not None,
+                "reviewed_category": review.reviewed_category or None,
+                "reviewed_iran_score": review.reviewed_iran_score,
+                "reviewed_global_score": review.reviewed_global_score,
+            }
+        )
+
+
+class EventSplitView(APIView):
+    """'Not the same event': move one article (and its copies) into a new event."""
+
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, event_id: int):
+        try:
+            article_id = int(request.data.get("article_id"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"article_id": "must be an integer"}) from exc
+        get_object_or_404(NewsEvent, pk=event_id)
+        try:
+            split = split_article_from_event(event_id, article_id)
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        review = event_review_cards(EventReview.objects.filter(event_id=event_id)).first()
+        return Response(
+            {"new_event": split.id, "card": event_review_card(review) if review else None},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class EventReviewStatsView(APIView):
+    """Agreement summary. With `since`, the caller's own reviews since that instant."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        since = None
+        if raw := request.query_params.get("since"):
+            since = parse_datetime(raw)
+            if since is None:
+                raise ValidationError({"since": "must be an ISO 8601 timestamp"})
+        reviewer = request.user if since is not None else None
+        return Response(review_stats(since=since, reviewer=reviewer))
 
 
 # ---------------------------------------------------------------------------------- a/b

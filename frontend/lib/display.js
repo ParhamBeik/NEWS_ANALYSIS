@@ -38,6 +38,17 @@ export const CATEGORY_STYLE = {
   other: "bg-slate-800 text-slate-400 border-slate-700",
 };
 
+// Reader-event categories ([English, Persian]); keys mirror core.vocabulary.EVENT_CATEGORIES.
+export const EVENT_CATEGORY = {
+  monetary: ["Monetary policy", "سیاست پولی"],
+  macro: ["Macroeconomy", "اقتصاد کلان"],
+  sanctions_trade: ["Trade & sanctions", "تجارت و تحریم"],
+  geopolitics: ["Geopolitics", "ژئوپلیتیک"],
+  energy: ["Energy", "انرژی"],
+  markets: ["Markets", "بازارها"],
+  other: ["Other", "سایر"],
+};
+
 export const AXIS_LABEL = {
   confidence_occurrence: "Confidence of occurrence",
   gold_price_impact: "Gold price impact",
@@ -79,6 +90,18 @@ export function tehranTime(iso) {
     timeZone: "Asia/Tehran",
     day: "2-digit",
     month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Tehran wall-clock on the Solar Hijri calendar, digits in the reader's language. */
+export function jalaliTime(iso, lang = "fa") {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString(lang === "fa" ? "fa-IR-u-ca-persian" : "en-GB-u-ca-persian", {
+    timeZone: "Asia/Tehran",
+    day: "numeric",
+    month: "long",
     hour: "2-digit",
     minute: "2-digit",
   });

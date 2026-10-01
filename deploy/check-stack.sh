@@ -29,12 +29,14 @@ client.force_authenticate(user=get_user_model()(is_staff=True, is_active=True))
 for path in (
     "/api/articles/", "/api/collection/", "/api/analysis-summary/?stage=classification",
     "/api/analysis-summary/?stage=evaluation", "/api/ops/", "/api/kpi/",
-    "/api/market/", "/api/exports/",
+    "/api/market/", "/api/exports/", "/api/public/events/",
 ):
     response = client.get(path)
     assert response.status_code == 200, f"{path}: HTTP {response.status_code}"
-assert PeriodicTask.objects.filter(name__in=("crawl-all-sources", "inference-cycle", "weekly-circuit-probe"), enabled=True).count() == 3
+# The event pipeline replaced the per-article inference cycle, which setup_schedule now
+# keeps disabled; gate on the job that actually drives assessment.
+expected = ("crawl-all-sources", "assess-pending-events", "weekly-circuit-probe")
+enabled = set(PeriodicTask.objects.filter(name__in=expected, enabled=True).values_list("name", flat=True))
+assert enabled == set(expected), f"schedules not enabled: {sorted(set(expected) - enabled)}"
 '
 
-# A successful process exit is not proof that a recoverable copy exists. The off-host
-# marker is written only after a byte-for-byte checked copy has been promoted remotely.

@@ -70,8 +70,10 @@ From `backend/`, operator commands include `manage.py run_pipeline`, `setup_sche
 
 ## Dashboard routes
 
-`/` public news radar · `/events/[id]` event · `/events/[id]/market` market impact · `/article/[id]` detail · `/review` human review · `/ab` prompt lab · `/ops` health
-and cost · `/kpi` quality · `/market` prices and backtests · `/exports` workbooks.
+`/` public news radar · `/events/[id]` event · `/events/[id]/market` market impact ·
+`/article/[id]` detail · `/review` human review · `/review/swipe` staff swipe review of
+event judgments · `/ab` prompt lab · `/ops` health and cost · `/kpi` quality ·
+`/market` prices and backtests · `/exports` workbooks.
 
 ## Deployment and backups
 
