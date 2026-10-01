@@ -55,6 +55,7 @@ class Command(BaseCommand):
                     "tier": entry.get("tier", 2),
                     "priority": entry.get("priority", 50),
                     "enabled": entry.get("enabled", True),
+                    "public_image_allowed": entry.get("public_image_allowed", False),
                 },
             )
             created_count += created

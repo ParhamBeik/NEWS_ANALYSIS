@@ -11,6 +11,7 @@
 # pg_restore, which is what you want at 4am when one table was truncated and the other
 # nineteen are fine.
 set -eu
+umask 077
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
@@ -35,7 +36,7 @@ dump_once() {
     fi
 
     # Read the data blocks too: --list only checks the archive's table of contents.
-    if ! pg_restore --file=/dev/null "$partial"; then
+    if ! pg_restore --exit-on-error --file=/dev/null "$partial"; then
         log "FAILED: dump is not a readable archive"
         rm -f "$partial"
         return 1
@@ -58,10 +59,11 @@ dump_once() {
 }
 
 sweep_old() {
+    current_name=${1##*/}
     # Only ever deletes files this script's own naming produces, never the directory's
     # whole contents: a stray -delete on a mount that failed to attach is unrecoverable.
     find "$BACKUP_DIR" -maxdepth 1 -type f -name "${POSTGRES_DB}-*.dump" \
-        ! -name "$(basename "$final")" -mtime "+${RETENTION_DAYS}" -print -delete
+        ! -name "$current_name" -mtime "+${RETENTION_DAYS}" -print -delete
     # A .partial older than a day is the residue of a killed container, not work in flight.
     find "$BACKUP_DIR" -maxdepth 1 -name "*.dump.partial" -mtime +1 -delete
 }
@@ -73,7 +75,7 @@ while true; do
     result=0
     # Preserve the last usable backups through an outage, even beyond the retention window.
     if dump_once; then
-        sweep_old || log "retention sweep failed"
+        sweep_old "$final" || log "retention sweep failed"
     else
         result=1
         log "continuing after a failed dump; retrying in ${RETRY_SECONDS}s"

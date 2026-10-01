@@ -8,6 +8,7 @@ and no worker answers - silence at 04:30 on a Sunday rather than an error anyone
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import timedelta
 from io import BytesIO
@@ -24,13 +25,106 @@ from core.errors import Transient
 from core.net import BlockedURL, open_checked, read_capped
 from sources.extraction import build_session
 
-from .models import Article, ArticleImage, ImageStatus, UrlStatus
+from .models import (
+    AlertSubscription,
+    Article,
+    ArticleImage,
+    ArticleRevision,
+    EventAlert,
+    ImageStatus,
+    NewsEvent,
+    UrlStatus,
+)
 
 # 404 and 410 both mean the outlet deleted or moved the story. Counting that is useful;
 # retrying it is not.
 GONE_HTTP = {404, 410}
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(name="articles.alert_event")
+def alert_event(event_id: int) -> dict:
+    """Fan out only calibrated, high-confidence notices after assessment."""
+    if not settings.NEWS_ALERTS_ENABLED or not settings.NEWS_VAPID_PRIVATE_KEY:
+        return {"queued": 0, "status": "disabled"}
+    event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
+    if (
+        event is None
+        or event.status == NewsEvent.Status.WITHDRAWN
+        or event.category == "other"
+        or (event.assessment_confidence or 0) < 0.8
+    ):
+        return {"queued": 0, "status": "below_threshold"}
+    if (
+        event.primary_article.source.tier > 1
+        and event.articles.values("source_id").distinct().count() < 2
+    ):
+        return {"queued": 0, "status": "insufficient_corroboration"}
+    assessment = event.assessments.order_by("-id").first()
+    asset_scores = assessment.asset_scores if assessment else {}
+    queued = 0
+    for subscription in AlertSubscription.objects.all().iterator():
+        interested = (
+            (subscription.iran and (event.iran_score or 0) >= 80)
+            or (subscription.global_events and (event.global_score or 0) >= 85)
+            or any(asset_scores.get(key, 0) >= 80 for key in subscription.asset_classes)
+        )
+        if interested:
+            send_event_alert.delay(event_id, subscription.pk)
+            queued += 1
+    return {"queued": queued}
+
+
+@shared_task(name="articles.send_event_alert", bind=True, max_retries=3)
+def send_event_alert(self, event_id: int, subscription_id: int) -> dict:
+    if not settings.NEWS_ALERTS_ENABLED or not settings.NEWS_VAPID_PRIVATE_KEY:
+        return {"status": "disabled"}
+    subscription = AlertSubscription.objects.filter(pk=subscription_id).first()
+    event = NewsEvent.objects.select_related("primary_article").filter(pk=event_id).first()
+    if subscription is None or event is None or event.status == NewsEvent.Status.WITHDRAWN:
+        return {"status": "missing"}
+    alert, _ = EventAlert.objects.get_or_create(event=event, subscription=subscription)
+    if alert.sent_at:
+        return {"status": "already_sent"}
+    from pywebpush import WebPushException, webpush
+
+    try:
+        webpush(
+            subscription_info={
+                "endpoint": subscription.endpoint,
+                "keys": {
+                    "p256dh": subscription.p256dh,
+                    "auth": subscription.auth,
+                },
+            },
+            data=json.dumps(
+                {
+                    "title": event.title_fa or event.primary_article.original_title,
+                    "body": (event.brief_fa or event.primary_article.lead)[:180],
+                    "url": f"/events/{event.id}",
+                },
+                ensure_ascii=False,
+            ),
+            vapid_private_key=settings.NEWS_VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": settings.NEWS_VAPID_SUBJECT},
+            ttl=3600,
+        )
+    except WebPushException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in {404, 410}:
+            subscription.delete()
+            return {"status": "expired"}
+        alert.last_error = f"push_http_{status}" if status else "push_transport"
+        alert.save(update_fields=["last_error"])
+        if status in {429, 500, 502, 503, 504} and self.request.retries < 3:
+            raise self.retry(countdown=60 * (2**self.request.retries)) from exc
+        return {"status": "failed"}
+    alert.sent_at = timezone.now()
+    alert.last_error = ""
+    alert.save(update_fields=["sent_at", "last_error"])
+    return {"status": "sent"}
+
 
 # A CDN that cannot even be resolved from this VPS will not recover inside Celery's
 # 5s-retry window. Remember the host so later pictures skip the connect timeout entirely.
@@ -114,7 +208,9 @@ class RecordImageFailure(Task):
         if article_id is None:
             logger.warning(
                 "image on_failure missing article_id task_id=%s args=%s kwargs=%s",
-                task_id, args, kwargs,
+                task_id,
+                args,
+                kwargs,
             )
             return
         # `.update()` on PENDING only: one statement that cannot fail on a deleted row, and
@@ -142,9 +238,15 @@ def download_image(article_id: int) -> dict:
     source publishes an image it will not serve.
     """
     record = ArticleImage.objects.filter(article_id=article_id).first()
-    if record is None or not record.source_url or record.status in {
-        ImageStatus.STORED, ImageStatus.GONE,
-    }:
+    if (
+        record is None
+        or not record.source_url
+        or record.status
+        in {
+            ImageStatus.STORED,
+            ImageStatus.GONE,
+        }
+    ):
         return {"article": article_id, "status": "skipped"}
 
     session = build_session()
@@ -162,8 +264,10 @@ def download_image(article_id: int) -> dict:
                 record.error = f"HTTP {response.status_code}"
                 record.save(update_fields=["status", "error"])
                 log_action(
-                    "image.gone", "gone",
-                    article=article_id, http_status=response.status_code,
+                    "image.gone",
+                    "gone",
+                    article=article_id,
+                    http_status=response.status_code,
                 )
                 return {
                     "article": article_id,
@@ -252,9 +356,7 @@ def download_pending_images(limit: int = 200) -> dict:
     for article_id, source_url in rows:
         host = _image_host(source_url)
         if image_host_is_dead(host):
-            ArticleImage.objects.filter(
-                article_id=article_id, status=ImageStatus.PENDING
-            ).update(
+            ArticleImage.objects.filter(article_id=article_id, status=ImageStatus.PENDING).update(
                 status=ImageStatus.FAILED,
                 error=f"skipped: host {host} recently unreachable",
             )
@@ -326,11 +428,27 @@ def reapply_prefilter() -> dict:
 def note_gone(url: str, http_status: int) -> bool:
     """Mark a stored article gone. Returns True if a row was updated."""
     now = timezone.now()
-    updated = Article.objects.filter(url=url).exclude(url_status=UrlStatus.GONE).update(
+    article = Article.objects.filter(url=url).exclude(url_status=UrlStatus.GONE).first()
+    if article is None:
+        return False
+    ArticleRevision.objects.create(
+        article=article,
+        title=article.original_title,
+        lead=article.lead,
+        content=article.content,
+        content_hash=article.content_hash,
+        status=article.url_status,
+    )
+    updated = Article.objects.filter(pk=article.pk).update(
         url_status=UrlStatus.GONE,
         gone_at=now,
         gone_http_status=http_status,
     )
+    from core.events import invalidate_presentation, refresh_event
+
+    for event in article.news_events.all():
+        invalidate_presentation(event, "source_withdrawal")
+        refresh_event(event)
     log_action("url.gone", "gone", url=url[:200], http_status=http_status, updated=updated)
     return bool(updated)
 
@@ -356,10 +474,33 @@ def _check_one(article: Article) -> str:
     if status in GONE_HTTP:
         note_gone(article.url, status)
         return "gone"
+    if status == 429 or status >= 500:
+        return "transient"
+    if status >= 400:
+        return "blocked"
     return "live"
 
 
 MAX_STALE_CHECK = 200
+
+
+@shared_task(name="articles.revisit_recent_articles")
+def revisit_recent_articles(limit: int = 100) -> dict:
+    """Recheck recent source URLs, including items still present in a feed."""
+    limit = max(1, min(int(limit), MAX_STALE_CHECK))
+    since = timezone.now() - timedelta(days=7)
+    candidates = list(
+        Article.objects.filter(url_status=UrlStatus.LIVE, created_at__gte=since).order_by(
+            "last_checked_at", "id"
+        )[:limit]
+    )
+    counts = {"checked": 0, "gone": 0, "live": 0, "transient": 0, "blocked": 0}
+    for article in candidates:
+        outcome = _check_one(article)
+        Article.objects.filter(pk=article.pk).update(last_checked_at=timezone.now())
+        counts["checked"] += 1
+        counts[outcome] += 1
+    return counts
 
 
 @shared_task(name="articles.tasks.check_stale_urls")
@@ -371,11 +512,9 @@ def check_stale_urls(limit: int = 100) -> dict:
         limit = 100
     limit = max(1, min(limit, MAX_STALE_CHECK))
     cutoff = timezone.now() - timedelta(days=7)
-    stale = (
-        Article.objects.filter(url_status=UrlStatus.LIVE, fetched_at__lt=cutoff)
-        .order_by("fetched_at")
-        [:limit]
-    )
+    stale = Article.objects.filter(url_status=UrlStatus.LIVE, fetched_at__lt=cutoff).order_by(
+        "fetched_at"
+    )[:limit]
     counts = {"checked": 0, "gone": 0, "live": 0, "transient": 0, "blocked": 0}
     for article in stale:
         counts["checked"] += 1

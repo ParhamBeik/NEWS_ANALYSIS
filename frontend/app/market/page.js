@@ -1,197 +1,44 @@
 import Link from "next/link";
-import { Card, EmptyState, Metric, QueryError, SectionTitle, TableScroll } from "@/components/primitives";
-import { ApiError, apiGet } from "@/lib/api";
-import { number, percent, tehranTime } from "@/lib/display";
+import AssetTimeline from "@/components/AssetTimeline";
+import { apiGet } from "@/lib/api";
+import { language, label } from "@/lib/language";
 
-export const metadata = { title: "Market · News Intelligence" };
+export const metadata = { title: "Asset timeline · News Intelligence" };
 export const dynamic = "force-dynamic";
 
-/**
- * A dependency-free sparkline.
- *
- * A charting library would be ~150 KB of client JavaScript to draw one line, and would turn
- * this server component into a client one. An SVG polyline renders on the server and ships
- * nothing.
- */
-function Sparkline({ points }) {
-  if (points.length < 2) return null;
-  const values = points.map((point) => Number(point.price));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const path = values
-    .map((value, index) => {
-      const x = (index / (values.length - 1)) * 100;
-      const y = 40 - ((value - min) / span) * 36;
-      return `${x.toFixed(2)},${y.toFixed(2)}`;
-    })
-    .join(" ");
-  const rising = values.at(-1) >= values[0];
-  return (
-    <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="h-32 w-full">
-      <polyline
-        points={path}
-        fill="none"
-        strokeWidth="0.8"
-        vectorEffect="non-scaling-stroke"
-        className={rising ? "stroke-emerald-400" : "stroke-rose-400"}
-      />
-    </svg>
-  );
-}
+const RANGES = ["1W", "1M", "3M", "1Y"];
 
 export default async function MarketPage({ searchParams }) {
   const params = await searchParams;
-  const symbol = params?.symbol || "gold_18k";
-  let market;
-  try {
-    market = await apiGet(`/api/market/?symbol=${encodeURIComponent(symbol)}&days=30`);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 400) {
-      return (
-        <QueryError title="Unknown market symbol.">
-          Choose one of the symbols listed on the Market page.
-        </QueryError>
-      );
-    }
-    throw error;
-  }
-
-  const series = market.series;
-  const first = series[0] ?? null;
-  const last = series.at(-1) ?? null;
-  const change =
-    first && last ? (Number(last.price) - Number(first.price)) / Number(first.price) : null;
-  const scoredPredictions = market.outcomes.filter(
-    (outcome) => outcome.direction_correct !== null,
-  ).length;
-
-  return (
-    <>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-100">Market</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            TGJU series, polled every 15 minutes. This is the ground truth the gold-impact
-            predictions are scored against.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-1 text-xs">
-          {market.symbols.map((option) => (
-            <Link
-              key={option.value}
-              href={`/market?symbol=${option.value}`}
-              className={`rounded-md px-2 py-1 ${
-                option.value === market.symbol
-                  ? "bg-slate-800 text-slate-100"
-                  : "text-slate-500 hover:bg-slate-900"
-              }`}
-            >
-              {option.label.split(" (")[0]}
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      {series.length === 0 ? (
-        <EmptyState title="No prices recorded for this symbol yet.">
-          The poller writes a snapshot every 15 minutes once the beat schedule is running.
-        </EmptyState>
-      ) : (
-        <>
-          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Metric
-              label="Latest"
-              value={number(market.latest?.price)}
-              hint={tehranTime(market.latest?.observed_at)}
-            />
-            <Metric
-              label="30-day change"
-              value={percent(change, 2)}
-              tone={change > 0 ? "text-emerald-400" : change < 0 ? "text-rose-400" : ""}
-            />
-            <Metric label="Snapshots" value={number(series.length)} />
-            <Metric label="Scored predictions" value={number(scoredPredictions)} />
-          </div>
-
-          <Card className="mb-6 p-4">
-            <SectionTitle hint="Tehran local observation time">
-              {market.symbols.find((option) => option.value === market.symbol)?.label}
-            </SectionTitle>
-            <Sparkline points={series} />
-            <div className="mt-1 flex justify-between text-[11px] text-slate-600">
-              <span>{tehranTime(first?.observed_at)}</span>
-              <span>{tehranTime(last?.observed_at)}</span>
-            </div>
-          </Card>
-        </>
-      )}
-
-      <Card className="p-4">
-        <SectionTitle hint="one row per prediction, per window">
-          Prediction outcomes
-        </SectionTitle>
-        {market.outcomes.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Nothing scored yet. An outcome needs a price on both ends of a trading-day
-            window, and a directional prediction that was not «خنثی» or «نامطمئن».
-          </p>
-        ) : (
-          <TableScroll>
-            <table className="w-full min-w-[480px] text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
-                  <th className="pb-1">Article</th>
-                  <th className="pb-1">Predicted</th>
-                  <th className="hidden pb-1 text-right sm:table-cell">Impact</th>
-                  <th className="pb-1 text-right">Window</th>
-                  <th className="pb-1 text-right">Realised</th>
-                  <th className="pb-1 text-right">Verdict</th>
-                </tr>
-              </thead>
-              <tbody>
-                {market.outcomes.map((row) => (
-                  <tr key={row.id} className="border-t border-slate-800">
-                    <td className="py-1.5">
-                      <Link
-                        href={`/article/${row.article_id}`}
-                        className="text-emerald-500 hover:underline"
-                      >
-                        #{row.article_id}
-                      </Link>
-                    </td>
-                    <td className="persian py-1.5">
-                      <bdi>{row.gold_trend || "—"}</bdi>
-                    </td>
-                    <td className="persian hidden py-1.5 text-right text-slate-400 sm:table-cell">
-                      <bdi>{row.gold_price_impact || "Not assessed"}</bdi>
-                    </td>
-                    <td className="py-1.5 text-right tabular text-slate-500">
-                      {row.window_trading_days}d
-                    </td>
-                    <td
-                      className={`py-1.5 text-right tabular ${
-                        row.realized_pct > 0 ? "text-emerald-400" : "text-rose-400"
-                      }`}
-                    >
-                      {row.realized_pct?.toFixed(2)}%
-                    </td>
-                    <td className="py-1.5 text-right">
-                      {row.direction_correct === null ? (
-                        <span className="text-slate-600">not scored</span>
-                      ) : row.direction_correct ? (
-                        <span className="text-emerald-400">correct</span>
-                      ) : (
-                        <span className="text-rose-400">wrong</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
-        )}
-      </Card>
-    </>
-  );
+  const lang = await language();
+  const tr = (en, fa) => label(lang, en, fa);
+  const catalog = await apiGet("/api/public/assets/");
+  const symbol = catalog.results.some((asset) => asset.key === params?.symbol) ? params.symbol : "gold_18k";
+  const range = RANGES.includes(params?.range) ? params.range : "1M";
+  const showAll = params?.events === "all";
+  const data = await apiGet(`/api/public/assets/${symbol}/timeline/?range=${range}&events=${showAll ? "all" : "relevant"}`);
+  const link = (nextSymbol, nextRange, all = showAll) => `/market?symbol=${nextSymbol}&range=${nextRange}&events=${all ? "all" : "relevant"}`;
+  return <div className="space-y-5">
+    <header><h1 className="text-3xl font-semibold">{tr("Asset timeline", "نمودار دارایی‌ها")}</h1>
+      <p className="mt-2 text-sm text-slate-400">{tr("Explore price observations beside potentially relevant news.", "قیمت‌های مشاهده‌شده را در کنار خبرهای مرتبط ببینید.")}</p>
+    </header>
+    <nav aria-label={tr("Assets", "دارایی‌ها")} className="flex flex-wrap gap-2">{catalog.results.map((asset) => <Link key={asset.key}
+      href={link(asset.key, range)} aria-current={asset.key === symbol ? "page" : undefined}
+      className={`rounded-lg px-3 py-2 text-sm ${asset.key === symbol ? "bg-emerald-800" : "bg-slate-900 text-slate-400"}`}>
+      {lang === "fa" ? asset.name_fa : asset.name}</Link>)}</nav>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex gap-2">{RANGES.map((choice) => <Link key={choice} href={link(symbol, choice)}
+        aria-current={choice === range ? "page" : undefined}
+        className={`rounded px-3 py-1 text-sm ${choice === range ? "bg-slate-700" : "text-slate-400"}`}>{choice}</Link>)}</div>
+      <Link href={link(symbol, range, !showAll)} className="rounded border border-slate-700 px-3 py-1 text-sm">
+        {showAll ? tr("Relevant events", "فقط خبرهای مرتبط") : tr("All important events", "همهٔ خبرهای مهم")}</Link>
+    </div>
+    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 sm:p-5">
+      <p className="mb-3 text-sm text-slate-400">{data.asset.provider} · {data.asset.unit} · {data.resolution} · {data.points.length} {tr("observations", "مشاهده")}</p>
+      <p className="mb-3 text-xs text-slate-500">{tr("Last observation", "آخرین مشاهده")}: {data.last_observation_at ? new Date(data.last_observation_at).toLocaleString(lang === "fa" ? "fa-IR" : "en-US") : "—"}
+        {data.gaps?.length ? ` · ${data.gaps.length} ${tr("gaps over 3 days", "فاصلهٔ بیش از سه روز")}` : ""}</p>
+      {data.caveats?.length ? <p className="mb-3 text-xs text-amber-300">{data.caveats.join(" · ")}</p> : null}
+      {data.points.length ? <AssetTimeline data={data} lang={lang} /> : <p className="py-20 text-center text-slate-400">{tr("No verified prices in this range.", "در این بازه قیمت تأییدشده‌ای موجود نیست.")}</p>}
+    </div>
+  </div>;
 }

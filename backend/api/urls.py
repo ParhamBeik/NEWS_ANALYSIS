@@ -8,6 +8,15 @@ during development. Both are configured in REST_FRAMEWORK; this module only name
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .public import (
+    AlertConfigView,
+    AlertSubscriptionView,
+    PublicAssetsView,
+    PublicEventDetailView,
+    PublicEventsView,
+    PublicSourcesView,
+    PublicTimelineView,
+)
 from .views import (
     ABPairViewSet,
     AnalysisSummaryView,
@@ -39,6 +48,17 @@ router.register("reviews", ReviewViewSet, basename="review")
 router.register("ab/pairs", ABPairViewSet, basename="ab-pair")
 
 urlpatterns = [
+    path("public/alert-config/", AlertConfigView.as_view(), name="public-alert-config"),
+    path("alerts/subscriptions/", AlertSubscriptionView.as_view(), name="alert-subscription"),
+    path("public/events/", PublicEventsView.as_view(), name="public-events"),
+    path("public/events/<int:event_id>/", PublicEventDetailView.as_view(), name="public-event"),
+    path("public/sources/", PublicSourcesView.as_view(), name="public-sources"),
+    path("public/assets/", PublicAssetsView.as_view(), name="public-assets"),
+    path(
+        "public/assets/<str:symbol>/timeline/",
+        PublicTimelineView.as_view(),
+        name="public-timeline",
+    ),
     path("collection/", CollectionView.as_view(), name="collection"),
     path("analysis-summary/", AnalysisSummaryView.as_view(), name="analysis-summary"),
     path("health/", HealthView.as_view(), name="health"),

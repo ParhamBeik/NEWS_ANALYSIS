@@ -39,9 +39,11 @@ from rest_framework.views import APIView
 
 from articles.models import Article, UrlStatus
 from core.collection import analysis_summary, collection_summary
+from core.events import priority_visibility
 from core.vocabulary import AXES
 from inference import budget, circuit
 from inference.models import (
+    AIUsageRecord,
     Classification,
     DeadLetter,
     Evaluation,
@@ -593,8 +595,24 @@ class OpsView(APIView):
                     "run_ceiling_usd": settings.NEWS_RUN_BUDGET_USD,
                     "daily_ceiling_usd": settings.NEWS_DAILY_BUDGET_USD,
                     "spent_today_usd": budget.day_spend(),
+                    "monthly_ceiling_usd": settings.NEWS_MONTHLY_BUDGET_USD,
+                    "spent_this_month_usd": budget.month_spend(),
                 },
+                "priority_visibility": priority_visibility(),
+                "reader_ai_usage": list(
+                    AIUsageRecord.objects.filter(created_at__gte=since)
+                    .values("stage").annotate(calls=Count("id"), cost=Sum("cost_usd"))
+                    .order_by("stage")
+                ),
                 "sources": SourceSerializer(Source.objects.all(), many=True).data,
+                "source_outages": [
+                    {"name": source.name, "last_success_at": source.last_success_at,
+                     "last_item_published_at": source.last_item_published_at,
+                     "supports_backfill": source.supports_backfill}
+                    for source in Source.objects.filter(enabled=True)
+                    if source.last_success_at is None or
+                    timezone.now() - source.last_success_at > timedelta(minutes=10)
+                ],
                 # The prefilter is the one change that can silently lose a story, so its
                 # effect is reported rather than assumed. `articles` is the evidence you would
                 # need to justify turning a rule off again.

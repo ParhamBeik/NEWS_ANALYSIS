@@ -189,6 +189,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": env("THROTTLE_LOGIN", "10/min"),
         "signup": env("THROTTLE_SIGNUP", "5/hour"),
+        "reader": env("THROTTLE_READER", "120/min"),
+        "alert_subscription": env("THROTTLE_ALERT_SUBSCRIPTION", "10/hour"),
     },
     # How many reverse proxies sit in front of this process, so a throttle can identify the
     # CLIENT rather than the proxy. This is a correctness setting, not tuning: DRF's default
@@ -253,6 +255,17 @@ CACHES = {
 # fail differently: a single runaway run and a slow drift over a day.
 NEWS_RUN_BUDGET_USD = env_float("NEWS_RUN_BUDGET_USD", 1.00)
 NEWS_DAILY_BUDGET_USD = env_float("NEWS_DAILY_BUDGET_USD", 3.00)
+NEWS_MONTHLY_BUDGET_USD = env_float("NEWS_MONTHLY_BUDGET_USD", 100.00)
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")
+OPENROUTER_JEV_MODEL = "typesafe/jev-1.13"
+OPENROUTER_BRIEF_MODEL = env("OPENROUTER_BRIEF_MODEL", "openai/gpt-6-luna")
+PORTFOLIO_MARKET_BASE_URL = env("PORTFOLIO_MARKET_BASE_URL")
+PORTFOLIO_MARKET_SERVICE_KEY = env("PORTFOLIO_MARKET_SERVICE_KEY")
+NEWS_VAPID_PUBLIC_KEY = env("NEWS_VAPID_PUBLIC_KEY")
+NEWS_VAPID_PRIVATE_KEY = env("NEWS_VAPID_PRIVATE_KEY")
+NEWS_VAPID_SUBJECT = env("NEWS_VAPID_SUBJECT")
+# Keep delivery off until the reviewed shadow sample meets the alert quality gate.
+NEWS_ALERTS_ENABLED = env_bool("NEWS_ALERTS_ENABLED", False)
 # Runaway-loop breaker on request COUNT, not money. Belongs well above a normal cycle.
 NEWS_MAX_PROVIDER_CALLS_PER_RUN = env_int("NEWS_MAX_PROVIDER_CALLS_PER_RUN", 1000)
 # Automatic provider halt. Not a user toggle: the first empty-wallet response opens the

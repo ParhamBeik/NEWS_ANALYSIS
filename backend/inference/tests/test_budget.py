@@ -23,9 +23,13 @@ RUN = "test-run"
 def _clean():
     budget.reset(RUN)
     budget.client().delete(budget._day_key("usd"))
+    budget.client().delete(budget._month_key("usd"))
+    budget.client().delete(budget._month_key("reserved"))
     yield
     budget.reset(RUN)
     budget.client().delete(budget._day_key("usd"))
+    budget.client().delete(budget._month_key("usd"))
+    budget.client().delete(budget._month_key("reserved"))
 
 
 def usage(cost: float) -> Usage:
@@ -70,6 +74,22 @@ class TestRequestCap:
 
 
 class TestMoneyCeilings:
+    @override_settings(NEWS_MONTHLY_BUDGET_USD=2, NEWS_MAX_PROVIDER_CALLS_PER_RUN=10)
+    def test_monthly_reservations_bound_concurrent_calls(self):
+        budget.reserve_call(RUN)
+        budget.reserve_call(RUN)
+        with pytest.raises(BudgetExceeded, match="monthly AI budget"):
+            budget.reserve_call(RUN)
+        budget.release_call(RUN)
+        assert budget.reserve_call(RUN) == 2
+
+    @override_settings(NEWS_RUN_BUDGET_USD=100, NEWS_DAILY_BUDGET_USD=100,
+                       NEWS_MONTHLY_BUDGET_USD=0.01)
+    def test_monthly_ceiling_stops_further_calls(self):
+        budget.charge(RUN, usage(0.02))
+        with pytest.raises(BudgetExceeded, match="monthly AI budget"):
+            budget.check(RUN)
+
     @override_settings(NEWS_RUN_BUDGET_USD=0.01, NEWS_DAILY_BUDGET_USD=100)
     def test_run_ceiling_stops_further_calls(self):
         budget.check(RUN)  # nothing spent yet

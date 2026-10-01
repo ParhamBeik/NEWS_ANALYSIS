@@ -42,6 +42,50 @@ logger = logging.getLogger(__name__)
 # run keys do not accumulate forever.
 RUN_KEY_TTL = 60 * 60 * 24
 DAY_KEY_TTL = 60 * 60 * 48
+MONTH_KEY_TTL = 60 * 60 * 24 * 35
+# Maximum charge of one reader/legacy call is far below $1 at the configured
+# input/output bounds. Reserving $1 makes the month guard safe across workers.
+MONTH_CALL_RESERVE_USD = 1.0
+
+_RESERVE = """
+local used = redis.call('INCR', KEYS[1])
+if used == 1 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
+if used > tonumber(ARGV[1]) then
+  redis.call('DECR', KEYS[1])
+  return -1
+end
+local spent = tonumber(redis.call('GET', KEYS[2]) or '0')
+local reserved = tonumber(redis.call('GET', KEYS[3]) or '0')
+if spent + reserved + tonumber(ARGV[4]) > tonumber(ARGV[2]) then
+  redis.call('DECR', KEYS[1])
+  return -2
+end
+redis.call('INCRBYFLOAT', KEYS[3], ARGV[4])
+redis.call('EXPIRE', KEYS[3], ARGV[5])
+redis.call('INCR', KEYS[4])
+redis.call('EXPIRE', KEYS[4], ARGV[3])
+return used
+"""
+
+_SETTLE = """
+local pending = tonumber(redis.call('GET', KEYS[1]) or '0')
+if pending > 0 then
+  redis.call('DECR', KEYS[1])
+  redis.call('INCRBYFLOAT', KEYS[2], -tonumber(ARGV[1]))
+end
+if ARGV[2] == 'charge' then
+  local run = redis.call('INCRBYFLOAT', KEYS[3], ARGV[3])
+  local day = redis.call('INCRBYFLOAT', KEYS[4], ARGV[3])
+  redis.call('INCRBYFLOAT', KEYS[5], ARGV[3])
+  redis.call('EXPIRE', KEYS[3], ARGV[4])
+  redis.call('EXPIRE', KEYS[4], ARGV[5])
+  redis.call('EXPIRE', KEYS[5], ARGV[6])
+  return {run, day}
+end
+local calls = redis.call('DECR', KEYS[6])
+if calls < 0 then redis.call('SET', KEYS[6], 0) end
+return {0, 0}
+"""
 
 _client: redis.Redis | None = None
 
@@ -63,6 +107,10 @@ def _run_key(run_id: str, field: str) -> str:
 
 def _day_key(field: str) -> str:
     return f"newsintel:budget:day:{_today()}:{field}"
+
+
+def _month_key(field: str) -> str:
+    return f"newsintel:budget:month:{datetime.now(UTC):%Y%m}:{field}"
 
 
 @dataclass(frozen=True)
@@ -104,13 +152,17 @@ def reserve_call(run_id: str) -> int:
     Increment-then-check, never check-then-increment: the latter lets N concurrent workers
     all observe the last permitted value and all proceed.
     """
-    conn = client()
-    used = conn.incr(_run_key(run_id, "calls"))
-    if used == 1:
-        conn.expire(_run_key(run_id, "calls"), RUN_KEY_TTL)
     cap = settings.NEWS_MAX_PROVIDER_CALLS_PER_RUN
-    if used > cap:
+    used = int(client().eval(
+        _RESERVE, 4, _run_key(run_id, "calls"), _month_key("usd"),
+        _month_key("reserved"), _run_key(run_id, "pending"),
+        cap, settings.NEWS_MONTHLY_BUDGET_USD, RUN_KEY_TTL,
+        MONTH_CALL_RESERVE_USD, MONTH_KEY_TTL,
+    ))
+    if used == -1:
         raise BudgetExceeded(f"provider request cap reached for run {run_id}: {cap}")
+    if used == -2:
+        raise BudgetExceeded("monthly AI budget exhausted or fully reserved")
     return used
 
 
@@ -127,17 +179,18 @@ def check(run_id: str) -> None:
             f"daily budget exhausted: ${spend.day_usd:.4f} of "
             f"${settings.NEWS_DAILY_BUDGET_USD:.2f}"
         )
+    if month_spend() >= settings.NEWS_MONTHLY_BUDGET_USD:
+        raise BudgetExceeded("monthly AI budget exhausted")
 
 
 def charge(run_id: str, usage: Usage) -> Spend:
     """Record what a completed call actually cost, from the provider's own usage fields."""
-    conn = client()
-    pipe = conn.pipeline()
-    pipe.incrbyfloat(_run_key(run_id, "usd"), usage.cost_usd)
-    pipe.incrbyfloat(_day_key("usd"), usage.cost_usd)
-    pipe.expire(_run_key(run_id, "usd"), RUN_KEY_TTL)
-    pipe.expire(_day_key("usd"), DAY_KEY_TTL)
-    run_usd, day_usd, *_ = pipe.execute()
+    run_usd, day_usd = client().eval(
+        _SETTLE, 6, _run_key(run_id, "pending"), _month_key("reserved"),
+        _run_key(run_id, "usd"), _day_key("usd"), _month_key("usd"),
+        _run_key(run_id, "calls"), MONTH_CALL_RESERVE_USD, "charge",
+        usage.cost_usd, RUN_KEY_TTL, DAY_KEY_TTL, MONTH_KEY_TTL,
+    )
     return Spend(float(run_usd), float(day_usd), current(run_id).run_calls)
 
 
@@ -162,6 +215,10 @@ def day_spend() -> float:
     return float(client().get(_day_key("usd")) or 0)
 
 
+def month_spend() -> float:
+    return float(client().get(_month_key("usd")) or 0)
+
+
 def abort_reason(run_id: str) -> str:
     return client().get(_run_key(run_id, "aborted")) or ""
 
@@ -172,15 +229,21 @@ def release_call(run_id: str) -> None:
     Failed requests used to count against NEWS_MAX_PROVIDER_CALLS_PER_RUN, so an empty
     wallet burned the cap on 403s and then kept the guard tripped after a top-up.
     """
-    conn = client()
-    used = int(conn.decr(_run_key(run_id, "calls")))
-    if used < 0:
-        conn.set(_run_key(run_id, "calls"), 0, ex=RUN_KEY_TTL)
+    client().eval(
+        _SETTLE, 6, _run_key(run_id, "pending"), _month_key("reserved"),
+        _run_key(run_id, "usd"), _day_key("usd"), _month_key("usd"),
+        _run_key(run_id, "calls"), MONTH_CALL_RESERVE_USD, "release",
+        0, RUN_KEY_TTL, DAY_KEY_TTL, MONTH_KEY_TTL,
+    )
 
 
 def reset(run_id: str) -> None:
     """Drop a run's counters. For tests and for restarting an aborted run deliberately."""
     conn = client()
+    pending = int(conn.get(_run_key(run_id, "pending")) or 0)
+    if pending:
+        conn.incrbyfloat(_month_key("reserved"), -pending * MONTH_CALL_RESERVE_USD)
     conn.delete(
-        _run_key(run_id, "usd"), _run_key(run_id, "calls"), _run_key(run_id, "aborted")
+        _run_key(run_id, "usd"), _run_key(run_id, "calls"),
+        _run_key(run_id, "pending"), _run_key(run_id, "aborted")
     )

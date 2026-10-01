@@ -22,6 +22,7 @@ one paid call at a time.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import timedelta
 
@@ -30,7 +31,7 @@ from django.conf import settings
 from django.db.models import Max, Sum
 from django.utils import timezone
 
-from articles.models import Article, UrlStatus
+from articles.models import Article, EventAssessment, EventReview, NewsEvent, UrlStatus
 from core.actions import log_action
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from core.vocabulary import AXES
@@ -53,6 +54,210 @@ from .providers import GapGPTProvider, provider_for
 logger = logging.getLogger(__name__)
 
 RESULT_MODELS = {"classify": Classification, "evaluate": Evaluation, "summarize": Summary}
+
+
+@shared_task(
+    name="inference.assess_event",
+    bind=True,
+    autoretry_for=(Transient,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=3,
+)
+def assess_event(self, event_id: int) -> dict:
+    """Fast event assessment, independent of the legacy 30-minute analyst pipeline."""
+    from .jev import decide
+
+    event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
+    if event is None:
+        return {"status": "missing"}
+    article = event.primary_article
+    evidence = "\n".join((article.original_title, article.lead, article.content[:5000]))
+    digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+    if event.assessments.filter(evidence_hash=digest).exists():
+        return {"status": "already_assessed", "event": event_id}
+    if not settings.OPENROUTER_API_KEY:
+        return {"status": "unassessed", "reason": "provider_not_configured"}
+    run_id = f"event-{event_id}"
+    event_time = event.event_time
+    candidates = {
+        f"event_{row.id}": f"Same occurrence: {row.primary_article.original_title[:180]}"
+        for row in NewsEvent.objects.filter(
+            event_time__range=(event_time - timedelta(hours=36), event_time + timedelta(hours=36))
+        )
+        .exclude(pk=event_id)
+        .select_related("primary_article")
+        .order_by("-event_time")[:10]
+    }
+    try:
+        response = decide(
+            {
+                "title": article.original_title,
+                "lead": article.lead,
+                "body": article.content[:5000],
+                "source": article.source.display_name or article.source_id,
+                "native_category": article.native_category,
+            },
+            run_id,
+            candidates,
+        )
+    except BudgetExceeded:
+        return {"status": "unassessed", "reason": "budget_or_credits"}
+    except (Fatal, Permanent) as exc:
+        logger.warning("event assessment unavailable for %s: %s", event_id, exc)
+        return {"status": "unassessed", "reason": type(exc).__name__}
+    answers = response["answers"]
+
+    def score(name):
+        value = float(answers[name]["score"])
+        if not 0 <= value <= 4:
+            raise ValueError("score outside Jev's 0-4 range")
+        return round(value * 25)
+
+    try:
+        category = answers["category"]["choice"]
+        if category not in {
+            "monetary",
+            "macro",
+            "sanctions_trade",
+            "geopolitics",
+            "energy",
+            "markets",
+            "other",
+        }:
+            raise KeyError("category")
+        iran_score, global_score = score("iran"), score("global")
+        asset_scores = {
+            key: score(f"asset_{key}")
+            for key in (
+                "fx",
+                "gold",
+                "tehran_index",
+                "oil",
+                "bitcoin",
+            )
+        }
+        confidence = min(
+            float(answers[name].get("confidence", 0))
+            for name in (
+                "category",
+                "iran",
+                "global",
+            )
+        )
+        if not 0 <= confidence <= 1:
+            raise ValueError("confidence outside 0-1 range")
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("invalid Jev answer for event %s: %s", event_id, exc)
+        return {"status": "unassessed", "reason": "invalid_answer"}
+    matched = answers.get("same_event", {})
+    choice = matched.get("choice", "none")
+    try:
+        match_probability = float(matched.get("probabilities", {}).get(choice, 0))
+    except (TypeError, ValueError):
+        match_probability = 0
+    if choice in candidates and 0.9 <= match_probability <= 1:
+        from core.events import merge_events
+
+        event = merge_events(int(choice.removeprefix("event_")), event_id)
+        event_id = event.id
+    EventAssessment.objects.create(
+        event=event,
+        model=str(response.get("model") or settings.OPENROUTER_JEV_MODEL),
+        evidence_hash=digest,
+        category=category,
+        iran_score=iran_score,
+        global_score=global_score,
+        asset_scores=asset_scores,
+        confidence=confidence,
+        cost_usd=float((response.get("usage") or {}).get("cost") or 0),
+    )
+    NewsEvent.objects.filter(pk=event_id).update(
+        category=category,
+        iran_score=iran_score,
+        global_score=global_score,
+        assessment_confidence=confidence,
+    )
+    from core.events import refresh_event
+
+    refresh_event(event)
+    if (max(iran_score, global_score) >= 60 and confidence < 0.7) or event_id % 20 == 0:
+        EventReview.objects.get_or_create(
+            event=event,
+            defaults={"reason": "high_impact_uncertain" if confidence < 0.7 else "audit_sample"},
+        )
+    if category != "other" and len(evidence.strip()) >= 40:
+        summarize_event.delay(event_id)
+    if settings.NEWS_ALERTS_ENABLED:
+        from articles.tasks import alert_event
+
+        alert_event.apply_async(args=[event_id], countdown=30)
+    return {"status": "assessed", "event": event_id}
+
+
+@shared_task(
+    name="inference.summarize_event",
+    bind=True,
+    autoretry_for=(Transient,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    retry_jitter=True,
+    max_retries=3,
+)
+def summarize_event(self, event_id: int) -> dict:
+    from .jev import brief
+
+    event = NewsEvent.objects.select_related("primary_article").filter(pk=event_id).first()
+    if event is None or event.brief_fa:
+        return {"status": "skipped"}
+    article = event.primary_article
+    supporting = [
+        {
+            "source": other.source.display_name or other.source_id,
+            "title": other.original_title,
+            "lead": other.lead[:700],
+        }
+        for other in event.articles.exclude(pk=article.pk).select_related("source")[:3]
+    ]
+    try:
+        result = brief(
+            {
+                "title": article.original_title,
+                "lead": article.lead,
+                "body": article.content[:5000],
+                "source": article.source.display_name or article.source_id,
+                "supporting_sources": supporting,
+            },
+            f"event-{event_id}",
+        )
+    except BudgetExceeded:
+        return {"status": "unassessed", "reason": "budget_or_credits"}
+    except (Fatal, Permanent) as exc:
+        logger.warning("event brief unavailable for %s: %s", event_id, exc)
+        return {"status": "unassessed", "reason": type(exc).__name__}
+    NewsEvent.objects.filter(pk=event_id).update(**result)
+    return {"status": "summarized", "event": event_id}
+
+
+@shared_task(name="inference.assess_pending_events")
+def assess_pending_events(limit: int = 200) -> dict:
+    """Retry unassessed events after outages or credit top-ups."""
+    if not settings.OPENROUTER_API_KEY or budget.month_spend() >= settings.NEWS_MONTHLY_BUDGET_USD:
+        return {"queued": 0, "status": "provider_or_budget_unavailable"}
+    ids = list(
+        NewsEvent.objects.exclude(category="other")
+        .filter(
+            primary_article__prefilter_reason="",
+            primary_article__quality_flag="",
+            assessments__isnull=True,
+        )
+        .order_by("-event_time")
+        .values_list("id", flat=True)[:limit]
+    )
+    for event_id in ids:
+        assess_event.delay(event_id)
+    return {"queued": len(ids)}
 
 
 # ------------------------------------------------------------------------------ helpers
@@ -127,9 +332,7 @@ def _context(article, variant, node: str, category: str | None):
     task = TASK_FOR_NODE[node]
     examples = memory.retrieve(article, variant, task, category)
     market = (
-        memory.market_context(article)
-        if variant.memory_strategy == "semantic+market"
-        else None
+        memory.market_context(article) if variant.memory_strategy == "semantic+market" else None
     )
     extra = {"category": category} if category else {}
     return messages(
@@ -219,9 +422,7 @@ def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt:
             )
         budget.abort(run_id, str(exc))
         node_status = (
-            NodeStatus.QUOTA_EXHAUSTED
-            if circuit.is_wallet_failure(exc)
-            else NodeStatus.ABORTED
+            NodeStatus.QUOTA_EXHAUSTED if circuit.is_wallet_failure(exc) else NodeStatus.ABORTED
         )
         _record(run, node, article_id, variant, node_status, attempt=attempt, exc=exc)
         log_action("inference.node", node_status, node=node, article=article_id)
@@ -250,8 +451,14 @@ def _run_node(node: str, article_id: int, variant_id: int, run_id: str, attempt:
     _persist(node, article, variant, run, answer)
     circuit.record_success()
     _record(
-        run, node, article_id, variant, NodeStatus.SUCCESS,
-        attempt=attempt, latency_ms=latency_ms, usage=answer.usage,
+        run,
+        node,
+        article_id,
+        variant,
+        NodeStatus.SUCCESS,
+        attempt=attempt,
+        latency_ms=latency_ms,
+        usage=answer.usage,
     )
     return {
         "article": article_id,
@@ -279,9 +486,7 @@ def _persist(node: str, article, variant: PromptVariant, run: Run, answer) -> No
             **common,
             category=data.category,
             confidence=data.confidence,
-            matched_keywords=(
-                data.matched_economics_keywords + data.matched_security_keywords
-            ),
+            matched_keywords=(data.matched_economics_keywords + data.matched_security_keywords),
         )
     elif node == "evaluate":
         Evaluation.objects.create(
@@ -432,10 +637,7 @@ def _outstanding_for(variant: PromptVariant, limit: int, window_days: int) -> li
         .filter(category="other")
         .values_list("article_id", flat=True)
     )
-    summarised = (
-        Summary.objects.for_variant(variant)
-        .values_list("article_id", flat=True)
-    )
+    summarised = Summary.objects.for_variant(variant).values_list("article_id", flat=True)
 
     qs = (
         Article.objects.eligible_for_inference()
@@ -573,7 +775,8 @@ def _status_from_events(run: Run) -> str:
         return RunStatus.ABORTED
     successes = statuses.count(NodeStatus.SUCCESS)
     failures = [
-        status for status in statuses
+        status
+        for status in statuses
         if status not in {NodeStatus.SUCCESS, NodeStatus.SKIPPED, NodeStatus.RETRY}
     ]
     if successes and failures:
@@ -589,7 +792,8 @@ def probe_circuit() -> dict:
     result = circuit.weekly_probe()
     status = result.get("status") or result.get("action") or "ok"
     log_action(
-        "inference.probe", status,
+        "inference.probe",
+        status,
         **{k: v for k, v in result.items() if k not in ("action", "status")},
     )
     return result
