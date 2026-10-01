@@ -1,42 +1,99 @@
 @import "tailwindcss";
 
-/* Vazirmatn is the standard open Persian UI face; without it a system fallback renders
-   Persian at a different optical size than the Latin chrome and the two never line up.
-
-   Self-hosted, not loaded from a CDN, for two reasons: the shared Caddy edge sends
-   `font-src 'self'`, which would simply block a jsdelivr URL and silently fall back to
-   Tahoma - and an Iranian reader may not be able to reach a foreign CDN at all. One
-   variable file covers every weight. */
-@font-face {
-  font-family: "Vazirmatn";
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url("/fonts/Vazirmatn.woff2") format("woff2");
+/* The face itself is bundled by next/font/local in app/layout.js (Vazirmatn, Persian and
+   Latin in one variable file) and served from /_next/static: no foreign CDN, and no
+   trip through the login middleware, which used to redirect a signed-out reader's
+   /fonts/ request and drop every Persian headline to the system face. */
+@theme inline {
+  --font-sans: var(--font-vazirmatn), Tahoma, sans-serif;
+  --font-persian: var(--font-vazirmatn), Tahoma, sans-serif;
+  --color-paper: var(--paper);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
 }
 
-@theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-persian: "Vazirmatn", "Tahoma", sans-serif;
-}
-
-html {
+/* Staff pages are dark-only; these defaults match their slate palette. */
+:root {
+  --paper: #020617;
+  --card: #0f172a;
+  --card-2: #1e293b;
+  --line: #1e293b;
+  --ink: #f1f5f9;
+  --muted: #94a3b8;
+  --accent: #a99bff;
+  --accent-strong: #4b33c9;
   color-scheme: dark;
 }
 
-body {
-  @apply bg-slate-950 text-slate-100 antialiased;
+/* Reader routes follow the system theme. Every pair below is >= 4.5:1 (WCAG AA). */
+.reader-theme {
+  --paper: #0c0d16;
+  --card: #151726;
+  --card-2: #1c1f33;
+  --line: #2a2e47;
+  --ink: #eef0fa;
+  --muted: #a7acc4;
+  --accent: #a99bff;
+  --accent-strong: #4b33c9;
+  --tier-1-bg: #24204a; --tier-1-fg: #c9c2ff;
+  --tier-2-bg: #352c78; --tier-2-fg: #e0dbff;
+  --tier-3-bg: #5a46cc; --tier-3-fg: #ffffff;
+  --tier-4-bg: #8b78f5; --tier-4-fg: #0e0a2e;
+  --tier-5-bg: #c4b8ff; --tier-5-fg: #120d3a;
+  --price-line: #c8cbe0;
+  color-scheme: dark;
 }
 
-/* Persian body text. `dir` is set on the element itself rather than here, because a class
-   cannot set direction for the bidi algorithm - only the attribute can. */
+@media (prefers-color-scheme: light) {
+  .reader-theme {
+    --paper: #f5f5fa;
+    --card: #ffffff;
+    --card-2: #eeeef7;
+    --line: #dfe0ec;
+    --ink: #14152a;
+    --muted: #52566e;
+    --accent: #4b33c9;
+    --accent-strong: #4b33c9;
+    --tier-1-bg: #ece9fd; --tier-1-fg: #3a2d91;
+    --tier-2-bg: #d6cffb; --tier-2-fg: #2f2380;
+    --tier-3-bg: #a597f2; --tier-3-fg: #160f45;
+    --tier-4-bg: #6b54e0; --tier-4-fg: #ffffff;
+    --tier-5-bg: #3d22b5; --tier-5-fg: #ffffff;
+    --price-line: #3b3f57;
+    color-scheme: light;
+  }
+}
+
+body {
+  @apply bg-paper text-ink antialiased;
+}
+
+/* One hue at five intensities. Red stays reserved for errors and disputed claims. */
+.tier-1 { background: var(--tier-1-bg); color: var(--tier-1-fg); }
+.tier-2 { background: var(--tier-2-bg); color: var(--tier-2-fg); }
+.tier-3 { background: var(--tier-3-bg); color: var(--tier-3-fg); }
+.tier-4 { background: var(--tier-4-bg); color: var(--tier-4-fg); }
+.tier-5 { background: var(--tier-5-bg); color: var(--tier-5-fg); }
+
+/* Category art: shown in place of a photo the source does not let us republish. */
+.art-monetary { background: linear-gradient(135deg, #0f5f59, #14a394); }
+.art-macro { background: linear-gradient(135deg, #075985, #3aa5d8); }
+.art-sanctions_trade { background: linear-gradient(135deg, #8a4b0f, #d08a1c); }
+.art-geopolitics { background: linear-gradient(135deg, #273449, #5b6b84); }
+.art-energy { background: linear-gradient(135deg, #9a3412, #e07a3a); }
+.art-markets { background: linear-gradient(135deg, #065f46, #2fa57c); }
+.art-pending { background: linear-gradient(135deg, #3a3d52, #6b6f88); }
+
 .persian {
   font-family: var(--font-persian);
   line-height: 1.9;
 }
 
-/* Numbers inside an RTL paragraph reorder unpredictably next to Latin identifiers. `bdi`
-   isolates them; this class only handles the typography. */
 .tabular {
   font-variant-numeric: tabular-nums;
 }

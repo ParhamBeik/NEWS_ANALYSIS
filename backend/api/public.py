@@ -121,11 +121,11 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
     articles = sorted(event.articles.all(), key=lambda row: row.published_at or row.fetched_at)
     primary = event.primary_article
     image = getattr(primary, "image", None)
-    permitted_image = (
-        image.thumbnail.url
-        if image and image.thumbnail and primary.source.public_image_allowed
-        else None
-    )
+    allowed = bool(image) and primary.source.public_image_allowed
+    permitted_image = image.thumbnail.url if allowed and image.thumbnail else None
+    # The 1200px display copy, for the hero and the event page; the 400px thumbnail
+    # blurs at that size. Same permission gate as the thumbnail.
+    permitted_large = image.file.url if allowed and image.file else None
     latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
     document = {
         "id": event.id,
@@ -148,6 +148,7 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
         "event_time": event.event_time,
         "first_seen_at": event.first_seen_at,
         "image_url": permitted_image,
+        "image_large_url": permitted_large or permitted_image,
         "sources": [
             {
                 "name": a.source.display_name or a.source_id,

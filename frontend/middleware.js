@@ -17,7 +17,9 @@ import { NextResponse } from "next/server";
 // `/logout` must reach its route even after the cookie has already been cleared. Otherwise a
 // second click is redirected to `/login?next=/logout`, which turns the next sign-in into a
 // misleading round-trip through the logout URL.
-const PUBLIC = ["/", "/events", "/market", "/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
+// `/media` reaches Next only in development (Caddy serves it in production); the reader's
+// images must load for a signed-out visitor there too.
+const PUBLIC = ["/", "/events", "/market", "/media", "/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
 
 function withPathname(request, pathname) {
   const requestHeaders = new Headers(request.headers);
