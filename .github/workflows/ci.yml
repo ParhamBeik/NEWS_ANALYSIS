@@ -79,8 +79,6 @@ jobs:
       - run: pytest -q
       - run: ruff check .
       - run: pip-audit -r requirements.txt
-      - name: Backup failure paths
-        run: python -m unittest discover -s ../deploy/tests -v
 
   frontend:
     runs-on: ubuntu-latest

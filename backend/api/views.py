@@ -512,39 +512,6 @@ class FeedStatsView(APIView):
         )
 
 
-def backup_health() -> dict:
-    """Report actual archives; a leftover success marker cannot prove a dump still exists."""
-    directory = Path(settings.BACKUP_DIR)
-    offsite = directory / ".offsite-last"
-    dumps = [
-        path for path in directory.glob("*.dump") if path.is_file() and path.stat().st_size > 0
-    ]
-    newest = max(dumps, key=lambda path: path.stat().st_mtime) if dumps else None
-    offsite_age = (
-        round((timezone.now().timestamp() - offsite.stat().st_mtime) / 3600, 1)
-        if newest and offsite.is_file() and offsite.read_text().strip() == newest.name
-        else None
-    )
-    if not dumps:
-        return {
-            "configured": directory.is_dir(),
-            "last_success_at": None,
-            "age_hours": None,
-            "retained": 0,
-            "offsite_age_hours": offsite_age,
-        }
-    stamp = timezone.datetime.fromtimestamp(
-        newest.stat().st_mtime, tz=timezone.get_current_timezone()
-    )
-    return {
-        "configured": True,
-        "last_success_at": stamp,
-        "age_hours": round((timezone.now() - stamp).total_seconds() / 3600, 1),
-        "retained": len(dumps),
-        "offsite_age_hours": offsite_age,
-    }
-
-
 class OpsView(APIView):
     """The operational picture: what the pipeline did, what it cost, what broke."""
 
@@ -646,7 +613,6 @@ class OpsView(APIView):
                         url_status=UrlStatus.DROPPED
                     ).count(),
                 },
-                "backups": backup_health(),
             }
         )
 

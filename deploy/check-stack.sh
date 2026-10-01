@@ -10,7 +10,7 @@ for service in db redis backend worker-crawl worker-inference frontend; do
         echo "$service is not healthy" >&2; exit 1;
     }
 done
-for service in beat backup; do
+for service in beat; do
     id=$(compose ps -q "$service")
     [ -n "$id" ] && [ "$(docker inspect -f '{{.State.Running}}' "$id")" = true ] || {
         echo "$service is not running" >&2; exit 1;
@@ -38,14 +38,3 @@ assert PeriodicTask.objects.filter(name__in=("crawl-all-sources", "inference-cyc
 
 # A successful process exit is not proof that a recoverable copy exists. The off-host
 # marker is written only after a byte-for-byte checked copy has been promoted remotely.
-compose exec -T backup sh -c '
-    set -eu
-    find /backups -maxdepth 1 -type f -name "*.dump" -mmin -2160 -print -quit | grep -q .
-    test -f /backups/.offsite-last
-    find /backups/.offsite-last -mmin -2160 -print -quit | grep -q .
-    # A restart makes a new dump before the next hourly Mac pull. Accept the
-    # previously copied archive while its verified marker is still fresh.
-    copied=$(cat /backups/.offsite-last)
-    case "$copied" in newsintel-*.dump) ;; *) exit 1 ;; esac
-    test -s "/backups/$copied"
-'

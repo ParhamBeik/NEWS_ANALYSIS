@@ -313,10 +313,6 @@ WORKBOOK_TEMPLATE_PATH = BASE_DIR / "exports" / "assets" / "workbook_template.xl
 # ExportDownloadView, which requires a login; keeping them off that volume is what makes
 # that the only way in.
 EXPORT_DIR = Path(env("EXPORT_DIR", str(BASE_DIR / "var" / "exports")))
-# Where the nightly pg_dump lands, mounted READ-ONLY into this process. The app never
-# writes here; it only reports how old the newest dump is, because a backup job that
-# stopped silently is indistinguishable from a working one until a restore is attempted.
-BACKUP_DIR = Path(env("BACKUP_DIR", str(BASE_DIR / "var" / "backups")))
 
 LOGGING = {
     "version": 1,
