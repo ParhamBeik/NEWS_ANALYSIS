@@ -1,14 +1,5 @@
 import Link from "next/link";
-import { tehranTime } from "@/lib/display";
-
-const CATEGORY = {
-  monetary: ["Monetary policy", "سیاست پولی"],
-  macro: ["Macroeconomy", "اقتصاد کلان"],
-  sanctions_trade: ["Trade & sanctions", "تجارت و تحریم"],
-  geopolitics: ["Geopolitics", "ژئوپلیتیک"],
-  energy: ["Energy", "انرژی"],
-  markets: ["Markets", "بازارها"],
-};
+import { EVENT_CATEGORY as CATEGORY, tehranTime } from "@/lib/display";
 
 export default function EventCard({ event, lang = "fa" }) {
   const persian = lang === "fa";

@@ -53,3 +53,9 @@ AXES: tuple[str, ...] = ("confidence_occurrence", "gold_price_impact", "security
 LEVELS: tuple[str, ...] = tuple(Level.values)
 CATEGORIES: tuple[str, ...] = tuple(Category.values)
 GOLD_TRENDS: tuple[str, ...] = tuple(GoldTrend.values)
+
+# Jev's reader-event categories: a separate vocabulary from the legacy article `Category`.
+# The assessment task validates against it and the swipe reviewer may only correct to it.
+EVENT_CATEGORIES: tuple[str, ...] = (
+    "monetary", "macro", "sanctions_trade", "geopolitics", "energy", "markets", "other",
+)

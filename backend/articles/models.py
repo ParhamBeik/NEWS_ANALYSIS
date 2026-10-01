@@ -220,6 +220,9 @@ class EventReview(models.Model):
         blank=True,
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    # A skipped card stays pending but drops behind unskipped ones, so one hard case cannot
+    # head every review session.
+    skipped_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
