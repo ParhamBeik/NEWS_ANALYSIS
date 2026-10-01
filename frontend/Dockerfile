@@ -27,8 +27,7 @@ RUN addgroup -g 10001 -S app && adduser -u 10001 -S app -G app
 
 COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
-# `public` is not traced into standalone output - the self-hosted Persian font lives here,
-# and without this line every Persian headline silently falls back to Tahoma.
+# `public` is not traced into standalone output - the push service worker lives here.
 COPY --from=build --chown=app:app /app/public ./public
 
 USER app

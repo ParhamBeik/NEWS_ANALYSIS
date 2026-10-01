@@ -18,23 +18,25 @@ const AUTH_PATHS = ["/login", "/signup"];
 export default function AppShell({ children, user = null, lang = "en" }) {
   const pathname = usePathname();
   const isAuth = AUTH_PATHS.some((path) => pathname.startsWith(path));
+  // Reader routes follow the system light/dark theme; staff pages stay dark-only.
+  const theme = pathname === "/" || pathname.startsWith("/events") ? "reader-theme" : "";
 
   if (isAuth) {
-    return <div className="min-h-screen bg-slate-950">{children}</div>;
+    return <div className="min-h-screen bg-paper">{children}</div>;
   }
 
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className={`${theme} min-h-screen bg-paper text-ink`}>
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-emerald-500 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-slate-950"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-accent-strong focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
       >
         {lang === "fa" ? "رفتن به محتوا" : "Skip to content"}
       </a>
-      <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/85 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-line bg-paper/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-3 px-3 py-3 sm:gap-6 sm:px-5">
-          <Link href="/" className="shrink-0 text-sm font-semibold tracking-tight text-slate-100">
-            News<span className="text-emerald-400">Intel</span>
+          <Link href="/" className="shrink-0 text-sm font-bold tracking-tight text-ink">
+            News<span className="text-accent">Intel</span>
           </Link>
           <nav aria-label={lang === "fa" ? "اصلی" : "Main"} className="order-3 flex min-w-0 basis-full flex-wrap gap-1 text-sm sm:order-none sm:basis-auto sm:flex-1">
             {NAV.filter((item) => !item.staff || user?.isStaff).map((item) => {
@@ -48,10 +50,10 @@ export default function AppShell({ children, user = null, lang = "en" }) {
                   // page. The colour alone conveys it to sighted users only, and on a
                   // seven-item nav "where am I" is the question being answered.
                   aria-current={active ? "page" : undefined}
-                  className={`rounded-md px-2 py-1 transition ${
+                  className={`rounded-md px-2 py-1 transition focus-visible:outline-2 focus-visible:outline-accent ${
                     active
-                      ? "bg-slate-900 text-slate-100"
-                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+                      ? "bg-card-2 text-ink"
+                      : "text-muted hover:bg-card-2 hover:text-ink"
                   }`}
                 >
                   {item[lang]}
@@ -63,19 +65,19 @@ export default function AppShell({ children, user = null, lang = "en" }) {
             <form action="/language" method="post">
               <input type="hidden" name="language" value={lang === "fa" ? "en" : "fa"} />
               <input type="hidden" name="next" value={pathname} />
-              <button type="submit" className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300">
+              <button type="submit" className="rounded-md border border-line px-2 py-1 text-xs text-ink hover:bg-card-2">
                 {lang === "fa" ? "English" : "فارسی"}
               </button>
             </form>
             {user ? (
-              <span className="max-w-[12ch] truncate text-xs text-slate-400 sm:max-w-none">
+              <span className="max-w-[12ch] truncate text-xs text-muted sm:max-w-none">
                 {user.username}
               </span>
             ) : null}
             {user?.isStaff ? (
               <a
                 href="/admin/"
-                className="text-xs text-slate-500 transition hover:text-slate-300"
+                className="text-xs text-muted transition hover:text-ink"
               >
                 {lang === "fa" ? "مدیریت" : "Admin"}
               </a>
@@ -83,11 +85,11 @@ export default function AppShell({ children, user = null, lang = "en" }) {
             {user ? <form action="/logout" method="post">
               <button
                 type="submit"
-                className="text-xs text-slate-500 transition hover:text-slate-300"
+                className="text-xs text-muted transition hover:text-ink"
               >
                 {lang === "fa" ? "خروج" : "Sign out"}
               </button>
-            </form> : <Link href="/login" className="text-xs text-slate-400">{lang === "fa" ? "ورود" : "Sign in"}</Link>}
+            </form> : <Link href="/login" className="text-xs text-muted hover:text-ink">{lang === "fa" ? "ورود" : "Sign in"}</Link>}
           </div>
         </div>
       </header>

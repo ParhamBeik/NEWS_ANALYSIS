@@ -31,8 +31,8 @@ export default function AlertOptIn({ publicKey, signedIn, lang }) {
   }, []);
 
   if (!publicKey || !supported) return null;
-  if (!signedIn) return <p className="text-xs text-slate-400">
-    <Link href="/login" className="text-emerald-300 underline">{fa ? "وارد شوید" : "Sign in"}</Link>
+  if (!signedIn) return <p className="text-xs text-muted">
+    <Link href="/login" className="text-accent underline">{fa ? "وارد شوید" : "Sign in"}</Link>
     {fa ? " تا هشدارهای اختیاری را فعال کنید." : " to opt in to important news alerts."}
   </p>;
 
@@ -61,20 +61,20 @@ export default function AlertOptIn({ publicKey, signedIn, lang }) {
     } finally { setBusy(false); }
   }
 
-  return <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-sm">
+  return <div className="rounded-2xl border border-line bg-card p-4 text-sm">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><strong>{fa ? "هشدار خبرهای مهم ایران" : "Top Iran news alerts"}</strong>
-        <p className="text-xs text-slate-400">{fa ? "اختیاری؛ فقط رویدادهای با اطمینان بالا." : "Opt in to high-confidence events."}</p></div>
+        <p className="text-xs text-muted">{fa ? "اختیاری؛ فقط رویدادهای با اطمینان بالا." : "Opt in to high-confidence events."}</p></div>
       <button type="button" onClick={toggle} disabled={busy}
-        className="rounded-lg bg-emerald-700 px-3 py-2 text-white disabled:opacity-50">
+        className="rounded-lg bg-accent-strong px-3 py-2 text-white focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
         {subscribed ? (fa ? "خاموش کردن" : "Turn off") : (fa ? "فعال کردن" : "Turn on")}
       </button>
     </div>
-    {!subscribed && <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-300">
+    {!subscribed && <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted">
       <label><input type="checkbox" checked={globalEvents} onChange={(event) => setGlobalEvents(event.target.checked)} /> {fa ? "جهانی" : "Global"}</label>
       {CLASSES.map((key) => <label key={key}><input type="checkbox" checked={assets.includes(key)}
         onChange={(event) => setAssets(event.target.checked ? [...assets, key] : assets.filter((item) => item !== key))} /> {key.replaceAll("_", " ")}</label>)}
     </div>}
-    {message && <p role="status" className="mt-2 text-amber-300">{message}</p>}
+    {message && <p role="status" className="mt-2 text-red-700 dark:text-red-300">{message}</p>}
   </div>;
 }

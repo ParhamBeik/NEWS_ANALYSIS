@@ -9,7 +9,7 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from articles.models import AlertSubscription, Article, EventAlert, NewsEvent
+from articles.models import AlertSubscription, Article, ArticleImage, EventAlert, NewsEvent
 from articles.tasks import send_event_alert
 from core.events import attach_article
 from market.models import PriceSnapshot, Symbol
@@ -39,6 +39,22 @@ def test_public_event_is_developing_and_does_not_expose_captured_body(source):
     assert detail.data["status"] == NewsEvent.Status.DEVELOPING
     assert "Full captured source text" not in str(detail.data)
     assert api.get("/api/articles/").status_code in {401, 403}
+
+
+def test_public_event_large_image_follows_the_source_permission(source):
+    event = make_event(source)
+    ArticleImage.objects.create(
+        article=event.primary_article, file="articles/2026/10/a.jpg",
+        thumbnail="articles/2026/10/thumbs/a_thumb.jpg",
+    )
+    api = APIClient()
+    hidden = api.get(f"/api/public/events/{event.id}/").data
+    assert hidden["image_url"] is None and hidden["image_large_url"] is None
+    source.public_image_allowed = True
+    source.save()
+    shown = api.get("/api/public/events/").data["results"][0]
+    assert shown["image_url"].endswith("thumbs/a_thumb.jpg")
+    assert shown["image_large_url"].endswith("articles/2026/10/a.jpg")
 
 
 def test_public_feed_excludes_prefiltered_articles(source):

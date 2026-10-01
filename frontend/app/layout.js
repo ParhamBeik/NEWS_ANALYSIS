@@ -1,7 +1,16 @@
+import localFont from "next/font/local";
 import AppShell from "@/components/AppShell";
 import { currentUser } from "@/lib/api";
 import { language } from "@/lib/language";
 import "./globals.css";
+
+// Bundled, not fetched from Google: the reader is served from Iran.
+const vazirmatn = localFont({
+  src: "./fonts/Vazirmatn.woff2",
+  weight: "100 900",
+  display: "swap",
+  variable: "--font-vazirmatn",
+});
 
 export const metadata = {
   title: "News Intelligence",
@@ -18,8 +27,8 @@ export default async function RootLayout({ children }) {
   const lang = await language();
 
   return (
-    <html lang={lang} dir={lang === "fa" ? "rtl" : "ltr"}>
-      <body className="min-h-screen bg-slate-950 text-slate-100 antialiased">
+    <html lang={lang} dir={lang === "fa" ? "rtl" : "ltr"} className={vazirmatn.variable}>
+      <body className="min-h-screen font-sans">
         <AppShell user={user} lang={lang}>{children}</AppShell>
       </body>
     </html>
