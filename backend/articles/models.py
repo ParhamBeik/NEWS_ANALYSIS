@@ -99,8 +99,8 @@ class Article(models.Model):
     duplicate_reason = models.CharField(max_length=32, blank=True)
 
     fetched_at = models.DateTimeField(db_index=True)
-    first_seen_run = models.CharField(max_length=32, blank=True)
-    last_seen_run = models.CharField(max_length=32, blank=True)
+    first_seen_run = models.CharField(max_length=64, blank=True)
+    last_seen_run = models.CharField(max_length=64, blank=True)
     url_status = models.CharField(
         max_length=16, choices=UrlStatus, default=UrlStatus.LIVE, db_index=True
     )

@@ -85,6 +85,14 @@ class TestUpsert:
         assert created_first and not created_second
         assert first.pk == second.pk
 
+    def test_a_celery_task_id_fits_as_the_run_id(self, source):
+        """Scheduled crawls pass the 36-character Celery task id; a 32-char column stopped
+        every insert in production."""
+        task_id = "4b8d3c1e-9f0a-4c6e-8a1b-2d3e4f5a6b7c"
+        article, _ = upsert(raw(), source, run_id=task_id)
+        again, _ = upsert(raw(), source, run_id=task_id)
+        assert article.first_seen_run == again.last_seen_run == task_id
+
     def test_native_category_is_lowercased(self, source):
         """Mehr emits CamelCase, IRNA lowercase, ISNA numeric ids. Normalising at write
         time is what lets one prefilter lookup serve all three."""
