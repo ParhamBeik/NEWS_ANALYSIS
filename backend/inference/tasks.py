@@ -37,6 +37,7 @@ from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from core.vocabulary import AXES
 
 from . import budget, circuit, memory
+from .jev import configured as jev_configured
 from .models import (
     Classification,
     DeadLetter,
@@ -77,7 +78,7 @@ def assess_event(self, event_id: int) -> dict:
     digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
     if event.assessments.filter(evidence_hash=digest).exists():
         return {"status": "already_assessed", "event": event_id}
-    if not settings.OPENROUTER_API_KEY:
+    if not jev_configured():
         return {"status": "unassessed", "reason": "provider_not_configured"}
     run_id = f"event-{event_id}"
     event_time = event.event_time
@@ -164,7 +165,7 @@ def assess_event(self, event_id: int) -> dict:
         event_id = event.id
     EventAssessment.objects.create(
         event=event,
-        model=str(response.get("model") or settings.OPENROUTER_JEV_MODEL),
+        model=str(response.get("model") or "jev"),
         evidence_hash=digest,
         category=category,
         iran_score=iran_score,
@@ -187,7 +188,11 @@ def assess_event(self, event_id: int) -> dict:
             event=event,
             defaults={"reason": "high_impact_uncertain" if confidence < 0.7 else "audit_sample"},
         )
-    if category != "other" and len(evidence.strip()) >= 40:
+    if (
+        category != "other"
+        and max(iran_score, global_score) >= settings.NEWS_BRIEF_MIN_SCORE
+        and len(evidence.strip()) >= 40
+    ):
         summarize_event.delay(event_id)
     if settings.NEWS_ALERTS_ENABLED:
         from articles.tasks import alert_event
@@ -243,7 +248,7 @@ def summarize_event(self, event_id: int) -> dict:
 @shared_task(name="inference.assess_pending_events")
 def assess_pending_events(limit: int = 200) -> dict:
     """Retry unassessed events after outages or credit top-ups."""
-    if not settings.OPENROUTER_API_KEY or budget.month_spend() >= settings.NEWS_MONTHLY_BUDGET_USD:
+    if not jev_configured() or budget.month_spend() >= settings.NEWS_MONTHLY_BUDGET_USD:
         return {"queued": 0, "status": "provider_or_budget_unavailable"}
     ids = list(
         NewsEvent.objects.exclude(category="other")

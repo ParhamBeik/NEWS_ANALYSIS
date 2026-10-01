@@ -256,9 +256,25 @@ CACHES = {
 NEWS_RUN_BUDGET_USD = env_float("NEWS_RUN_BUDGET_USD", 1.00)
 NEWS_DAILY_BUDGET_USD = env_float("NEWS_DAILY_BUDGET_USD", 3.00)
 NEWS_MONTHLY_BUDGET_USD = env_float("NEWS_MONTHLY_BUDGET_USD", 100.00)
-OPENROUTER_API_KEY = env("OPENROUTER_API_KEY")
-OPENROUTER_JEV_MODEL = "typesafe/jev-1.13"
-OPENROUTER_BRIEF_MODEL = env("OPENROUTER_BRIEF_MODEL", "openai/gpt-6-luna")
+# Jev decisions. TypeSafe direct, because OpenRouter refuses the Tehran server. While the
+# key is empty, decisions fall back to a GapGPT model asked for the same typed answers.
+TYPESAFE_API_KEY = env("TYPESAFE_API_KEY")
+TYPESAFE_BASE_URL = env("TYPESAFE_BASE_URL", "https://api.typesafe.ai/v1")
+TYPESAFE_JEV_MODEL = env("TYPESAFE_JEV_MODEL", "jev-1.13.0")
+# TypeSafe reports tokens only; output tokens are free on its price list.
+TYPESAFE_INPUT_USD_PER_MILLION = env_float("TYPESAFE_INPUT_USD_PER_MILLION", 0.042)
+NEWS_DECISION_FALLBACK_MODEL = env("NEWS_DECISION_FALLBACK_MODEL", "")
+NEWS_DECISION_MAX_TOKENS = env_int("NEWS_DECISION_MAX_TOKENS", 600)
+# Briefs are prose, which Jev does not write.
+NEWS_BRIEF_MODEL = env("NEWS_BRIEF_MODEL", "gpt-6-luna")
+NEWS_BRIEF_MAX_TOKENS = env_int("NEWS_BRIEF_MAX_TOKENS", 1200)
+# Briefs cost ~20x a decision, so only events scored "Large" (75 of 100) or above get one;
+# the rest show their original headline. Keeps the ~$30/month AI plan.
+NEWS_BRIEF_MIN_SCORE = env_int("NEWS_BRIEF_MIN_SCORE", 75)
+# Used only when GapGPT omits cost. Deliberately high so a missing figure overstates spend
+# instead of letting the monthly ceiling under-count a premium model.
+NEWS_BRIEF_INPUT_USD_PER_MILLION = env_float("NEWS_BRIEF_INPUT_USD_PER_MILLION", 2.50)
+NEWS_BRIEF_OUTPUT_USD_PER_MILLION = env_float("NEWS_BRIEF_OUTPUT_USD_PER_MILLION", 10.00)
 PORTFOLIO_MARKET_BASE_URL = env("PORTFOLIO_MARKET_BASE_URL")
 PORTFOLIO_MARKET_SERVICE_KEY = env("PORTFOLIO_MARKET_SERVICE_KEY")
 NEWS_VAPID_PUBLIC_KEY = env("NEWS_VAPID_PUBLIC_KEY")

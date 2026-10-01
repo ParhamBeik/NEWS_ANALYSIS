@@ -55,7 +55,9 @@ def fetch(source, session, *, limit: int) -> list[RawArticle]:
             url = link.get("href", "") if link is not None else ""
         if not title or not url:
             continue
-        lead_html = _text(item, "description", "{http://www.w3.org/2005/Atom}summary", f"{RSS1}description")
+        lead_html = _text(
+            item, "description", "{http://www.w3.org/2005/Atom}summary", f"{RSS1}description"
+        )
         lead = BeautifulSoup(lead_html, "html.parser").get_text(" ", strip=True)
         published = _text(
             item, "pubDate", "{http://www.w3.org/2005/Atom}published",
