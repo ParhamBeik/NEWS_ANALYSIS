@@ -6,7 +6,7 @@ will be tuned against real cost, not a constant discovered at design time.
 
 Cadences and their reasons:
 
-- crawl every 5 minutes for the current feed cadence. Inference has its own budget gate.
+- crawl every 2 minutes to leave processing headroom within the priority-source target.
 - inference on its own 30-minute cycle, OFFSET from the crawl by design. Running them
   together means the inference pass reads a half-written corpus and pays again next cycle
   for what it missed.
@@ -34,13 +34,16 @@ from django_celery_beat.models import CrontabSchedule, IntervalSchedule, Periodi
 TEHRAN = "Asia/Tehran"
 
 INTERVAL_TASKS = [
-    ("crawl-all-sources", "sources.crawl_all", 5, IntervalSchedule.MINUTES, {}),
+    ("crawl-all-sources", "sources.crawl_all", 2, IntervalSchedule.MINUTES, {}),
+    ("assess-pending-events", "inference.assess_pending_events", 5, IntervalSchedule.MINUTES, {}),
     ("inference-cycle", "inference.run_cycle", 30, IntervalSchedule.MINUTES, {}),
     ("poll-market-prices", "market.poll_prices", 15, IntervalSchedule.MINUTES, {}),
     ("backtest-predictions", "market.backtest_predictions", 1, IntervalSchedule.HOURS, {}),
     ("source-canary", "sources.canary", 1, IntervalSchedule.HOURS, {}),
     ("download-pending-images", "articles.tasks.download_pending_images", 1,
      IntervalSchedule.HOURS, {}),
+    ("revisit-recent-articles", "articles.revisit_recent_articles", 1,
+     IntervalSchedule.HOURS, {"limit": 100}),
     # Offset from the 30-minute inference cycle by its own cadence: a run is finalised once
     # its tasks stop writing events, so sweeping more often than that just re-reads runs
     # that are still working.
@@ -88,7 +91,7 @@ class Command(BaseCommand):
                     "interval": schedule,
                     "crontab": None,
                     "kwargs": json.dumps(kwargs),
-                    "enabled": enabled,
+                    "enabled": enabled and task != "inference.run_cycle",
                 },
             )
             self.stdout.write(f"  {name:28} every {every} {period}")

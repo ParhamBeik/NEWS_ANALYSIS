@@ -17,7 +17,7 @@ import { NextResponse } from "next/server";
 // `/logout` must reach its route even after the cookie has already been cleared. Otherwise a
 // second click is redirected to `/login?next=/logout`, which turns the next sign-in into a
 // misleading round-trip through the logout URL.
-const PUBLIC = ["/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
+const PUBLIC = ["/", "/events", "/market", "/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
 
 function withPathname(request, pathname) {
   const requestHeaders = new Headers(request.headers);
@@ -29,7 +29,7 @@ export function middleware(request) {
   const { pathname } = request.nextUrl;
   const hasToken = Boolean(request.cookies.get("news_token"));
 
-  if (PUBLIC.some((prefix) => pathname.startsWith(prefix))) {
+  if (pathname === "/" || PUBLIC.slice(1).some((prefix) => pathname.startsWith(prefix))) {
     // A revoked token still has a cookie. Redirecting it home loops back here on the API 401.
     return withPathname(request, pathname);
   }

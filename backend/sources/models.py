@@ -40,6 +40,7 @@ class Strategy(models.TextChoices):
     """How a source is crawled. The value keys `sources.strategies.REGISTRY`."""
 
     RSS_SABA = "rss_saba", "Saba/Nastooh CMS RSS (Mehr, IRNA, ISNA)"
+    RSS_GENERIC = "rss_generic", "Standard RSS or Atom feed"
     LISTING_DETAIL = "listing_detail", "Listing page -> detail page"
     LISTING_RELAY = "listing_relay", "Listing page -> interstitial -> real article"
 
@@ -64,6 +65,8 @@ class Source(models.Model):
     # that source's copy tends to be. See articles.dedupe.better_canonical.
     priority = models.PositiveSmallIntegerField(default=50)
     enabled = models.BooleanField(default=True)
+    public_image_allowed = models.BooleanField(default=False)
+    last_item_published_at = models.DateTimeField(null=True, blank=True)
 
     health_status = models.CharField(
         max_length=16, choices=HealthStatus, default=HealthStatus.UNKNOWN

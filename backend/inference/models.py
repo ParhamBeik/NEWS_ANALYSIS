@@ -60,9 +60,7 @@ class PromptVariant(models.Model):
     # FROZEN INVARIANT 3/4: sha256 of the prompt policy files, never hand-maintained.
     # Recomputed from disk on save; see inference.prompts.prompt_version().
     prompt_version = models.CharField(max_length=16, editable=False)
-    is_active = models.BooleanField(
-        default=False, help_text="Active variants run on every cycle."
-    )
+    is_active = models.BooleanField(default=False, help_text="Active variants run on every cycle.")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -157,7 +155,10 @@ class NodeEvent(models.Model):
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="events")
     node = models.CharField(max_length=32, db_index=True)
     article = models.ForeignKey(
-        "articles.Article", null=True, blank=True, on_delete=models.CASCADE,
+        "articles.Article",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
         related_name="node_events",
     )
     variant = models.ForeignKey(
@@ -255,7 +256,10 @@ class InferenceResult(models.Model):
         "articles.Article", on_delete=models.CASCADE, related_name="%(class)ss"
     )
     variant = models.ForeignKey(
-        PromptVariant, null=True, blank=True, on_delete=models.SET_NULL,
+        PromptVariant,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="%(class)ss",
     )
     prompt_version = models.CharField(max_length=16)
@@ -313,9 +317,7 @@ class Evaluation(InferenceResult):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    models.Q(
-                        confidence_occurrence__isnull=False, gold_price_impact__isnull=False
-                    )
+                    models.Q(confidence_occurrence__isnull=False, gold_price_impact__isnull=False)
                     | models.Q(
                         confidence_occurrence__isnull=False, security_relevance__isnull=False
                     )
@@ -329,9 +331,7 @@ class Evaluation(InferenceResult):
     def decision(self):
         from core.scoring import decide
 
-        return decide(
-            self.confidence_occurrence, self.gold_price_impact, self.security_relevance
-        )
+        return decide(self.confidence_occurrence, self.gold_price_impact, self.security_relevance)
 
 
 class Summary(InferenceResult):
@@ -367,9 +367,7 @@ class ProviderCircuit(models.Model):
     thing that may try the wallet again. One row (pk=1), created on first read.
     """
 
-    state = models.CharField(
-        max_length=16, choices=CircuitState, default=CircuitState.OPEN_BUDGET
-    )
+    state = models.CharField(max_length=16, choices=CircuitState, default=CircuitState.OPEN_BUDGET)
     reason = models.TextField(blank=True)
     error_kind = models.CharField(max_length=32, blank=True)
     consecutive_failures = models.PositiveIntegerField(default=0)
@@ -385,3 +383,25 @@ class ProviderCircuit(models.Model):
 
     def __str__(self) -> str:
         return f"circuit {self.state}"
+
+
+class AIUsageRecord(models.Model):
+    """Provider-reported cost for each new reader assessment or brief."""
+
+    event = models.ForeignKey(
+        "articles.NewsEvent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="usage_records",
+    )
+    stage = models.CharField(max_length=16, db_index=True)
+    provider = models.CharField(max_length=64)
+    model = models.CharField(max_length=100)
+    tokens_in = models.PositiveIntegerField(default=0)
+    tokens_out = models.PositiveIntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=8)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"{self.stage} usage for event {self.event_id}"

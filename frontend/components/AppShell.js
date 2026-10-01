@@ -4,10 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
-  { href: "/", en: "Collection", fa: "گردآوری" },
-  { href: "/classification", en: "Classification", fa: "دسته‌بندی" },
-  { href: "/evaluation", en: "Evaluation", fa: "ارزیابی" },
-  { href: "/articles", en: "Articles", fa: "مقالات" },
+  { href: "/", en: "News", fa: "خبرها" },
+  { href: "/market", en: "Asset timeline", fa: "نمودار دارایی‌ها" },
+  { href: "/collection", en: "Collection", fa: "گردآوری", staff: true },
+  { href: "/classification", en: "Classification", fa: "دسته‌بندی", staff: true },
+  { href: "/evaluation", en: "Evaluation", fa: "ارزیابی", staff: true },
+  { href: "/articles", en: "Articles", fa: "مقالات", staff: true },
 ];
 
 const AUTH_PATHS = ["/login", "/signup"];
@@ -34,7 +36,7 @@ export default function AppShell({ children, user = null, lang = "en" }) {
             News<span className="text-emerald-400">Intel</span>
           </Link>
           <nav aria-label={lang === "fa" ? "اصلی" : "Main"} className="order-3 flex min-w-0 basis-full flex-wrap gap-1 text-sm sm:order-none sm:basis-auto sm:flex-1">
-            {NAV.map((item) => {
+            {NAV.filter((item) => !item.staff || user?.isStaff).map((item) => {
               const active =
                 item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
               return (
@@ -77,14 +79,14 @@ export default function AppShell({ children, user = null, lang = "en" }) {
                 {lang === "fa" ? "مدیریت" : "Admin"}
               </a>
             ) : null}
-            <form action="/logout" method="post">
+            {user ? <form action="/logout" method="post">
               <button
                 type="submit"
                 className="text-xs text-slate-500 transition hover:text-slate-300"
               >
                 {lang === "fa" ? "خروج" : "Sign out"}
               </button>
-            </form>
+            </form> : <Link href="/login" className="text-xs text-slate-400">{lang === "fa" ? "ورود" : "Sign in"}</Link>}
           </div>
         </div>
       </header>

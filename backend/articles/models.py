@@ -14,6 +14,7 @@ Neither is a deletion. Everything fetched is kept; only spending is withheld.
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from pgvector.django import HnswIndex, VectorField
@@ -105,6 +106,7 @@ class Article(models.Model):
     )
     gone_at = models.DateTimeField(null=True, blank=True)
     gone_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_checked_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = ArticleQuerySet.as_manager()
@@ -121,6 +123,156 @@ class Article(models.Model):
 
     def __str__(self) -> str:
         return self.original_title[:80]
+
+
+class NewsEvent(models.Model):
+    """A reader-facing story. Articles remain the evidence and retain their own provenance."""
+
+    class Status(models.TextChoices):
+        DEVELOPING = "developing", "Developing"
+        ASSESSED = "assessed", "Assessed"
+        CORRECTED = "corrected", "Corrected"
+        WITHDRAWN = "withdrawn", "Withdrawn"
+
+    primary_article = models.OneToOneField(
+        Article, on_delete=models.PROTECT, related_name="led_event"
+    )
+    articles = models.ManyToManyField(Article, related_name="news_events", blank=True)
+    event_time = models.DateTimeField(db_index=True)
+    first_seen_at = models.DateTimeField(db_index=True)
+    status = models.CharField(max_length=16, choices=Status, default=Status.DEVELOPING)
+    category = models.CharField(max_length=32, blank=True, db_index=True)
+    iran_score = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
+    global_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    assessment_confidence = models.FloatField(null=True, blank=True)
+    title_fa = models.TextField(blank=True)
+    title_en = models.TextField(blank=True)
+    brief_fa = models.TextField(blank=True)
+    brief_en = models.TextField(blank=True)
+    channels_fa = models.TextField(blank=True)
+    channels_en = models.TextField(blank=True)
+    uncertainty_fa = models.TextField(blank=True)
+    uncertainty_en = models.TextField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["-event_time", "-id"])]
+
+    def __str__(self) -> str:
+        return f"event {self.pk}: {self.primary_article.original_title[:60]}"
+
+
+class EventAssessment(models.Model):
+    """Append-only Jev decisions; an event's current fields are its read projection."""
+
+    event = models.ForeignKey(NewsEvent, on_delete=models.CASCADE, related_name="assessments")
+    model = models.CharField(max_length=80)
+    evidence_hash = models.CharField(max_length=64, db_index=True)
+    category = models.CharField(max_length=32)
+    iran_score = models.PositiveSmallIntegerField()
+    global_score = models.PositiveSmallIntegerField()
+    asset_scores = models.JSONField(default=dict)
+    confidence = models.FloatField()
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=8, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"Jev assessment for event {self.event_id}"
+
+
+class EventRevision(models.Model):
+    """Reader copy replaced after source evidence changes."""
+
+    event = models.ForeignKey(NewsEvent, on_delete=models.CASCADE, related_name="revisions")
+    reason = models.CharField(max_length=32)
+    title_fa = models.TextField(blank=True)
+    title_en = models.TextField(blank=True)
+    brief_fa = models.TextField(blank=True)
+    brief_en = models.TextField(blank=True)
+    channels_fa = models.TextField(blank=True)
+    channels_en = models.TextField(blank=True)
+    uncertainty_fa = models.TextField(blank=True)
+    uncertainty_en = models.TextField(blank=True)
+    observed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"reader revision of event {self.event_id}"
+
+
+class EventReview(models.Model):
+    """Human labels for Jev calibration; the published event remains independent."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        REVIEWED = "reviewed", "Reviewed"
+
+    event = models.OneToOneField(NewsEvent, on_delete=models.CASCADE, related_name="review")
+    reason = models.CharField(max_length=32, db_index=True)
+    status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
+    reviewed_category = models.CharField(max_length=32, blank=True)
+    reviewed_iran_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    reviewed_global_score = models.PositiveSmallIntegerField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"review for event {self.event_id}: {self.status}"
+
+
+class AlertSubscription(models.Model):
+    """An opted-in browser endpoint; credentials stay server-side."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    endpoint = models.URLField(max_length=2048, unique=True)
+    p256dh = models.CharField(max_length=255)
+    auth = models.CharField(max_length=255)
+    iran = models.BooleanField(default=True)
+    global_events = models.BooleanField(default=False)
+    asset_classes = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"browser alert subscription {self.pk}"
+
+
+class EventAlert(models.Model):
+    event = models.ForeignKey(NewsEvent, on_delete=models.CASCADE)
+    subscription = models.ForeignKey(AlertSubscription, on_delete=models.CASCADE)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "subscription"],
+                name="one_alert_per_event_subscription",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"alert {self.event_id} to {self.subscription_id}"
+
+
+class ArticleRevision(models.Model):
+    """The content observed before an upstream correction or removal."""
+
+    article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name="revisions")
+    title = models.TextField()
+    lead = models.TextField(blank=True)
+    content = models.TextField(blank=True)
+    content_hash = models.CharField(max_length=32)
+    status = models.CharField(max_length=16)
+    observed_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"revision of article {self.article_id} at {self.observed_at}"
 
 
 class ImageStatus(models.TextChoices):

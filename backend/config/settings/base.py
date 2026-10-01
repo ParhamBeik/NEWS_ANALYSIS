@@ -189,6 +189,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": env("THROTTLE_LOGIN", "10/min"),
         "signup": env("THROTTLE_SIGNUP", "5/hour"),
+        "reader": env("THROTTLE_READER", "120/min"),
+        "alert_subscription": env("THROTTLE_ALERT_SUBSCRIPTION", "10/hour"),
     },
     # How many reverse proxies sit in front of this process, so a throttle can identify the
     # CLIENT rather than the proxy. This is a correctness setting, not tuning: DRF's default
@@ -253,6 +255,33 @@ CACHES = {
 # fail differently: a single runaway run and a slow drift over a day.
 NEWS_RUN_BUDGET_USD = env_float("NEWS_RUN_BUDGET_USD", 1.00)
 NEWS_DAILY_BUDGET_USD = env_float("NEWS_DAILY_BUDGET_USD", 3.00)
+NEWS_MONTHLY_BUDGET_USD = env_float("NEWS_MONTHLY_BUDGET_USD", 100.00)
+# Jev decisions. TypeSafe direct, because OpenRouter refuses the Tehran server. While the
+# key is empty, decisions fall back to a GapGPT model asked for the same typed answers.
+TYPESAFE_API_KEY = env("TYPESAFE_API_KEY")
+TYPESAFE_BASE_URL = env("TYPESAFE_BASE_URL", "https://api.typesafe.ai/v1")
+TYPESAFE_JEV_MODEL = env("TYPESAFE_JEV_MODEL", "jev-1.13.0")
+# TypeSafe reports tokens only; output tokens are free on its price list.
+TYPESAFE_INPUT_USD_PER_MILLION = env_float("TYPESAFE_INPUT_USD_PER_MILLION", 0.042)
+NEWS_DECISION_FALLBACK_MODEL = env("NEWS_DECISION_FALLBACK_MODEL", "")
+NEWS_DECISION_MAX_TOKENS = env_int("NEWS_DECISION_MAX_TOKENS", 600)
+# Briefs are prose, which Jev does not write.
+NEWS_BRIEF_MODEL = env("NEWS_BRIEF_MODEL", "gpt-6-luna")
+NEWS_BRIEF_MAX_TOKENS = env_int("NEWS_BRIEF_MAX_TOKENS", 1200)
+# Briefs cost ~20x a decision, so only events scored "Large" (75 of 100) or above get one;
+# the rest show their original headline. Keeps the ~$30/month AI plan.
+NEWS_BRIEF_MIN_SCORE = env_int("NEWS_BRIEF_MIN_SCORE", 75)
+# Used only when GapGPT omits cost. Deliberately high so a missing figure overstates spend
+# instead of letting the monthly ceiling under-count a premium model.
+NEWS_BRIEF_INPUT_USD_PER_MILLION = env_float("NEWS_BRIEF_INPUT_USD_PER_MILLION", 2.50)
+NEWS_BRIEF_OUTPUT_USD_PER_MILLION = env_float("NEWS_BRIEF_OUTPUT_USD_PER_MILLION", 10.00)
+PORTFOLIO_MARKET_BASE_URL = env("PORTFOLIO_MARKET_BASE_URL")
+PORTFOLIO_MARKET_SERVICE_KEY = env("PORTFOLIO_MARKET_SERVICE_KEY")
+NEWS_VAPID_PUBLIC_KEY = env("NEWS_VAPID_PUBLIC_KEY")
+NEWS_VAPID_PRIVATE_KEY = env("NEWS_VAPID_PRIVATE_KEY")
+NEWS_VAPID_SUBJECT = env("NEWS_VAPID_SUBJECT")
+# Keep delivery off until the reviewed shadow sample meets the alert quality gate.
+NEWS_ALERTS_ENABLED = env_bool("NEWS_ALERTS_ENABLED", False)
 # Runaway-loop breaker on request COUNT, not money. Belongs well above a normal cycle.
 NEWS_MAX_PROVIDER_CALLS_PER_RUN = env_int("NEWS_MAX_PROVIDER_CALLS_PER_RUN", 1000)
 # Automatic provider halt. Not a user toggle: the first empty-wallet response opens the

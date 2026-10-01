@@ -85,7 +85,9 @@ def crawl_source(self, source_name: str, limit: int | None = None, run_id: str =
         raise Permanent(f"no enabled source named {source_name!r}")
 
     attempt = CrawlAttempt.objects.create(
-        source=source, task_id=self.request.id or "", retry=self.request.retries,
+        source=source,
+        task_id=self.request.id or "",
+        retry=self.request.retries,
     )
     try:
         stats = _crawl(source, limit or settings.NEWS_CRAWL_LIMIT_PER_SOURCE, run_id, attempt)
@@ -105,13 +107,28 @@ def _crawl(source, limit, run_id, attempt):
     with build_session() as session:
         raw_articles = strategies.fetch(source, session, limit=limit)
 
-    stats = {"source": source.name, "fetched": 0, "new": 0, "duplicate": 0, "rejected": 0,
-             "prefiltered": 0, "images_queued": 0, "failed": 0}
+    stats = {
+        "source": source.name,
+        "fetched": 0,
+        "new": 0,
+        "duplicate": 0,
+        "rejected": 0,
+        "prefiltered": 0,
+        "images_queued": 0,
+        "failed": 0,
+    }
+    latest_published = source.last_item_published_at
     for raw in raw_articles:
         stats["fetched"] += 1
         try:
             with transaction.atomic():
-                article, created = upsert(raw, source, run_id)
+                article, created = upsert(
+                    raw, source, run_id or attempt.task_id or f"crawl-{attempt.id}"
+                )
+                if article.published_at and (
+                    latest_published is None or article.published_at > latest_published
+                ):
+                    latest_published = article.published_at
                 # Commit storage and its counter together, even if the worker dies next.
                 attempt.fetched += 1
                 attempt.new += int(created)
@@ -140,6 +157,8 @@ def _crawl(source, limit, run_id, attempt):
         stats["images_queued"] += _queue_image(article)
 
     attempt.status = "partial" if stats["failed"] else "success" if stats["fetched"] else "empty"
+    if latest_published != source.last_item_published_at:
+        Source.objects.filter(pk=source.pk).update(last_item_published_at=latest_published)
     if attempt.status == "success":
         source.mark_healthy()
     else:

@@ -23,10 +23,11 @@ from core.errors import Permanent
 
 from ..extraction import RawArticle
 from ..models import Strategy
-from . import khabarfoori, saba, shahrekhabar
+from . import khabarfoori, rss_generic, saba, shahrekhabar
 
 REGISTRY: dict[str, ModuleType] = {
     Strategy.RSS_SABA: saba,
+    Strategy.RSS_GENERIC: rss_generic,
     Strategy.LISTING_DETAIL: khabarfoori,
     Strategy.LISTING_RELAY: shahrekhabar,
 }

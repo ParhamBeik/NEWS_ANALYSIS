@@ -76,6 +76,7 @@ class SourceSerializer(serializers.ModelSerializer):
         fields = [
             "name", "display_name", "strategy", "url", "tier", "priority", "enabled",
             "health_status", "last_success_at", "last_error", "supports_backfill",
+            "last_item_published_at", "public_image_allowed",
         ]
 
 

@@ -77,7 +77,7 @@ def test_embedding_sweep_is_manual_and_crawl_cadence_is_preserved(db):
     call_command("setup_schedule")
     assert not PeriodicTask.objects.filter(name="embed-missing").exists()
     crawl = PeriodicTask.objects.select_related("interval").get(name="crawl-all-sources")
-    assert crawl.interval.every == 5
+    assert crawl.interval.every == 2
     assert crawl.interval.period == IntervalSchedule.MINUTES
 
 

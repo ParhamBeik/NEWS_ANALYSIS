@@ -20,7 +20,7 @@ from sources import prefilter
 from sources.extraction import RawArticle
 
 from . import dedupe
-from .models import Article, ArticleImage, ExtractionTier, ImageStatus, UrlStatus
+from .models import Article, ArticleImage, ArticleRevision, ExtractionTier, ImageStatus, UrlStatus
 
 MIN_TITLE_CHARS = 10
 # Title plus lead is enough to judge a photo post; a full body is not required. IRNA and
@@ -81,10 +81,41 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
         fields = {"last_seen_run": run_id}
         # A listing/feed row still names a URL after the detail page 404s. Treating that
         # as resurrection flipped GONE back to LIVE every crawl and the 404 never stuck.
-        detail_page = (
-            raw.extraction_tier not in {ExtractionTier.FEED, ExtractionTier.LISTING}
-            and bool(raw.content)
+        detail_page = raw.extraction_tier not in {
+            ExtractionTier.FEED,
+            ExtractionTier.LISTING,
+        } and bool(raw.content)
+        # Official feeds may revise a headline or summary without exposing a detail body.
+        # Compare feed evidence only with another feed row; a thinner feed response must
+        # never overwrite a previously extracted detail article.
+        comparable_feed = (
+            raw.extraction_tier == ExtractionTier.FEED
+            and existing.extraction_tier == ExtractionTier.FEED
+            and bool(raw.lead)
         )
+        changed_content = (
+            detail_page or comparable_feed
+        ) and raw.content_hash != existing.content_hash
+        becoming_gone = bool(raw.gone_http_status) and existing.url_status != UrlStatus.GONE
+        if changed_content or becoming_gone:
+            ArticleRevision.objects.create(
+                article=existing,
+                title=existing.original_title,
+                lead=existing.lead,
+                content=existing.content,
+                content_hash=existing.content_hash,
+                status=existing.url_status,
+            )
+        if changed_content:
+            fields.update(
+                original_title=clean(raw.title),
+                lead=clean(raw.lead),
+                content=raw.content,
+                content_hash=raw.content_hash,
+                url_status=UrlStatus.LIVE,
+                gone_at=None,
+                gone_http_status=None,
+            )
         if raw.gone_http_status:
             fields.update(
                 url_status=UrlStatus.GONE,
@@ -102,6 +133,17 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
         else:
             fields["fetched_at"] = timezone.now()
         Article.objects.filter(pk=existing.pk).update(**fields)
+        from core.events import attach_article, invalidate_presentation
+
+        existing.refresh_from_db()
+        event = attach_article(existing)
+        if changed_content:
+            invalidate_presentation(event, "source_correction")
+            from inference.tasks import assess_event
+
+            transaction.on_commit(lambda event_id=event.pk: assess_event.delay(event_id))
+        elif becoming_gone:
+            invalidate_presentation(event, "source_withdrawal")
         return existing, False
 
     published_at, jalali, clock = published_fields(raw.published_at)
@@ -130,6 +172,17 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
         gone_http_status=raw.gone_http_status,
     )
     dedupe.resolve(article)
+    from core.events import attach_article
+
+    event = attach_article(article)
+    if (
+        article.duplicate_of_id is None
+        and not article.prefilter_reason
+        and not article.quality_flag
+    ):
+        from inference.tasks import assess_event
+
+        transaction.on_commit(lambda event_id=event.pk: assess_event.delay(event_id))
 
     if raw.image_url:
         ArticleImage.objects.get_or_create(

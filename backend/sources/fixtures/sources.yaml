@@ -70,3 +70,70 @@ shahrekhabar:
   url: https://www.shahrekhabar.com/آخرین-اخبار
   tier: 2
   priority: 5
+
+# Public primary-source feeds validated as HTTP 200 XML with current items on 2026-09-29.
+# They provide titles, summaries and links; no image redistribution is assumed.
+fed_monetary:
+  display_name: Federal Reserve monetary policy
+  strategy: rss_generic
+  url: https://www.federalreserve.gov/feeds/press_monetary.xml
+  tier: 1
+  priority: 6
+
+ecb_press:
+  display_name: European Central Bank
+  strategy: rss_generic
+  url: https://www.ecb.europa.eu/rss/press.html
+  tier: 1
+  priority: 7
+
+eia_press:
+  display_name: U.S. Energy Information Administration
+  strategy: rss_generic
+  url: https://www.eia.gov/rss/press_rss.xml
+  tier: 1
+  priority: 8
+
+eia_energy:
+  display_name: EIA Today in Energy
+  strategy: rss_generic
+  url: https://www.eia.gov/rss/todayinenergy.xml
+  tier: 1
+  priority: 9
+
+# Additional official channels checked for HTTP 200, parseable XML and current entries
+# on 2026-09-29. They are separate feed cursors, even where the institution overlaps.
+fed_enforcement:
+  display_name: Federal Reserve enforcement actions
+  strategy: rss_generic
+  url: https://www.federalreserve.gov/feeds/press_enforcement.xml
+  tier: 1
+  priority: 10
+
+fed_speeches:
+  display_name: Federal Reserve speeches and testimony
+  strategy: rss_generic
+  url: https://www.federalreserve.gov/feeds/speeches_and_testimony.xml
+  tier: 1
+  priority: 11
+
+ecb_blog:
+  display_name: European Central Bank blog
+  strategy: rss_generic
+  url: https://www.ecb.europa.eu/rss/blog.html
+  tier: 1
+  priority: 12
+
+ecb_statistics:
+  display_name: European Central Bank statistical releases
+  strategy: rss_generic
+  url: https://www.ecb.europa.eu/rss/statpress.html
+  tier: 1
+  priority: 13
+
+bea_releases:
+  display_name: U.S. Bureau of Economic Analysis
+  strategy: rss_generic
+  url: https://apps.bea.gov/rss/rss.xml
+  tier: 1
+  priority: 14

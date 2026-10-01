@@ -3,15 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { loadServerModule } from "./helpers.mjs";
 
-test("the Market scored-predictions metric excludes unscored outcomes", async () => {
-  const page = await readFile(new URL("../app/market/page.js", import.meta.url), "utf8");
-  assert.match(
-    page,
-    /const scoredPredictions = market\.outcomes\.filter\(\s*\(outcome\) => outcome\.direction_correct !== null,\s*\)\.length;/s,
-  );
-  assert.match(page, /label="Scored predictions" value=\{number\(scoredPredictions\)\}/);
-});
-
 test("malformed query boundaries render contextual recovery states", async () => {
   const [api, primitives, feed, ops, market, article] = await Promise.all([
     readFile(new URL("../lib/api.js", import.meta.url), "utf8"),
@@ -24,7 +15,8 @@ test("malformed query boundaries render contextual recovery states", async () =>
   assert.match(primitives, /export function QueryError\(/);
   assert.match(feed, /error instanceof ApiError && error\.status === 400/);
   assert.match(ops, /title="Invalid time window\."/);
-  assert.match(market, /title="Unknown market symbol\."/);
+  assert.match(market, /catalog\.results\.some\(\(asset\) => asset\.key === params\?\.symbol\)/);
+  assert.match(market, /RANGES\.includes\(params\?\.range\)/);
   assert.match(article, /if \(!\/\^\[1-9\]\\d\*\$\/.test\(id\)\) notFound\(\);/);
   assert.match(article, /error\.status === 400 \|\| error\.status === 404/);
 });

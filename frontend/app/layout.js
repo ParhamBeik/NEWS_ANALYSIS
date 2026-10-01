@@ -5,15 +5,12 @@ import "./globals.css";
 
 export const metadata = {
   title: "News Intelligence",
-  description: "Persian security and macroeconomic news analysis",
+  description: "Iran-focused economic and geopolitical news intelligence",
 };
 
 /**
- * `lang="en" dir="ltr"` on the document, with Persian content marked RTL where it appears.
- *
- * The chrome is English and the content is Persian, so a document-level RTL would mirror
- * every dashboard, table and chart to fix the direction of the headlines. Setting
- * direction at the content boundary is the smaller, correct change.
+ * Document direction follows the reader's chosen language. Headlines from another
+ * language use `dir="auto"` at their own text boundary.
  */
 
 export default async function RootLayout({ children }) {

@@ -95,6 +95,17 @@ export default async function OpsPage({ searchParams }) {
         />
       </div>
 
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <Metric label="AI spend this month" value={money(budget.spent_this_month_usd)}
+          hint={`ceiling ${money(budget.monthly_ceiling_usd, 2)}`} />
+        <Metric label="Priority visibility p95"
+          value={ops.priority_visibility.p95_minutes == null ? "—" : `${ops.priority_visibility.p95_minutes} min`}
+          hint={`${number(ops.priority_visibility.sample_size)} observed items · target 10 min`} />
+        <Metric label="Within 10 minutes"
+          value={ops.priority_visibility.within_10_minutes == null ? "—" : percent(ops.priority_visibility.within_10_minutes, 0)}
+          hint="source publication to first ingest" />
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="p-4">
           <SectionTitle hint="each stage is a subset of the one above">Funnel</SectionTitle>
@@ -137,6 +148,9 @@ export default async function OpsPage({ searchParams }) {
           <SectionTitle hint="from the provider's own reported usage">
             Cost per day
           </SectionTitle>
+          {ops.reader_ai_usage?.length ? <div className="mb-4 flex flex-wrap gap-3 border-b border-slate-800 pb-3 text-xs text-slate-300">
+            {ops.reader_ai_usage.map((row) => <span key={row.stage}>{row.stage}: {number(row.calls)} calls · {money(Number(row.cost))}</span>)}
+          </div> : null}
           {ops.cost_by_day.length === 0 ? (
             <p className="text-sm text-slate-500">No provider calls in this window.</p>
           ) : (
@@ -165,6 +179,9 @@ export default async function OpsPage({ searchParams }) {
           <SectionTitle hint="reachability is measured, not assumed">
             Source health
           </SectionTitle>
+          {ops.source_outages?.length ? <p className="mb-3 text-xs text-amber-300">
+            {ops.source_outages.length} enabled sources have no successful crawl in the last 10 minutes.
+          </p> : null}
           <TableScroll>
             <table className="w-full min-w-[280px] text-sm">
               <tbody>

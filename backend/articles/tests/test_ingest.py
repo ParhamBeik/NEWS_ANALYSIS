@@ -156,3 +156,18 @@ class TestUpsert:
         upsert(raw(extraction_tier=ExtractionTier.CSS, content="متن کامل برگشته."), source)
         article.refresh_from_db()
         assert article.url_status == UrlStatus.LIVE
+
+    def test_feed_correction_keeps_prior_evidence(self, source):
+        from articles.models import ArticleRevision, EventRevision, NewsEvent
+
+        first, _ = upsert(raw(content="", extraction_tier="feed", lead="Original summary text."), source)
+        event = first.news_events.get()
+        NewsEvent.objects.filter(pk=event.pk).update(brief_fa="خلاصهٔ قدیمی")
+        upsert(raw(content="", extraction_tier="feed", lead="Corrected summary text."), source)
+        first.refresh_from_db()
+        assert first.lead == "Corrected summary text."
+        assert ArticleRevision.objects.get(article=first).lead == "Original summary text."
+        assert first.news_events.get().status == NewsEvent.Status.CORRECTED
+        event.refresh_from_db()
+        assert event.brief_fa == ""
+        assert EventRevision.objects.get(event=event).brief_fa == "خلاصهٔ قدیمی"

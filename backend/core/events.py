@@ -1,0 +1,165 @@
+"""Reader-facing event projection built from the retained source articles."""
+
+from __future__ import annotations
+
+import math
+from datetime import timedelta
+
+from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+
+from articles.models import (
+    Article,
+    EventAlert,
+    EventAssessment,
+    EventRevision,
+    NewsEvent,
+    UrlStatus,
+)
+
+PRESENTATION_FIELDS = (
+    "title_fa", "title_en", "brief_fa", "brief_en", "channels_fa", "channels_en",
+    "uncertainty_fa", "uncertainty_en",
+)
+
+
+def invalidate_presentation(event: NewsEvent, reason: str) -> None:
+    """Retain the old reader copy before fresh source evidence is summarized."""
+    event.refresh_from_db()
+    if not any(getattr(event, field) for field in PRESENTATION_FIELDS):
+        return
+    EventRevision.objects.create(
+        event=event, reason=reason,
+        **{field: getattr(event, field) for field in PRESENTATION_FIELDS},
+    )
+    NewsEvent.objects.filter(pk=event.pk).update(**dict.fromkeys(PRESENTATION_FIELDS, ""))
+
+
+@transaction.atomic
+def attach_article(article: Article) -> NewsEvent:
+    """Attach copies to the canonical story without discarding article provenance."""
+    canonical_id = article.duplicate_of_id or article.id
+    event = (
+        NewsEvent.objects.filter(
+            Q(articles__id=canonical_id) | Q(articles__duplicate_of_id=canonical_id)
+        )
+        .distinct()
+        .first()
+    )
+    if event is None:
+        canonical = Article.objects.get(pk=canonical_id)
+        event, _ = NewsEvent.objects.get_or_create(
+            primary_article=canonical,
+            defaults={
+                "event_time": canonical.published_at or canonical.fetched_at,
+                "first_seen_at": canonical.created_at or timezone.now(),
+            },
+        )
+        event.articles.add(canonical)
+    elif event.primary_article_id != canonical_id:
+        event.primary_article_id = canonical_id
+        event.save(update_fields=["primary_article", "updated_at"])
+    new_evidence = not event.articles.filter(pk=article.pk).exists()
+    if new_evidence and event.brief_fa:
+        invalidate_presentation(event, "additional_source")
+        from inference.tasks import summarize_event
+
+        transaction.on_commit(lambda event_id=event.pk: summarize_event.delay(event_id))
+    event.articles.add(article)
+    refresh_event(event)
+    return event
+
+
+def refresh_event(event: NewsEvent) -> None:
+    """Keep the timeline and correction state in sync with source observations."""
+    articles = list(event.articles.all())
+    if not articles:
+        return
+    event.event_time = min(a.published_at or a.fetched_at for a in articles)
+    event.first_seen_at = min(a.created_at or a.fetched_at for a in articles)
+    if all(a.url_status == UrlStatus.GONE for a in articles):
+        event.status = NewsEvent.Status.WITHDRAWN
+    elif any(a.revisions.exists() for a in articles):
+        event.status = NewsEvent.Status.CORRECTED
+    elif event.assessments.exists():
+        event.status = NewsEvent.Status.ASSESSED
+    event.save(update_fields=["event_time", "first_seen_at", "status", "updated_at"])
+
+
+@transaction.atomic
+def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
+    """Merge high-confidence reports while keeping each original article."""
+    if target_id == incoming_id:
+        return NewsEvent.objects.get(pk=target_id)
+    rows = {
+        row.id: row
+        for row in NewsEvent.objects.select_for_update()
+        .filter(pk__in=[target_id, incoming_id])
+        .order_by("id")
+    }
+    target, incoming = rows.get(target_id), rows.get(incoming_id)
+    if target is None or incoming is None:
+        return target or incoming
+    had_presentation = bool(target.brief_fa)
+    if had_presentation:
+        invalidate_presentation(target, "event_merge")
+    if any(getattr(incoming, field) for field in PRESENTATION_FIELDS):
+        EventRevision.objects.create(
+            event=target, reason="merged_event",
+            **{field: getattr(incoming, field) for field in PRESENTATION_FIELDS},
+        )
+    for alert in EventAlert.objects.filter(event=incoming):
+        retained, created = EventAlert.objects.get_or_create(
+            event=target, subscription_id=alert.subscription_id,
+            defaults={"sent_at": alert.sent_at, "last_error": alert.last_error},
+        )
+        if not created and retained.sent_at is None and alert.sent_at is not None:
+            retained.sent_at = alert.sent_at
+            retained.save(update_fields=["sent_at"])
+    EventAssessment.objects.filter(event=incoming).update(event=target)
+    target.articles.add(*incoming.articles.all())
+    incoming.delete()
+    refresh_event(target)
+    if had_presentation:
+        from inference.tasks import summarize_event
+
+        transaction.on_commit(lambda event_id=target.pk: summarize_event.delay(event_id))
+    return target
+
+
+def ranked_events(queryset, now=None):
+    """Small bounded page ranking; score is separate from model confidence."""
+    now = now or timezone.now()
+    events = list(queryset)
+    return sorted(
+        events,
+        key=lambda event: (
+            (0.6 * (event.iran_score or 0) + 0.4 * (event.global_score or 0))
+            * 0.5 ** (max(0, (now - event.event_time).total_seconds()) / (12 * 3600)),
+            event.event_time,
+        ),
+        reverse=True,
+    )
+
+
+def priority_visibility(window_days: int = 14) -> dict:
+    """Observed source-publication to event-ingest latency for priority articles."""
+    now = timezone.now()
+    rows = Article.objects.filter(
+        source__tier=1,
+        published_at__gte=now - timedelta(days=window_days),
+        date_uncertain=False,
+    ).values_list("published_at", "created_at")
+    delays = sorted(
+        max(0, (seen - published).total_seconds() / 60)
+        for published, seen in rows.iterator()
+        if seen >= published and seen <= now
+    )
+    if not delays:
+        return {"sample_size": 0, "p95_minutes": None, "within_10_minutes": None}
+    return {
+        "sample_size": len(delays),
+        "p95_minutes": round(delays[math.ceil(len(delays) * 0.95) - 1], 2),
+        "within_10_minutes": round(sum(delay <= 10 for delay in delays) / len(delays), 3),
+    }

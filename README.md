@@ -1,113 +1,91 @@
-# News Intelligence Platform
+# News Intelligence
 
-Monitors Iranian news sources: crawl → deduplicate → classify → score impact → summarize →
-publish a Persian analyst workbook, with a human review loop and an A/B lab feeding back
-into prompt selection.
+News Intelligence crawls Iranian news sources, deduplicates articles, classifies and scores
+them with LLMs, supports human review and A/B prompt evaluation, and publishes Persian analyst
+workbooks.
 
-## Stack
+## Directory map
 
-Django + DRF + Postgres (pgvector) + Celery/Redis behind a Next.js App Router frontend.
-TLS and static media are terminated by a shared Caddy edge on the VPS. Images are built by
-CI, pushed to GHCR, and deployed with `docker compose`; nothing is built on the host.
-
-```
-backend/            Django project (config.settings.{base,dev,prod,test})
-  core/             vocabulary, notify scoring, Persian text, error taxonomy
-  sources/          the source registry, crawl strategies, extraction, prefilter
-  articles/         Article/Image/Embedding storage, ingest, deduplication
-  inference/        prompt variants, providers, budget guards, the three LLM nodes
-  review/           human labelling queue and the blinded A/B pairing
-  market/           TGJU price snapshots and the prediction back-test
-  exports/          the Persian analyst workbook and the category text feeds
-  api/              the read API and the three purpose-built dashboard documents
-
-frontend/           Next.js 15, App Router, server components only
-  app/              /, /article/[id], /review, /ab, /ops, /kpi, /market, /exports
-  lib/api.js        the server-side Django client; the token never reaches the browser
-  middleware.js     fail-closed login gate
-
-deploy/             docker-compose for dev and prod, plus the Caddy site block
-.github/workflows/  ci.yml (tests, lint, deploy checks) and deploy.yml (build → VPS)
+```text
+backend/                 Django + DRF + Celery application
+  config/                settings, URLs, ASGI/WSGI, Celery
+  core/                  shared scoring, text, vocabulary, errors, CLI commands
+  sources/               source registry, crawlers, extraction, prefilter
+  articles/              article/image/embedding storage, ingest, deduplication
+  inference/             prompts, providers, budgets, circuits, inference tasks
+  review/                human labels and blinded A/B comparisons
+  market/                TGJU prices and prediction backtests
+  exports/               Persian workbooks and category feeds
+  api/                   authenticated read API
+frontend/                Next.js App Router dashboard
+deploy/                  Docker Compose, Caddy, backup, and release checks
+.github/workflows/       CI and deployment workflows
+backend/inference/prompt_texts/
+                          runtime prompt policy files, versioned by content hash
 ```
 
-`ARCHITECTURE.md` has the layer diagram, the four rules a contributor must not break, and
-the list of things that look dead to static analysis but are reachable by string.
+Generated folders such as `backend/.venv`, `frontend/node_modules`, `frontend/.next`, caches,
+and `graphify-out` are local build or analysis output and are not source files.
+
+## Runtime flow
+
+```text
+sources → articles → inference → review/market → exports/api → frontend
+             PostgreSQL/pgvector stores data; Redis/Celery runs background work.
+```
+
+`ARCHITECTURE.md` explains dependency layers and invariants. `AGENTS.md` contains contributor
+rules and the minimum checks. The three Markdown files under `backend/inference/prompt_texts/`
+are loaded by the application and must be treated as runtime policy, not documentation.
 
 ## Setup
 
-Needs [uv](https://docs.astral.sh/uv/), Node 24 and Docker.
+Requirements: `uv`, Python 3.13, Node 24, and Docker.
 
 ```bash
-make setup    # backend/.venv on Python 3.13, npm ci, backend/.env from the example
-              # then set GAPGPT_API_KEY in backend/.env
-
-make services                                   # postgres + redis
+make setup
+make services
 backend/.venv/bin/python backend/manage.py migrate
-cd backend && ../backend/.venv/bin/python manage.py seed_sources && \
-              ../backend/.venv/bin/python manage.py seed_variants && \
-              ../backend/.venv/bin/python manage.py createsuperuser
-
-make dev      # API on :8000 and dashboard on :3000, together
+make dev
 ```
 
+Set the required provider and database values in `backend/.env`; secrets are environment-only.
 `make help` lists everything. `make ci` runs local lint, Django/deploy checks, migration
 drift, both test suites and the frontend build. GitHub CI also runs dependency audits,
 both Docker image builds. `main` deploys after successful CI.
 
-Credentials come from the environment only. There is no fallback default for any secret —
-the pipeline this replaced shipped a live API key as an `os.getenv` default and it reached
-a public git history. `config/settings/base.py` raises at import time on a missing one.
-`backend/.env.example` documents every key the settings read.
-
-## Operator commands
-
-Everything routine is a `make` target. These are the ones that only make sense by hand,
-run as `backend/.venv/bin/python manage.py <command>` from `backend/`:
+## Useful commands
 
 ```bash
-manage.py setup_schedule            # install the beat schedule (idempotent)
-manage.py check_provider            # which key is in effect, and does it have money
-manage.py seed_sources              # load sources/fixtures/sources.yaml (upsert)
-manage.py run_pipeline crawl        # queues to Celery; --now runs it inline
-manage.py run_pipeline inference --limit 20
-manage.py run_pipeline embed --limit 200  # when activating a semantic variant
-manage.py run_pipeline workbook     # --rebuild-all ignores the rolling window
-manage.py benchmark_models          # bake off candidate models on real articles
+make test       # backend and frontend tests
+make lint       # Ruff
+make check      # Django and deployment checks
+make migrations # migration drift check
+make build      # production frontend build
+make ci         # all local CI gates
 ```
 
-Celery does the real work on a schedule; `run_pipeline` exists for the abnormal paths —
-proving a fresh deployment, backfilling after an outage, and answering "is it the crawler
-or the model?" without waiting for the next tick. `manage.py run_pipeline --help` lists
-every stage.
+From `backend/`, operator commands include `manage.py run_pipeline`, `setup_schedule`,
+`seed_sources`, `seed_variants`, `check_provider`, and `benchmark_models`.
 
-The nightly workbook export only rebuilds days that could still have changed — a day can
-only change if one of its articles was fetched inside the rolling window, because that is
-the only set the inference cycle will re-answer. On a fresh deployment with an existing
-corpus, `run_pipeline workbook --rebuild-all` is the way to produce the back catalogue once.
+## Dashboard routes
 
-## Pages
+`/` feed · `/article/[id]` detail · `/review` human review · `/ab` prompt lab · `/ops` health
+and cost · `/kpi` quality · `/market` prices and backtests · `/exports` workbooks.
 
-UI chrome is English throughout; article title/lead/body are Persian and render RTL inline.
+## Deployment and backups
 
-- **`/` Feed** — articles in the rolling window, filtered by category, source and notify
-  status. The window is a query parameter, read fresh on every request.
-- **`/article/[id]`** — one article with its latest classification, evaluation and summary,
-  its duplicates, and the retrieved neighbours the model actually saw.
-- **`/review`** — one article and a form pre-filled with the model's own answer, so a
-  reviewer corrects rather than fills. Every approved row becomes truth for `/kpi`,
-  few-shot examples for the next run, and part of the golden set.
-- **`/ab`** — blinded pairwise judging between prompt variants, with the position-bias
-  check reported alongside the standings. On a fresh deploy only the control variant is
-  active; the A/B tab shows variant status and setup steps. Activate a second arm in Django
-  admin when you are ready for the doubled inference cost — see `seed_variants`.
-- **`/ops`** — the funnel, cost and tokens per day, node outcome rates, dead letters,
-  prefilter effect, image status and per-source health.
-- **`/kpi`** — model-vs-human agreement, the notify confusion matrix, and the market
-  back-test.
-- **`/market`** — gold and currency series with the scored prediction outcomes.
-- **`/exports`** — the nightly workbooks and category feeds, downloadable behind login.
+CI builds backend and frontend images, publishes them to GHCR, and the deploy workflow updates
+the VPS Compose stack after successful CI. `deploy/check-stack.sh` is the read-only release gate.
 
-## Design notes
+- `deploy/backup.sh`: creates verified PostgreSQL custom-format dumps and retains recent files.
+- `deploy/copy-backup.sh`: copies a verified dump to an always-on SSH destination.
+- `deploy/pull-backup.sh`: pulls and verifies a dump on the FileVault Mac before promotion.
+- `deploy/docker-compose.*.yml`: local and production service definitions.
+
+The backup scripts write temporary files and promote them only after checksum or archive
+verification. Run `backend/.venv/bin/python -m unittest discover -s deploy/tests -v` after
+changing them.
 
 **Inference is append-only.** Classifications, evaluations and summaries are separate
 tables carrying `prompt_version`, `provider`, `model` and the variant that produced them.
