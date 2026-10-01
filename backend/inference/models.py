@@ -113,7 +113,9 @@ def new_run_id(now: datetime | None = None) -> str:
     with an integrity error.
     """
     stamp = (now or timezone.now()).strftime("%Y%m%d_%H%M%S")
-    return f"{stamp}_{secrets.token_hex(3)}"
+    # 16 hex chars: 6 collided about once per thousand same-second batches of 200 in CI.
+    # 15 + 1 + 16 = 32, the column width.
+    return f"{stamp}_{secrets.token_hex(8)}"
 
 
 class Run(models.Model):
