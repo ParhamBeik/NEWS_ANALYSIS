@@ -36,7 +36,31 @@ export type ReaderEvent = {
   image_url: string | null;
   image_large_url: string | null;
   sources: Source[];
+  watch_items?: { slug: string; kind: string; name_fa: string; name_en: string }[];
+  /** Set by boostWatched: the event touches the reader's watchlist. */
+  watched?: boolean;
 };
+
+/** How many places an event on the reader's watchlist moves up the ranked radar. */
+export const WATCH_BOOST = 5;
+
+/**
+ * Mark events that touch the reader's watchlist and lift each one WATCH_BOOST places.
+ * A bounded lift, not a sort to the top: a minor watched story must not bury a tier-5 one.
+ * With `boost: false` (latest-first order) events are only marked.
+ * Ported from frontend/lib/reader.js boostWatched; keep the two in step.
+ */
+export function boostWatched<T extends Pick<ReaderEvent, "watch_items">>(
+  events: T[], slugs: string[] | null | undefined, { boost = true } = {},
+): (T & { watched: boolean })[] {
+  const watched = new Set(slugs || []);
+  const marked = events.map((event, index) => ({
+    event: { ...event, watched: (event.watch_items || []).some((item) => watched.has(item.slug)) },
+    rank: index,
+  }));
+  if (boost) for (const row of marked) if (row.event.watched) row.rank -= WATCH_BOOST + 0.5;
+  return marked.sort((a, b) => a.rank - b.rank).map((row) => row.event);
+}
 
 export const TIERS = [
   { level: 1, en: "Very low", fa: "خیلی کم" },

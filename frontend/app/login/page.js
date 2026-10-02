@@ -28,6 +28,13 @@ export default async function LoginPage({ searchParams }) {
           : "Sign in with your mobile number to follow the assets and topics you care about and get alerts."}
       </p>
       <PhoneLogin next={next} lang={lang} />
+      <p className="mt-4 text-center text-xs leading-6 text-muted">
+        {fa ? "با ورود، " : "By signing in you accept the "}
+        <Link href="/terms" className="underline underline-offset-4 hover:text-ink">{fa ? "شرایط استفاده" : "terms of use"}</Link>
+        {fa ? " و " : " and the "}
+        <Link href="/privacy" className="underline underline-offset-4 hover:text-ink">{fa ? "سیاست حریم خصوصی" : "privacy policy"}</Link>
+        {fa ? " را می‌پذیرید." : "."}
+      </p>
       <p className="mt-3 text-center text-sm">
         <Link href={next !== "/" ? `/login?next=${encodeURIComponent(next)}` : "/login"} className="text-muted underline underline-offset-4 hover:text-ink">
           {fa ? "تغییر شماره" : "Use a different number"}

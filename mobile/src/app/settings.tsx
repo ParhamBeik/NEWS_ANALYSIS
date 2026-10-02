@@ -1,17 +1,41 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { ScrollView, TextInput, View } from "react-native";
+import { Alert, Linking, ScrollView, TextInput, View } from "react-native";
 import { Button, Row, Txt } from "../components/ui";
-import { logout } from "../lib/api";
+import { useAccount } from "../lib/account";
+import { localDigits } from "../lib/jalali";
 import { DEFAULT_API_BASE, useSettings } from "../lib/settings";
 import { FONT, useTheme } from "../lib/theme";
 import { enabledProviders } from "../push";
 
 export default function Settings() {
-  const { lang, setLang, apiBase, setApiBase, token, setToken, tr } = useSettings();
+  const { lang, setLang, apiBase, setApiBase, token, tr } = useSettings();
+  const { account, signOut, destroy } = useAccount();
   const theme = useTheme();
   const router = useRouter();
   const [draft, setDraft] = useState(apiBase);
+  const [deleteError, setDeleteError] = useState("");
+
+  // Irreversible: a native confirm, and the account is only dropped locally once the server
+  // has deleted it.
+  const confirmDelete = () => Alert.alert(
+    tr("Delete your account?", "حساب شما حذف شود؟"),
+    tr("Your phone number, email, watchlist, devices and alerts are deleted. This cannot be undone.",
+      "شمارهٔ موبایل، ایمیل، فهرست پیگیری، دستگاه‌ها و هشدارهای شما پاک می‌شود. این کار برگشت‌پذیر نیست."),
+    [
+      { text: tr("Cancel", "انصراف"), style: "cancel" },
+      { text: tr("Delete", "حذف"), style: "destructive", onPress: async () => {
+        setDeleteError("");
+        try {
+          await destroy();
+          router.replace("/");
+        } catch {
+          setDeleteError(tr("The account could not be deleted. Check your connection and try again.",
+            "حساب حذف نشد. اتصال را بررسی کنید و دوباره امتحان کنید."));
+        }
+      } },
+    ],
+  );
   const providers = enabledProviders();
   const valid = /^https?:\/\/[^\s/]+/.test(draft.trim());
 
@@ -44,13 +68,31 @@ export default function Settings() {
     </View>
 
     <View style={{ gap: 8 }}>
+      <Txt bold>{tr("Account", "حساب کاربری")}</Txt>
+      {token ? <>
+        {account?.phone ? <Txt muted size={13}>{localDigits(account.phone, lang)}</Txt> : null}
+        <Row>
+          <Button title={tr("Watchlist & alerts", "فهرست پیگیری و هشدارها")} kind="ghost" onPress={() => router.push("/watchlist")} />
+          <Button title={tr("Inbox", "صندوق هشدارها")} kind="ghost" onPress={() => router.push("/inbox")} />
+          <Button title={tr("Sign out", "خروج")} kind="ghost" onPress={signOut} />
+        </Row>
+        <Button title={tr("Delete my account", "حذف حساب من")} kind="ghost" onPress={confirmDelete} />
+        {deleteError ? <Txt accessibilityRole="alert" style={{ color: theme.error }}>{deleteError}</Txt> : null}
+      </> : <Button title={tr("Sign in with your mobile number", "ورود با شمارهٔ موبایل")} onPress={() => router.push("/login")} />}
+    </View>
+
+    <View style={{ gap: 8 }}>
+      <Txt bold>{tr("Privacy and terms", "حریم خصوصی و شرایط")}</Txt>
+      <Row>
+        <Button title={tr("Privacy policy", "حریم خصوصی")} kind="ghost" onPress={() => Linking.openURL(`${apiBase}/privacy`)} />
+        <Button title={tr("Terms of use", "شرایط استفاده")} kind="ghost" onPress={() => Linking.openURL(`${apiBase}/terms`)} />
+      </Row>
+    </View>
+
+    <View style={{ gap: 8 }}>
       <Txt bold>{tr("Staff", "کارکنان")}</Txt>
       <Row>
         <Button title={tr("Swipe review", "بازبینی سریع")} kind="ghost" onPress={() => router.push("/review")} />
-        {token ? <Button title={tr("Sign out", "خروج")} kind="ghost" onPress={async () => {
-          await logout(apiBase, token).catch(() => {}); // revoke server-side; drop locally regardless
-          await setToken(null);
-        }} /> : null}
       </Row>
     </View>
   </ScrollView>;
