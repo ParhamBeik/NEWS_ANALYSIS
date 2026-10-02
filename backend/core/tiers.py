@@ -99,3 +99,21 @@ def tier(score: float | None, axis: str, cuts: dict | None = None) -> int | None
         return None
     cuts = cuts or cutoffs()
     return 1 + sum(score >= cut for cut in cuts[axis])
+
+
+BRIEF_TIER = 4
+WATCHED_BRIEF_TIER = 3
+
+
+def brief_eligible(
+    category: str, iran: float | None, global_: float | None, *, watched: bool,
+    cuts: dict | None = None,
+) -> bool:
+    """Whether an event earns a paid brief: impact tier >= 4, or tier >= 3 when at least
+    one reader watches one of its tagged items. `other` and unassessed events never do."""
+    if category in {"", "other"}:
+        return False
+    level = tier(impact(iran, global_), "impact", cuts)
+    if level is None:
+        return False
+    return level >= BRIEF_TIER or (watched and level >= WATCHED_BRIEF_TIER)

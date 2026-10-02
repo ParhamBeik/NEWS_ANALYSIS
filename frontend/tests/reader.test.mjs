@@ -25,6 +25,11 @@ test("dates are Jalali in both languages with Persian digits in Persian", () => 
 test("sources group by outlet and the market window covers the event", () => {
   const groups = groupSources([{ name: "mehr" }, { name: "isna" }, { name: "mehr" }]);
   assert.deepEqual(groups.map((group) => [group.name, group.items.length]), [["mehr", 2], ["isna", 1]]);
+  const byGroup = groupSources([
+    { name: "IRNA", group: "state" }, { name: "IRIB", group: "state" },
+    { name: "BBC", group: "bbc", stance: "contradicts" },
+  ]);
+  assert.deepEqual(byGroup.map((group) => [group.name, group.disputes]), [["IRNA · IRIB", false], ["BBC", true]]);
   const now = Date.parse("2026-10-01T00:00:00Z");
   assert.equal(rangeFor("2026-09-30T00:00:00Z", now), "1W");
   assert.equal(rangeFor("2026-09-10T00:00:00Z", now), "1M");

@@ -28,11 +28,13 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
 
 from articles.models import (
     Article,
+    ArticleStance,
     EventAssessment,
     EventReview,
     NewsEvent,
@@ -99,6 +101,7 @@ def assess_event(self, event_id: int) -> dict:
         for row in NewsEvent.objects.filter(
             event_time__range=(event_time - timedelta(hours=36), event_time + timedelta(hours=36))
         )
+        .visible()
         .exclude(pk=event_id)
         .exclude(pk__in=kept_apart(event_id))
         .select_related("primary_article")
@@ -173,9 +176,19 @@ def assess_event(self, event_id: int) -> dict:
     if choice in candidates and 0.9 <= match_probability <= 1:
         from core.events import merge_events
 
+        joining = list(event.articles.values_list("id", flat=True))
         event = merge_events(int(choice.removeprefix("event_")), event_id)
         merged = event.id != event_id
         event_id = event.id
+        if merged:
+            from .jev import stance
+
+            label, stance_confidence = stance(answers)
+            for article_id in joining:
+                ArticleStance.objects.update_or_create(
+                    event=event, article_id=article_id,
+                    defaults={"stance": label, "confidence": stance_confidence},
+                )
     EventAssessment.objects.create(
         event=event,
         model=str(response.get("model") or "jev"),
@@ -202,12 +215,18 @@ def assess_event(self, event_id: int) -> dict:
             event=event,
             defaults={"reason": "high_impact_uncertain" if confidence < 0.7 else "audit_sample"},
         )
+    from core.tiers import brief_eligible
+    from core.watch import watched_events
+
     if (
-        category != "other"
-        and max(iran_score, global_score) >= settings.NEWS_BRIEF_MIN_SCORE
+        brief_eligible(
+            category, iran_score, global_score, watched=bool(watched_events([event_id]))
+        )
         and len(evidence.strip()) >= 40
     ):
         summarize_event.delay(event_id)
+    elif category != "other":
+        transaction.on_commit(lambda event_id=event_id: translate_event_title.delay(event_id))
     if settings.NEWS_ALERTS_ENABLED:
         from accounts.tasks import fan_out_event
         from articles.tasks import alert_event
@@ -263,6 +282,51 @@ def summarize_event(self, event_id: int) -> dict:
         return {"status": "unassessed", "reason": type(exc).__name__}
     NewsEvent.objects.filter(pk=event_id).update(**result)
     return {"status": "summarized", "event": event_id}
+
+
+@shared_task(
+    name="inference.translate_event_title",
+    bind=True,
+    autoretry_for=(Transient,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    max_retries=2,
+)
+def translate_event_title(self, event_id: int) -> dict:
+    """Headline in the other UI language for an event without a brief (one cheap call)."""
+    from articles.models import TitleTranslation
+
+    from .jev import translate_title
+
+    event = (
+        NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
+    )
+    if event is None or event.category in {"", "other"} or event.brief_fa:
+        return {"status": "skipped"}
+    article = event.primary_article
+    language = "fa" if article.source.language == "en" else "en"
+    cached = TitleTranslation.objects.filter(
+        article=article, language=language, source_title=article.original_title
+    ).first()
+    if cached is None:
+        try:
+            text, model = translate_title(article.original_title, language, f"event-{event_id}")
+        except BudgetExceeded:
+            record_ai_failure("title", "budget")
+            return {"status": "skipped", "reason": "budget_or_credits"}
+        except (Fatal, Permanent, Transient) as exc:
+            record_ai_failure("title", failure_kind(exc))
+            if isinstance(exc, Transient):
+                raise
+            return {"status": "skipped", "reason": type(exc).__name__}
+        cached, _ = TitleTranslation.objects.update_or_create(
+            article=article,
+            defaults={"language": language, "source_title": article.original_title,
+                      "title": text, "model": model},
+        )
+    # A brief written meanwhile owns the titles; never overwrite it.
+    NewsEvent.objects.filter(pk=event_id, brief_fa="").update(**{f"title_{language}": cached.title})
+    return {"status": "translated", "event": event_id, "language": language}
 
 
 @shared_task(name="inference.build_storylines")

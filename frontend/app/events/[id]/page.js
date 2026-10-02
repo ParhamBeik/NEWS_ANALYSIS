@@ -2,8 +2,9 @@ import Link from "next/link";
 import EventImage from "@/components/EventImage";
 import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { language, label } from "@/lib/language";
-import { loadEvent } from "./load";
-import { EVIDENCE, digits, groupSources, headline, sep } from "@/lib/reader";
+import { loadEvent, loadTakedown } from "./load";
+import TakedownControl from "./TakedownControl";
+import { EVIDENCE, STANCE, digits, groupSources, headline, sep } from "@/lib/reader";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +17,15 @@ function Block({ title, icon, children }) {
 
 export default async function EventDetail({ params }) {
   const { id } = await params;
-  const event = await loadEvent(id);
+  const takedown = await loadTakedown(id);
+  const event = await loadEvent(id, { allowMissing: Boolean(takedown) });
   const lang = await language();
+  if (!event) {
+    return <article className="mx-auto max-w-3xl space-y-4">
+      <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">Hidden from readers.</p>
+      <TakedownControl state={takedown} />
+    </article>;
+  }
   const tr = (en, fa) => label(lang, en, fa);
   const pick = (field) => event[`${field}_${lang}`];
   const title = headline(event, lang);
@@ -72,22 +80,29 @@ export default async function EventDetail({ params }) {
 
     <section aria-labelledby="sources-title" className="space-y-3">
       <h2 id="sources-title" className="text-xl font-bold">{tr("Sources", "منابع")}
-        <span className="ms-2 text-sm font-normal text-muted">{tr(`${groups.length} outlets · ${event.sources.length} reports`, `${digits(groups.length, lang)} رسانه، ${digits(event.sources.length, lang)} گزارش`)}</span>
+        <span className="ms-2 text-sm font-normal text-muted">{tr(`${groups.length} independent groups · ${event.sources.length} reports`, `${digits(groups.length, lang)} گروه مستقل، ${digits(event.sources.length, lang)} گزارش`)}</span>
       </h2>
-      {/* TODO(reader): group by independence (official / state / private / international) once
-          the API exposes it; Source has no such field yet, so this groups by outlet. */}
-      <div className="grid gap-3">{groups.map((group) => <div key={group.name} className="rounded-2xl border border-line bg-card p-4">
-        <h3 className="mb-2 flex items-center justify-between gap-2 font-semibold">{group.name}
-          <span className="rounded-full bg-card-2 px-2 py-0.5 text-xs font-normal text-muted">{digits(group.items.length, lang)} {tr("reports", "گزارش")}</span>
+      <div className="grid gap-3">{groups.map((group) => <div key={group.key} className="rounded-2xl border border-line bg-card p-4">
+        <h3 className="mb-2 flex items-center justify-between gap-2 font-semibold" dir="auto">{group.name}
+          <span className="flex shrink-0 items-center gap-2">
+            {group.disputes ? <span className="tier-5 rounded-full px-2 py-0.5 text-xs font-semibold">{tr("Disputes this account", "روایت متفاوت")}</span> : null}
+            <span className="rounded-full bg-card-2 px-2 py-0.5 text-xs font-normal text-muted">{digits(group.items.length, lang)} {tr("reports", "گزارش")}</span>
+          </span>
         </h3>
         <ul className="divide-y divide-line">{group.items.map((source) => <li key={source.url} className="py-2">
           <a href={source.url} target="_blank" rel="noopener noreferrer" className="font-medium text-accent hover:underline" dir="auto">{source.headline || source.url}</a>
-          <p className="mt-1 text-xs text-muted"><When iso={source.published_at || source.first_seen_at} lang={lang} time showRelative={false} />
-            {source.date_uncertain ? tr(" · date uncertain", "، تاریخ نامطمئن") : ""}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted">
+            {group.items.length > 1 || source.name !== group.name ? <span>{source.original_outlet || source.name}</span> : null}
+            <When iso={source.published_at || source.first_seen_at} lang={lang} time showRelative={false} />
+            {source.date_uncertain ? tr(" · date uncertain", "، تاریخ نامطمئن") : ""}
+            {source.stance && source.stance !== "reports" && STANCE[source.stance] ? <span className={`rounded-full px-2 py-0.5 ${source.stance === "contradicts" ? "tier-5 font-semibold" : "border border-line"}`}>{STANCE[source.stance][lang]}</span> : null}
+          </p>
           {source.lead ? <p className="mt-1 line-clamp-3 text-sm leading-7 text-muted" dir="auto">{source.lead}</p> : null}
         </li>)}</ul>
       </div>)}</div>
     </section>
+
+    {takedown ? <TakedownControl state={takedown} /> : null}
 
     <section aria-labelledby="story-title" className="space-y-3">
       <h2 id="story-title" className="text-xl font-bold">{tr("Storyline", "روند رویداد")}</h2>

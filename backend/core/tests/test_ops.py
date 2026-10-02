@@ -41,7 +41,7 @@ def test_ai_cost_splits_month_and_today_by_stage_and_provider(monkeypatch):
     report = ops.ai_cost(now=NOW)
 
     stages = {row["stage"]: row for row in report["by_stage"]}
-    assert set(stages) == {"jev", "brief", "storyline"}
+    assert set(stages) == {"jev", "brief", "title", "storyline"}
     assert stages["jev"]["today_usd"] == pytest.approx(0.10)
     assert stages["brief"]["cost_usd"] == pytest.approx(0.40)
     assert stages["brief"]["today_usd"] == 0
@@ -104,15 +104,14 @@ def _event(article, seen, iran, category="energy", brief=""):
     )
 
 
-def test_brief_slo_passes_fails_and_waits(make_article, settings):
-    settings.NEWS_BRIEF_MIN_SCORE = 75
+def test_brief_slo_passes_fails_and_waits(make_article):
     on_time = _event(make_article(), NOW - timedelta(hours=1), 90, brief="خلاصه")
     _usage("brief", "GapGPT", "0.01", NOW - timedelta(minutes=55), event=on_time)
     late = _event(make_article(), NOW - timedelta(hours=1), 90, brief="خلاصه")
     _usage("brief", "GapGPT", "0.01", NOW - timedelta(minutes=30), event=late)
     _event(make_article(), NOW - timedelta(hours=1), 90)  # never briefed: missed
     _event(make_article(), NOW - timedelta(minutes=3), 90)  # still inside 10 min
-    _event(make_article(), NOW - timedelta(hours=1), 65)  # below the brief threshold
+    _event(make_article(), NOW - timedelta(hours=1), 45)  # tier 3, nobody watches it
     _event(make_article(), NOW - timedelta(hours=1), 95, category="other")
 
     result = ops.brief_slo(NOW, NOW - timedelta(hours=24))

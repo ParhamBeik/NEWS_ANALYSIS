@@ -162,3 +162,80 @@ def test_low_impact_event_gets_no_paid_brief(make_article):
             patch("inference.tasks.summarize_event.delay") as brief:
         assert assess_event.run(event.id)["status"] == "assessed"
     brief.assert_not_called()
+
+
+@pytest.mark.parametrize(("score", "watched", "briefed"), [
+    (4, False, True),   # impact 100: tier 5
+    (2, False, False),  # impact 50: tier 3, nobody watches it
+    (2, True, True),    # tier 3 on a reader's watchlist
+    (1, True, False),   # tier 2 is never briefed
+])
+def test_briefs_follow_impact_tier_and_watchlists(make_article, user, score, watched, briefed):
+    from accounts.models import Watch
+    from articles.models import EventWatchItem, WatchItem
+
+    event = attach_article(make_article(original_title="Oil exports halted at a major terminal"))
+    item = WatchItem.objects.create(slug="oil", kind="asset", name_fa="نفت", name_en="Oil")
+    EventWatchItem.objects.create(event=event, item=item)
+    if watched:
+        Watch.objects.create(user=user, item=item)
+    response = {"model": "jev", "answers": {
+        "category": {"choice": "energy_commodities", "confidence": 0.9},
+        "iran": {"score": score, "confidence": 0.9},
+        "global": {"score": score, "confidence": 0.9},
+        **{f"asset_{key}": {"score": 0} for key in
+           ("fx", "gold", "tehran_index", "oil", "bitcoin")},
+    }}
+    with override_settings(TYPESAFE_API_KEY="test-key"), \
+            patch("inference.jev.decide", return_value=response), \
+            patch("inference.tasks.summarize_event.delay") as brief:
+        assess_event.run(event.id)
+    assert brief.called is briefed
+
+
+def test_stance_is_asked_with_candidates_and_optional_in_the_fallback():
+    questions = jev._questions({"event_1": "Same occurrence: x"})
+    assert set(questions["stance"]["criteria"]) == {
+        "reports", "supports", "contradicts", "updates"}
+    assert "stance" not in jev._questions(None)
+    raw = {name: ({"choice": next(iter(q["criteria"])), "confidence": 0.8}
+                  if q["type"] == "choice" else {"score": 1, "confidence": 0.8})
+           for name, q in questions.items() if name != "stance"}
+    answers = jev._fallback_answers(raw, questions)
+    assert "stance" not in answers
+    assert jev.stance(answers) == ("reports", None)
+    raw["stance"] = {"choice": "contradicts", "confidence": 0.7}
+    assert jev.stance(jev._fallback_answers(raw, questions)) == ("contradicts", 0.7)
+
+
+def test_a_contradicting_report_from_another_group_disputes_the_merged_event(make_article):
+    from articles.models import ArticleStance
+    from sources.models import Source, Strategy
+
+    other = Source.objects.create(name="bbc-persian", strategy=Strategy.RSS_GENERIC,
+                                  url="https://feeds.bbci.co.uk/persian/rss.xml")
+    first = attach_article(make_article(original_title="Officials report a refinery fire"))
+    second = attach_article(make_article(
+        source=other, original_title="Refinery denies any fire took place",
+        url="https://www.bbc.com/persian/denial",
+    ))
+    joining = second.primary_article_id
+    response = {"model": "jev", "answers": {
+        "same_event": {"choice": f"event_{first.id}",
+                       "probabilities": {f"event_{first.id}": 0.95}},
+        "stance": {"choice": "contradicts", "confidence": 0.81},
+        "category": {"choice": "energy_commodities", "confidence": 0.9},
+        "iran": {"score": 2, "confidence": 0.9},
+        "global": {"score": 1, "confidence": 0.9},
+        **{f"asset_{key}": {"score": 1} for key in
+           ("fx", "gold", "tehran_index", "oil", "bitcoin")},
+    }}
+    with override_settings(TYPESAFE_API_KEY="test-key"), \
+            patch("inference.jev.decide", return_value=response), \
+            patch("inference.tasks.summarize_event.delay"):
+        assert assess_event.run(second.id)["event"] == first.id
+    row = ArticleStance.objects.get()
+    assert (row.event_id, row.article_id, row.stance, row.confidence) == (
+        first.id, joining, "contradicts", 0.81)
+    first.refresh_from_db()
+    assert first.evidence_level == NewsEvent.Evidence.DISPUTED

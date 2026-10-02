@@ -103,12 +103,81 @@ def crawl_source(self, source_name: str, limit: int | None = None, run_id: str =
         attempt.finished_at = timezone.now()
         attempt.save(update_fields=["status", "error", "error_class", "finished_at"])
         covered = attempt.status in {"success", "partial"}
+        previous = CoverageInterval.objects.filter(source=source).first()
         CoverageInterval.record(
             source,
             CoverageInterval.COVERED if covered else CoverageInterval.GAP,
             "" if covered else attempt.error_class,
             now=attempt.finished_at,
         )
+        if covered:
+            _backfill_closed_gap(source, previous, attempt.finished_at)
+    return stats
+
+
+BACKFILL_MAX_WINDOW = timedelta(days=3)
+BACKFILL_MAX_ARTICLES = 200
+BACKFILL_LOCK_SECONDS = 60 * 60
+
+
+def _backfill_closed_gap(source, previous, now) -> None:
+    """A covered crawl right after a gap or a silence closes it: queue one bounded backfill.
+
+    Never raises; the crawl that closed the gap has already succeeded.
+    """
+    try:
+        if previous is None or not strategies.supports_backfill(source):
+            return
+        if previous.state != CoverageInterval.COVERED:
+            start = previous.started_at
+        elif now - previous.ended_at > CoverageInterval.UNOBSERVED_AFTER:
+            start = previous.ended_at  # record() just wrote this silence as unknown
+        else:
+            return
+        since = max(start, now - BACKFILL_MAX_WINDOW).date().isoformat()
+        transaction.on_commit(lambda: backfill_gap.delay(source.name, since))
+    except Exception:
+        logger.warning("could not queue gap backfill for %s", source.name, exc_info=True)
+
+
+@shared_task(name="sources.backfill_gap")
+def backfill_gap(source_name: str, since_date: str) -> dict:
+    """Walk one source's archive back to `since_date` (strategies.backfill), storing at
+    most BACKFILL_MAX_ARTICLES. One run per source at a time."""
+    from django.core.cache import cache
+
+    from articles.models import Article
+
+    source = Source.objects.filter(name=source_name, enabled=True).first()
+    if source is None or not strategies.supports_backfill(source):
+        return {"status": "skipped"}
+    lock = f"sources:backfill:{source.name}"
+    if not cache.add(lock, 1, BACKFILL_LOCK_SECONDS):
+        return {"status": "already_running"}
+    stats = {"source": source.name, "since": since_date, "fetched": 0, "new": 0, "failed": 0}
+    try:
+        seen = set(
+            Article.objects.filter(source=source, fetched_at__date__gte=since_date)
+            .values_list("url", flat=True)
+        )
+        with build_session() as session:
+            for raw in strategies.backfill(source, session, since_date=since_date, seen=seen):
+                if stats["fetched"] >= BACKFILL_MAX_ARTICLES:
+                    break
+                stats["fetched"] += 1
+                try:
+                    with transaction.atomic():
+                        article, created = upsert(raw, source, f"backfill-{since_date}")
+                except Exception:
+                    stats["failed"] += 1
+                    logger.warning("backfill ingest failed for %s", raw.url[:200], exc_info=True)
+                    continue
+                if created:
+                    stats["new"] += 1
+                    _queue_image(article)
+    finally:
+        cache.delete(lock)
+    logger.info("backfill %s: %s", source.name, stats)
     return stats
 
 

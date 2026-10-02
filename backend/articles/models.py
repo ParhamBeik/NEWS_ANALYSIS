@@ -41,9 +41,17 @@ class ExtractionTier(models.TextChoices):
 
 
 class ArticleQuerySet(models.QuerySet):
-    def canonical(self):
-        """The stories. Duplicates point at their canonical copy and drop out here."""
-        return self.filter(duplicate_of__isnull=True)
+    def canonical(self, include_hidden: bool = False):
+        """The stories. Duplicates point at their canonical copy and drop out here.
+
+        Taken-down articles, and articles in a taken-down event, drop out too, so exports,
+        inference and review never see them. Dedup passes include_hidden=True: a new copy
+        of a hidden story must still attach to it rather than surface as a fresh event.
+        """
+        queryset = self.filter(duplicate_of__isnull=True)
+        if include_hidden:
+            return queryset
+        return queryset.filter(hidden=False).exclude(news_events__hidden=True)
 
     def eligible_for_inference(self):
         return self.canonical().filter(
@@ -107,6 +115,9 @@ class Article(models.Model):
     gone_at = models.DateTimeField(null=True, blank=True)
     gone_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
     last_checked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Takedown (core.takedown): hidden from every public surface, kept for audit.
+    hidden = models.BooleanField(default=False)
+    hidden_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = ArticleQuerySet.as_manager()
@@ -123,6 +134,12 @@ class Article(models.Model):
 
     def __str__(self) -> str:
         return self.original_title[:80]
+
+
+class NewsEventQuerySet(models.QuerySet):
+    def visible(self):
+        """What readers may see: not taken down, and not led by a taken-down article."""
+        return self.filter(hidden=False, primary_article__hidden=False)
 
 
 class NewsEvent(models.Model):
@@ -162,13 +179,84 @@ class NewsEvent(models.Model):
     channels_en = models.TextField(blank=True)
     uncertainty_fa = models.TextField(blank=True)
     uncertainty_en = models.TextField(blank=True)
+    hidden = models.BooleanField(default=False)
+    hidden_reason = models.CharField(max_length=255, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = NewsEventQuerySet.as_manager()
 
     class Meta:
         indexes = [models.Index(fields=["-event_time", "-id"])]
 
     def __str__(self) -> str:
         return f"event {self.pk}: {self.primary_article.original_title[:60]}"
+
+
+class ArticleStance(models.Model):
+    """How one report relates to the event it was grouped into, as Jev judged it on joining.
+
+    A separate table rather than a through-model on `NewsEvent.articles`: the M2M stays
+    untouched, and a member without a row simply `reports` (the event's first report and
+    dedup copies never get asked). Rows die with their event, so a merge or split leaves
+    no stale stance behind.
+    """
+
+    class Stance(models.TextChoices):
+        REPORTS = "reports", "Reports the occurrence"
+        SUPPORTS = "supports", "Confirms what was reported"
+        CONTRADICTS = "contradicts", "Disputes what was reported"
+        UPDATES = "updates", "Adds a later development"
+
+    event = models.ForeignKey("NewsEvent", on_delete=models.CASCADE, related_name="stances")
+    article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name="stances")
+    stance = models.CharField(max_length=16, choices=Stance, default=Stance.REPORTS)
+    confidence = models.FloatField(null=True, blank=True)
+    decided_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["event", "article"], name="one_stance_per_member")
+        ]
+
+    def __str__(self) -> str:
+        return f"article {self.article_id} {self.stance} event {self.event_id}"
+
+
+class TakedownLog(models.Model):
+    """Append-only audit of every hide and unhide: who, when, why. Never edited or deleted."""
+
+    class Kind(models.TextChoices):
+        EVENT = "event", "Event"
+        ARTICLE = "article", "Article"
+
+    class Action(models.TextChoices):
+        HIDE = "hide", "Hide"
+        UNHIDE = "unhide", "Unhide"
+
+    kind = models.CharField(max_length=8, choices=Kind)
+    # A plain id, not a foreign key: the trail must outlive a merged-away event.
+    object_id = models.PositiveBigIntegerField(db_index=True)
+    action = models.CharField(max_length=8, choices=Action)
+    reason = models.CharField(max_length=255)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    actor_name = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.kind} {self.object_id}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("takedown log rows are append-only")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("takedown log rows are append-only")
 
 
 class EventAssessment(models.Model):
@@ -388,6 +476,26 @@ class ArticleRevision(models.Model):
 
     def __str__(self) -> str:
         return f"revision of article {self.article_id} at {self.observed_at}"
+
+
+class TitleTranslation(models.Model):
+    """A cheap machine translation of one article's headline into the other UI language.
+
+    Used for events that get no brief. Cached per article and keyed by the headline it
+    translated, so a re-assessment costs nothing and a corrected headline is redone.
+    """
+
+    article = models.OneToOneField(
+        Article, on_delete=models.CASCADE, related_name="title_translation"
+    )
+    language = models.CharField(max_length=2)
+    source_title = models.TextField()
+    title = models.TextField()
+    model = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.language} title for article {self.article_id}"
 
 
 class ImageStatus(models.TextChoices):
