@@ -8,6 +8,7 @@ during development. Both are configured in REST_FRAMEWORK; this module only name
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .macro import PublicMacroView
 from .public import (
     AlertConfigView,
     AlertSubscriptionView,
@@ -60,6 +61,7 @@ urlpatterns = [
     path("public/events/<int:event_id>/", PublicEventDetailView.as_view(), name="public-event"),
     path("public/sources/", PublicSourcesView.as_view(), name="public-sources"),
     path("public/assets/", PublicAssetsView.as_view(), name="public-assets"),
+    path("public/macro/", PublicMacroView.as_view(), name="public-macro"),
     path(
         "public/assets/<str:symbol>/timeline/",
         PublicTimelineView.as_view(),

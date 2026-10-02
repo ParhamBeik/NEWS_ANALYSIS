@@ -31,7 +31,14 @@ from django.conf import settings
 from django.db.models import Max, Sum
 from django.utils import timezone
 
-from articles.models import Article, EventAssessment, EventReview, NewsEvent, UrlStatus
+from articles.models import (
+    Article,
+    EventAssessment,
+    EventReview,
+    NewsEvent,
+    UrlStatus,
+    WatchItem,
+)
 from core.actions import log_action
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from core.ops import failure_kind, record_ai_failure
@@ -69,7 +76,9 @@ RESULT_MODELS = {"classify": Classification, "evaluate": Evaluation, "summarize"
 )
 def assess_event(self, event_id: int) -> dict:
     """Fast event assessment, independent of the legacy 30-minute analyst pipeline."""
-    from .jev import decide
+    from core.watch import shortlist, tag_event
+
+    from .jev import decide, watch_tags
 
     event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
     if event is None:
@@ -83,12 +92,15 @@ def assess_event(self, event_id: int) -> dict:
         return {"status": "unassessed", "reason": "provider_not_configured"}
     run_id = f"event-{event_id}"
     event_time = event.event_time
+    from core.events import kept_apart
+
     candidates = {
         f"event_{row.id}": f"Same occurrence: {row.primary_article.original_title[:180]}"
         for row in NewsEvent.objects.filter(
             event_time__range=(event_time - timedelta(hours=36), event_time + timedelta(hours=36))
         )
         .exclude(pk=event_id)
+        .exclude(pk__in=kept_apart(event_id))
         .select_related("primary_article")
         .order_by("-event_time")[:10]
     }
@@ -103,6 +115,7 @@ def assess_event(self, event_id: int) -> dict:
             },
             run_id,
             candidates,
+            shortlist(evidence, WatchItem.objects.filter(enabled=True)),
         )
     except BudgetExceeded:
         record_ai_failure("jev", "budget")
@@ -178,6 +191,7 @@ def assess_event(self, event_id: int) -> dict:
         global_score=global_score,
         assessment_confidence=confidence,
     )
+    tag_event(event, watch_tags(answers))
     from core.events import refresh_event
 
     refresh_event(event)
@@ -245,6 +259,21 @@ def summarize_event(self, event_id: int) -> dict:
         return {"status": "unassessed", "reason": type(exc).__name__}
     NewsEvent.objects.filter(pk=event_id).update(**result)
     return {"status": "summarized", "event": event_id}
+
+
+@shared_task(name="inference.build_storylines")
+def build_storylines() -> dict:
+    """Nightly: link recent events into storylines; naming degrades to derived names."""
+    from core.storylines import build
+
+    from .jev import storyline_name
+
+    run_id = f"storylines-{timezone.now():%Y%m%d}"
+
+    def namer(titles):
+        return storyline_name(titles, run_id) if settings.GAPGPT_API_KEY else None
+
+    return build(namer=namer)
 
 
 @shared_task(name="inference.assess_pending_events")

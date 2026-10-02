@@ -28,7 +28,12 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Article versions | `articles.ArticleRevision` | Live: prior text kept on edit/removal |
 | Events | `core/events.py`, `articles.NewsEvent` | Live: created per new article |
 | AI decisions (Jev) | `inference/jev.py`, `inference/tasks.py` `assess_event` | Built; **stalled: GapGPT wallet empty**; TypeSafe key not yet set |
-| Briefs | `inference/jev.py` `brief`, `summarize_event` | Built; waits on AI decisions |
+| Topics + watch items | `core/vocabulary.py`, `core/watch.py`, `articles/fixtures/watch_items.yaml` | Built (Phase 2): 8 investor topics; ~165 bilingual assets/actors/themes tagged per event |
+| Reader tiers | `core/tiers.py` | Built (Phase 2): 1-5 relative to the last 30 days; fixed bands under 200 scored events |
+| Grouping memory | `articles.GroupingDecision`, `core/events.py` | Built (Phase 2): staff splits are never re-merged |
+| Storylines | `core/storylines.py`, `inference.build_storylines` (02:30 nightly) | Built (Phase 2); names wait on AI |
+| Evidence level | `NewsEvent.evidence_level` | Placeholder: single/multi/official from source groups |
+| Briefs | `inference/jev.py` `brief`, `summarize_event` | Built; waits on AI decisions; stop at 80% of the monthly budget |
 | AI budget guard | `inference/budget.py`, `inference/circuit.py` | Live; caps run/day/month |
 | Reader radar | `frontend/app/page.js` | Live (image-led, categories, tiers) |
 | Event page | `frontend/app/events/[id]/` | Live |
@@ -73,6 +78,6 @@ with `date_uncertain`.
 ## Next build phases
 
 1. Collection backbone: source catalog to ~38, coverage gaps, durable retries.
-2. AI backbone: 8 investor topics, watch-item vocabulary, quantile tiers, storylines.
+2. AI backbone: 8 investor topics, watch-item vocabulary, quantile tiers, storylines (built).
 3. Ops page for coverage and AI cost; 4. portfolio price contract; 5. accounts, watchlists,
    alerts; 6. mobile app.

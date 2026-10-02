@@ -1,5 +1,5 @@
 /**
- * Reader presentation rules: impact tiers, Jalali dates, Persian digits, category art and
+ * Reader presentation rules: tier labels, Jalali dates, Persian digits, category art and
  * source grouping. Pure functions with no Next.js imports, so tests load this file as-is.
  */
 
@@ -11,23 +11,12 @@ export const TIERS = [
   { level: 5, en: "Very high", fa: "خیلی زیاد" },
 ];
 
-/** 0-100 score to tier 1-5 in equal 20-point bands; 80+ matches the alert threshold.
- *  A missing score stays null - "not assessed" is never shown as "very low". */
-export function impactTier(score) {
-  if (score === null || score === undefined || score === "") return null;
-  const value = Number(score);
-  if (!Number.isFinite(value)) return null;
-  return TIERS[Math.min(4, Math.max(0, Math.floor(value / 20)))];
-}
-
-/** The same Iran/global weighting the API ranks by (core.events.ranked_events). */
-export function impactScore(event) {
-  const iran = event?.iran_score;
-  const global = event?.global_score;
-  if (iran == null && global == null) return null;
-  if (iran == null) return global;
-  if (global == null) return iran;
-  return Math.round(0.6 * iran + 0.4 * global);
+/** Labels for the API's tier 1-5 (core/tiers.py decides it; the reader never does).
+ *  A missing tier stays null - "not assessed" is never shown as "very low". */
+export function tierMeta(level) {
+  const value = Number(level);
+  if (level === null || level === undefined || !Number.isInteger(value)) return null;
+  return TIERS[value - 1] || null;
 }
 
 const TEHRAN = "Asia/Tehran";
@@ -79,13 +68,16 @@ export function relative(iso, lang = "fa", now = Date.now()) {
   return lang === "fa" ? "همین حالا" : "just now";
 }
 
+/** The eight investor topics (core.vocabulary.EVENT_CATEGORIES); the API maps legacy slugs. */
 export const CATEGORIES = {
-  monetary: { en: "Monetary policy", fa: "سیاست پولی", icon: "bank" },
-  macro: { en: "Macroeconomy", fa: "اقتصاد کلان", icon: "chart" },
-  sanctions_trade: { en: "Trade & sanctions", fa: "تجارت و تحریم", icon: "ship" },
-  geopolitics: { en: "Geopolitics", fa: "ژئوپلیتیک", icon: "globe" },
-  energy: { en: "Energy", fa: "انرژی", icon: "flame" },
-  markets: { en: "Markets", fa: "بازارها", icon: "candles" },
+  conflict_security: { en: "Conflict & security", fa: "امنیت و درگیری", icon: "shield" },
+  sanctions_diplomacy: { en: "Sanctions & diplomacy", fa: "تحریم و دیپلماسی", icon: "globe" },
+  macro_monetary: { en: "Macro & monetary", fa: "اقتصاد کلان و پولی", icon: "bank" },
+  energy_commodities: { en: "Energy & commodities", fa: "انرژی و کالاها", icon: "flame" },
+  iran_economy_policy: { en: "Iran economic policy", fa: "سیاست اقتصادی ایران", icon: "chart" },
+  markets_companies: { en: "Markets & companies", fa: "بازارها و شرکت‌ها", icon: "candles" },
+  disasters: { en: "Disasters & accidents", fa: "حوادث و بلایا", icon: "wave" },
+  social_unrest: { en: "Protests & strikes", fa: "اعتراض و اعتصاب", icon: "people" },
 };
 export const PENDING_CATEGORY = { en: "Being assessed", fa: "در حال ارزیابی", icon: "radar" };
 
@@ -118,6 +110,14 @@ export const STATUS = {
   assessed: { en: "Assessed", fa: "ارزیابی‌شده", tone: "solid" },
   corrected: { en: "Corrected", fa: "اصلاح‌شده", tone: "solid" },
   withdrawn: { en: "Withdrawn", fa: "پس‌گرفته‌شده", tone: "alert" },
+};
+
+/** How independently the occurrence is reported (core.events.evidence_level). */
+export const EVIDENCE = {
+  single: { en: "One source group", fa: "یک گروه منبع" },
+  multi: { en: "Independent sources", fa: "منابع مستقل" },
+  official: { en: "Official source", fa: "منبع رسمی" },
+  disputed: { en: "Sources disagree", fa: "روایت‌های متناقض" },
 };
 
 export function sourceCount(event) {

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const NAV = [
   { href: "/", en: "News", fa: "خبرها" },
   { href: "/market", en: "Asset timeline", fa: "نمودار دارایی‌ها" },
+  { href: "/macro", en: "Macro", fa: "کلان" },
   { href: "/collection", en: "Collection", fa: "گردآوری", staff: true },
   { href: "/classification", en: "Classification", fa: "دسته‌بندی", staff: true },
   { href: "/evaluation", en: "Evaluation", fa: "ارزیابی", staff: true },

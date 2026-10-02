@@ -1,4 +1,4 @@
-import { CATEGORIES, PENDING_CATEGORY, STATUS, gregorian, impactTier, jalali, relative, sep } from "@/lib/reader";
+import { CATEGORIES, PENDING_CATEGORY, STATUS, gregorian, jalali, tierMeta, relative, sep } from "@/lib/reader";
 
 const ICONS = {
   bank: "M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18M12 3l9 5H3z",
@@ -12,6 +12,9 @@ const ICONS = {
   check: "M5 12.5l4.5 4.5L19 7.5",
   arrow: "M5 12h14M13 6l6 6-6 6",
   layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
+  shield: "M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z",
+  wave: "M3 12h3l2-5 3 10 3-8 2 3h5",
+  people: "M9 11a3 3 0 1 0 0-6a3 3 0 1 0 0 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.5a3 3 0 0 1 0 5.5M18 14.5c1.8.8 3 2.8 3 5.5",
 };
 
 export function Icon({ name, className = "h-5 w-5" }) {
@@ -28,6 +31,16 @@ export function CategoryChip({ category, lang, className = "" }) {
   </span>;
 }
 
+/** Jev's watch-item tags (assets, actors, themes) as quiet chips; not links yet. */
+export function WatchChips({ items, lang, limit = 5, className = "" }) {
+  if (!items?.length) return null;
+  return <ul aria-label={lang === "fa" ? "موضوع‌های مرتبط" : "Related watch items"} className={`flex flex-wrap gap-1.5 ${className}`}>
+    {items.slice(0, limit).map((item) => <li key={item.slug} className="rounded-full border border-line bg-card-2 px-2 py-0.5 text-xs text-muted">
+      {lang === "fa" ? item.name_fa : item.name_en}
+    </li>)}
+  </ul>;
+}
+
 function Meter({ level }) {
   return <span className="inline-flex items-end gap-[2px]" aria-hidden="true">
     {[1, 2, 3, 4, 5].map((step) => <span key={step} className="w-[3px] rounded-sm bg-current"
@@ -35,9 +48,10 @@ function Meter({ level }) {
   </span>;
 }
 
-/** Impact tier: one hue, five intensities, plus a five-step meter so colour is never the only cue. */
-export function TierBadge({ score, lang, prefix = true }) {
-  const tier = impactTier(score);
+/** Impact tier from the API: one hue, five intensities, plus a five-step meter so colour is
+ *  never the only cue. */
+export function TierBadge({ tier: level, lang, prefix = true }) {
+  const tier = tierMeta(level);
   if (!tier) {
     return <span className="inline-flex items-center rounded-full border border-dashed border-line px-2.5 py-0.5 text-xs text-muted">
       {lang === "fa" ? "اثر هنوز ارزیابی نشده" : "Impact not assessed yet"}

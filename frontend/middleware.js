@@ -19,7 +19,7 @@ import { NextResponse } from "next/server";
 // misleading round-trip through the logout URL.
 // `/media` reaches Next only in development (Caddy serves it in production); the reader's
 // images must load for a signed-out visitor there too.
-const PUBLIC = ["/", "/events", "/market", "/media", "/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
+const PUBLIC = ["/", "/events", "/market", "/macro", "/media", "/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg"];
 
 function withPathname(request, pathname) {
   const requestHeaders = new Headers(request.headers);
