@@ -13,6 +13,7 @@ point of the health field.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -25,7 +26,7 @@ from core.errors import Permanent, Transient, error_class
 
 from . import strategies
 from .extraction import build_session
-from .models import CoverageInterval, CrawlAttempt, Source
+from .models import CoverageInterval, CrawlAttempt, FetchRetry, Source
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,40 @@ def _crawl(source, limit, run_id, attempt):
         source.mark_degraded(attempt.error)
     logger.info("crawl %s: %s", source.name, stats)
     return stats
+
+
+GAVE_UP_KEPT_FOR = timedelta(days=30)
+
+
+@shared_task(name="sources.drain_fetch_retries")
+def drain_fetch_retries(limit: int = 50) -> dict:
+    """Fetch article pages whose first attempt failed transiently, once they are due.
+
+    No Celery retry here: each row carries its own backoff, so a task retry would only
+    refetch rows that already failed this pass. Gave-up rows stay a month for /ops, then go.
+    """
+    now = timezone.now()
+    due = list(
+        FetchRetry.objects.filter(gave_up=False, next_at__lte=now, source__enabled=True)
+        .select_related("source")[:limit]
+    )
+    counts = {"stored": 0, "rescheduled": 0, "gave_up": 0}
+    with build_session() as session:
+        for retry in due:
+            try:
+                raw = strategies.fetch_one(retry.source, session, retry.url)
+                with transaction.atomic():
+                    article, created = upsert(raw, retry.source, f"retry-{retry.pk}")
+            except Exception as exc:
+                counts[retry.failed(exc, now)] += 1
+                continue
+            retry.delete()
+            counts["stored"] += 1
+            if created:
+                _queue_image(article)
+    FetchRetry.objects.filter(gave_up=True, updated_at__lt=now - GAVE_UP_KEPT_FOR).delete()
+    logger.info("fetch retries: %s", counts)
+    return counts
 
 
 @shared_task(name="sources.crawl_all")

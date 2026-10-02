@@ -7,12 +7,15 @@ here too, so `/ops` can answer "is each source still alive?" without a crawl.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from django.db import models, transaction
 from django.utils import timezone
 
-from core.errors import ERROR_CLASSES
+from core.errors import ERROR_CLASSES, Transient, classify_exception, error_class
+
+logger = logging.getLogger(__name__)
 
 ERROR_CLASS_CHOICES = [(name, name) for name in ERROR_CLASSES]
 
@@ -92,6 +95,69 @@ class CoverageInterval(models.Model):
                 state=state,
                 error_class=error_class,
             )
+
+
+class FetchRetry(models.Model):
+    """An article page that failed for a reason worth trying again.
+
+    The crawl itself retries the whole source (Celery autoretry), but a single detail page
+    timing out was simply skipped: the story stayed at feed tier, or for listing sources
+    was never stored at all. This row keeps that URL until `sources.drain_fetch_retries`
+    succeeds or gives up, and it survives a worker restart because it lives in Postgres.
+    Only transient failures are queued; a 404 or a blocked host will not change by waiting.
+    """
+
+    BASE_DELAY = timedelta(minutes=5)
+    MAX_DELAY = timedelta(hours=6)
+    MAX_ATTEMPTS = 6
+
+    source = models.ForeignKey("Source", on_delete=models.PROTECT, related_name="fetch_retries")
+    url = models.URLField(max_length=2048)
+    attempts = models.PositiveSmallIntegerField(default=1)
+    next_at = models.DateTimeField()
+    error_class = models.CharField(max_length=16, blank=True, choices=ERROR_CLASS_CHOICES)
+    gave_up = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["next_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["source", "url"], name="unique_fetch_retry"),
+        ]
+        indexes = [models.Index(fields=["gave_up", "next_at"])]
+
+    def __str__(self):
+        return f"{self.source_id}: {self.url[:80]} (attempt {self.attempts})"
+
+    @classmethod
+    def schedule(cls, source, url: str, exc: BaseException) -> None:
+        """Queue a failed detail fetch. Never raises: the crawl must not die on its own
+        bookkeeping, and a source object from a test or a probe may not be a saved row."""
+        if classify_exception(exc) is not Transient or not getattr(source, "pk", None):
+            return
+        try:
+            with transaction.atomic():
+                cls.objects.get_or_create(
+                    source=source, url=url[:2048],
+                    defaults={"next_at": timezone.now() + cls.BASE_DELAY,
+                              "error_class": error_class(exc)},
+                )
+        except Exception:
+            logger.warning("could not queue retry for %s", url[:200], exc_info=True)
+
+    def failed(self, exc: BaseException, now) -> str:
+        """Back off exponentially, or give up. Returns which one happened."""
+        self.attempts += 1
+        self.error_class = error_class(exc)
+        if classify_exception(exc) is Transient and self.attempts < self.MAX_ATTEMPTS:
+            self.next_at = now + min(self.BASE_DELAY * 2 ** (self.attempts - 1), self.MAX_DELAY)
+            outcome = "rescheduled"
+        else:
+            self.gave_up = True
+            outcome = "gave_up"
+        self.save(update_fields=["attempts", "error_class", "next_at", "gave_up", "updated_at"])
+        return outcome
 
 
 class Strategy(models.TextChoices):

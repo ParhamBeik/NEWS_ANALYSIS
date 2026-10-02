@@ -28,6 +28,7 @@ from ..extraction import (
     node_text,
     soup_of,
 )
+from ..models import FetchRetry
 
 LISTING_SELECTOR = "ul.box.container h2.title a[href]"
 # A listing page holds 10 links. Anything beyond a handful of pages per cycle is a backfill
@@ -88,14 +89,19 @@ def collect_urls(session: requests.Session, base_url: str, *, limit: int) -> lis
     return urls[:limit]
 
 
+def fetch_one(spec, session: requests.Session, url: str) -> RawArticle:
+    return parse_article(fetch_text(session, url), url, spec.name)
+
+
 def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     articles = []
     for url in collect_urls(session, spec.url, limit=limit):
         try:
-            articles.append(parse_article(fetch_text(session, url), url, spec.name))
-        except Exception:
+            articles.append(fetch_one(spec, session, url))
+        except Exception as exc:
             # A single unreachable detail page is not a source failure. The listing already
-            # proved the source is alive.
+            # proved the source is alive; a transient failure is queued for a later retry.
+            FetchRetry.schedule(spec, url, exc)
             continue
     return articles
 
