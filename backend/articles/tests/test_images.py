@@ -243,3 +243,36 @@ def test_compact_images_keeps_one_webp_and_requeues_missing(make_article):
     remaining = set(_walk(default_storage, "articles"))
     assert kept.file.name in remaining and not {big, thumb, stray} & remaining
     assert (lost.status, lost.file.name) == (ImageStatus.PENDING, "")
+
+
+@pytest.mark.django_db
+def test_compact_images_dry_run_changes_nothing_and_rescues_thumbnail_only_rows(make_article):
+    """The two paths the main compact test cannot see: --dry-run must not touch a file
+    or row, and a row whose display copy is gone keeps its thumbnail as the one image."""
+    from io import BytesIO
+
+    from django.core.files.base import ContentFile
+    from django.core.files.storage import default_storage
+    from django.core.management import call_command
+    from PIL import Image
+
+    from articles.models import ArticleImage, ImageStatus
+
+    buffer = BytesIO()
+    Image.new("RGB", (400, 200), "green").save(buffer, format="JPEG")
+    thumb = default_storage.save("articles/2026/08/thumbs/7_thumb.jpg",
+                                 ContentFile(buffer.getvalue()))
+    row = ArticleImage.objects.create(
+        article=make_article(), source_url="https://cdn.example/c.jpg",
+        status=ImageStatus.STORED, file="articles/2026/08/7.jpg", thumbnail=thumb)
+
+    call_command("compact_images", "--dry-run")
+    row.refresh_from_db()
+    assert (row.file.name, row.thumbnail.name) == ("articles/2026/08/7.jpg", thumb)
+    assert default_storage.exists(thumb)
+
+    call_command("compact_images")
+    row.refresh_from_db()
+    assert row.status == ImageStatus.STORED
+    assert row.file.name.endswith(".webp") and not row.thumbnail
+    assert not default_storage.exists(thumb)
