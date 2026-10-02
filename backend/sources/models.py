@@ -51,6 +51,25 @@ class HealthStatus(models.TextChoices):
     DEGRADED = "degraded", "Degraded"
 
 
+class Language(models.TextChoices):
+    FA = "fa", "Persian"
+    EN = "en", "English"
+
+
+class LicenseMode(models.TextChoices):
+    FULL = "full", "Store and show the text"
+    # Paywalled or foreign press: keep the facts, show a link, never republish the copy.
+    FACTS_LINK_OUT = "facts_link_out", "Facts and a link out"
+
+
+class SourceRole(models.TextChoices):
+    PRIMARY = "primary", "Primary reporter"
+    AGGREGATOR = "aggregator", "Aggregator"
+
+
+AGGREGATOR_GROUP = "aggregator"
+
+
 class Source(models.Model):
     name = models.SlugField(primary_key=True, max_length=64)
     display_name = models.CharField(max_length=128, blank=True)
@@ -66,6 +85,12 @@ class Source(models.Model):
     priority = models.PositiveSmallIntegerField(default=50)
     enabled = models.BooleanField(default=True)
     public_image_allowed = models.BooleanField(default=False)
+    language = models.CharField(max_length=2, choices=Language, default=Language.FA)
+    # Ownership or editorial control. Two sources in one group are one voice: IRIB News
+    # and YJC repeating a story is not two confirmations.
+    independence_group = models.SlugField(max_length=64, blank=True)
+    license_mode = models.CharField(max_length=16, choices=LicenseMode, default=LicenseMode.FULL)
+    role = models.CharField(max_length=16, choices=SourceRole, default=SourceRole.PRIMARY)
     last_item_published_at = models.DateTimeField(null=True, blank=True)
 
     health_status = models.CharField(
@@ -86,6 +111,14 @@ class Source(models.Model):
     @property
     def supports_backfill(self) -> bool:
         return bool(self.archive_url)
+
+    @property
+    def independence_key(self) -> str | None:
+        """What a confirmation counts against, or None when this source cannot confirm
+        anything: an aggregator only relays what another outlet already said."""
+        if self.role == SourceRole.AGGREGATOR or self.independence_group == AGGREGATOR_GROUP:
+            return None
+        return self.independence_group or self.name
 
     def mark_healthy(self) -> None:
         from django.utils import timezone
