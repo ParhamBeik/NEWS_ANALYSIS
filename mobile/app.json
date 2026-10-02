@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "رادار خبر",
+    "slug": "news-radar",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ir.parhambm.newsradar"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#020617",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "ir.parhambm.newsradar"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store"
+    ],
+    "scheme": "newsradar",
+    "backgroundColor": "#0c0d16",
+    "extra": {
+      "apiBase": "https://news.parhambm.ir",
+      "push": {
+        "order": [
+          "fcm",
+          "pushe",
+          "najva"
+        ],
+        "fcm": {
+          "enabled": false
+        },
+        "pushe": {
+          "appId": ""
+        },
+        "najva": {
+          "apiKey": "",
+          "websiteId": ""
+        }
+      }
+    }
+  }
+}
