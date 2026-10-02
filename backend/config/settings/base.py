@@ -296,14 +296,18 @@ KAVENEGAR_OTP_TEMPLATE = env("KAVENEGAR_OTP_TEMPLATE")
 # App push through FCM HTTP v1: a service-account JSON file path and its project id.
 FCM_PROJECT_ID = env("FCM_PROJECT_ID")
 FCM_CREDENTIALS_FILE = env("FCM_CREDENTIALS_FILE")
+# Staff ops notices (core.ops_alerts). Email only when EMAIL_HOST is set; the webhook gets a
+# JSON {"text", "alerts"} POST only when its URL is set. Both off by default: always logged.
 # Optional email digest. Empty EMAIL_HOST (Django's default is "localhost") keeps it off.
 EMAIL_HOST = env("EMAIL_HOST")
 EMAIL_PORT = env_int("EMAIL_PORT", 587)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "NewsIntel <noreply@parhambm.ir>")
 PUBLIC_SITE_URL = env("PUBLIC_SITE_URL", "https://news.parhambm.ir")
+OPS_ALERT_WEBHOOK_URL = env("OPS_ALERT_WEBHOOK_URL")
 # Runaway-loop breaker on request COUNT, not money. Belongs well above a normal cycle.
 NEWS_MAX_PROVIDER_CALLS_PER_RUN = env_int("NEWS_MAX_PROVIDER_CALLS_PER_RUN", 1000)
 # Automatic provider halt. Not a user toggle: the first empty-wallet response opens the

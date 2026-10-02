@@ -23,7 +23,7 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 
 | Part | Code | Status |
 |---|---|---|
-| Source catalog | `backend/sources/` (`fixtures/sources.yaml`, `strategies/`) | 44 catalog sources (Phase 1, 2026-10-02) with language, ownership group, license mode and role; prod loads them only after `seed_sources` |
+| Source catalog | `backend/sources/` (`fixtures/sources.yaml`, `strategies/`) | 44 catalog sources (Phase 1, 2026-10-02) with language, ownership group, license mode and role; loaded on every deploy by the `migrate` service |
 | Collection | `sources/tasks.py`, `articles/ingest.py` | Live (fixed 2026-10-01 after a 4.5 h outage) |
 | Article versions | `articles.ArticleRevision` | Live: prior text kept on edit/removal |
 | Events | `core/events.py`, `articles.NewsEvent` | Live: created per new article |
@@ -44,7 +44,8 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Reader accounts | `accounts/`, `core/otp.py`, `api/accounts.py`, `/login`, `/onboarding`, `/settings` | Built (Phase 5): phone OTP via Kavenegar, **off until keys**; staff password login unchanged |
 | Watchlists + personal radar | `accounts.Watch`, `lib/reader.js` `boostWatched` | Built (Phase 5): ≥3 watch items at onboarding; watched events marked and lifted 5 places |
 | Watchlist alerts | `core/alerts.py`, `accounts.fan_out_event`, `/inbox` | Built (Phase 5), behind `NEWS_ALERTS_ENABLED`: dial, 5 pushes/day, quiet hours 23-07, tier 5 exempt; inbox always; web push + FCM adapters, Pushe/Najva tokens stored only |
-| Ops dashboard | `frontend/app/ops/`, `api` `OpsView` | Live |
+| Ops dashboard | `frontend/app/ops/`, `api` `OpsView`, `OpsStaffView`, `core/ops.py` | Live; staff panels: AI cost vs ceilings, errors by cause, freshness SLO (Phase 3) |
+| Staff ops alerts | `core/ops_alerts.py`, task `core.ops_alerts` | Every 5 min, 6 h dedup; logs always, email/webhook once `EMAIL_HOST` / `OPS_ALERT_WEBHOOK_URL` are set |
 | Deploy | `.github/workflows/`, `deploy/` | `main` → CI → GHCR → Mac runner → server; health gate + auto-rollback |
 
 ## Blocked: network

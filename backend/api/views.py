@@ -43,6 +43,7 @@ from accounts.models import Account
 from articles.models import Article, EventReview, NewsEvent, UrlStatus
 from core.collection import analysis_summary, collection_summary, coverage_summary
 from core.events import priority_visibility, split_article_from_event
+from core.ops import staff_ops
 from core.review import SESSION_SIZE, record_decision, review_queue, review_stats, score_tier
 from core.vocabulary import AXES
 from inference import budget, circuit
@@ -752,6 +753,15 @@ class OpsView(APIView):
                 },
             }
         )
+
+
+class OpsStaffView(APIView):
+    """Staff only: AI cost against the ceilings, crawl errors by cause, freshness SLOs."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(staff_ops())
 
 
 class KPIView(APIView):

@@ -60,6 +60,10 @@ INTERVAL_TASKS = [
     # Keep the legacy row name so setup_schedule updates the deployed task instead of leaving
     # a second enabled schedule behind.
     ("weekly-circuit-probe", "inference.probe_circuit", 1, IntervalSchedule.HOURS, {}),
+    # Staff notices dedupe per condition for 6 hours, so polling often only shortens how
+    # long a new problem goes unsaid; delivery is a no-op until EMAIL_HOST or the webhook
+    # URL is set.
+    ("ops-staff-alerts", "core.ops_alerts", 5, IntervalSchedule.MINUTES, {}),
 ]
 
 CRON_TASKS = [
