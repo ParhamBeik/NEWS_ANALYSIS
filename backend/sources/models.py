@@ -7,8 +7,17 @@ here too, so `/ops` can answer "is each source still alive?" without a crawl.
 
 from __future__ import annotations
 
-from django.db import models
+import logging
+from datetime import timedelta
+
+from django.db import models, transaction
 from django.utils import timezone
+
+from core.errors import ERROR_CLASSES, Transient, classify_exception, error_class
+
+logger = logging.getLogger(__name__)
+
+ERROR_CLASS_CHOICES = [(name, name) for name in ERROR_CLASSES]
 
 
 class CrawlAttempt(models.Model):
@@ -27,6 +36,7 @@ class CrawlAttempt(models.Model):
     repeated = models.PositiveIntegerField(default=0)
     failed = models.PositiveIntegerField(default=0)
     error = models.CharField(max_length=255, blank=True)
+    error_class = models.CharField(max_length=16, blank=True, choices=ERROR_CLASS_CHOICES)
 
     class Meta:
         ordering = ["-started_at", "-id"]
@@ -34,6 +44,120 @@ class CrawlAttempt(models.Model):
 
     def __str__(self):
         return f"{self.source_id}: {self.status} ({self.started_at})"
+
+
+class CoverageInterval(models.Model):
+    """When a source was watched, when it failed, and when nobody was looking.
+
+    One row per run of the same outcome, not per crawl: a crawl every two minutes would
+    write 720 rows a day per source, so a repeat outcome extends the latest row instead.
+    Intervals are contiguous - a gap starts where the last covered stretch ended - so
+    "how many hours did we miss" is a sum, not a reconstruction.
+
+    `unknown` is the honest state for a silence longer than UNOBSERVED_AFTER: the worker
+    or beat was down, so we cannot claim the source was covered or that it failed.
+    """
+
+    COVERED, GAP, UNKNOWN = "covered", "gap", "unknown"
+    # Five crawl cadences (every 2 min, see setup_schedule) plus retry backoff headroom.
+    UNOBSERVED_AFTER = timedelta(minutes=10)
+
+    source = models.ForeignKey("Source", on_delete=models.PROTECT, related_name="coverage")
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField()
+    state = models.CharField(max_length=8, choices=[(s, s) for s in (COVERED, GAP, UNKNOWN)])
+    error_class = models.CharField(max_length=16, blank=True, choices=ERROR_CLASS_CHOICES)
+
+    class Meta:
+        ordering = ["-ended_at", "-id"]
+        indexes = [models.Index(fields=["source", "-ended_at"])]
+
+    def __str__(self):
+        return f"{self.source_id}: {self.state} {self.started_at} - {self.ended_at}"
+
+    @classmethod
+    def record(cls, source, state: str, error_class: str = "", *, now=None) -> None:
+        now = now or timezone.now()
+        with transaction.atomic():
+            last = cls.objects.select_for_update().filter(source=source).first()
+            if last and now - last.ended_at > cls.UNOBSERVED_AFTER:
+                cls.objects.create(
+                    source=source, started_at=last.ended_at, ended_at=now, state=cls.UNKNOWN
+                )
+                last = None
+            if last and (last.state, last.error_class) == (state, error_class):
+                cls.objects.filter(pk=last.pk).update(ended_at=now)
+                return
+            cls.objects.create(
+                source=source,
+                started_at=last.ended_at if last else now,
+                ended_at=now,
+                state=state,
+                error_class=error_class,
+            )
+
+
+class FetchRetry(models.Model):
+    """An article page that failed for a reason worth trying again.
+
+    The crawl itself retries the whole source (Celery autoretry), but a single detail page
+    timing out was simply skipped: the story stayed at feed tier, or for listing sources
+    was never stored at all. This row keeps that URL until `sources.drain_fetch_retries`
+    succeeds or gives up, and it survives a worker restart because it lives in Postgres.
+    Only transient failures are queued; a 404 or a blocked host will not change by waiting.
+    """
+
+    BASE_DELAY = timedelta(minutes=5)
+    MAX_DELAY = timedelta(hours=6)
+    MAX_ATTEMPTS = 6
+
+    source = models.ForeignKey("Source", on_delete=models.PROTECT, related_name="fetch_retries")
+    url = models.URLField(max_length=2048)
+    attempts = models.PositiveSmallIntegerField(default=1)
+    next_at = models.DateTimeField()
+    error_class = models.CharField(max_length=16, blank=True, choices=ERROR_CLASS_CHOICES)
+    gave_up = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["next_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["source", "url"], name="unique_fetch_retry"),
+        ]
+        indexes = [models.Index(fields=["gave_up", "next_at"])]
+
+    def __str__(self):
+        return f"{self.source_id}: {self.url[:80]} (attempt {self.attempts})"
+
+    @classmethod
+    def schedule(cls, source, url: str, exc: BaseException) -> None:
+        """Queue a failed detail fetch. Never raises: the crawl must not die on its own
+        bookkeeping, and a source object from a test or a probe may not be a saved row."""
+        if classify_exception(exc) is not Transient or not getattr(source, "pk", None):
+            return
+        try:
+            with transaction.atomic():
+                cls.objects.get_or_create(
+                    source=source, url=url[:2048],
+                    defaults={"next_at": timezone.now() + cls.BASE_DELAY,
+                              "error_class": error_class(exc)},
+                )
+        except Exception:
+            logger.warning("could not queue retry for %s", url[:200], exc_info=True)
+
+    def failed(self, exc: BaseException, now) -> str:
+        """Back off exponentially, or give up. Returns which one happened."""
+        self.attempts += 1
+        self.error_class = error_class(exc)
+        if classify_exception(exc) is Transient and self.attempts < self.MAX_ATTEMPTS:
+            self.next_at = now + min(self.BASE_DELAY * 2 ** (self.attempts - 1), self.MAX_DELAY)
+            outcome = "rescheduled"
+        else:
+            self.gave_up = True
+            outcome = "gave_up"
+        self.save(update_fields=["attempts", "error_class", "next_at", "gave_up", "updated_at"])
+        return outcome
 
 
 class Strategy(models.TextChoices):
@@ -51,6 +175,25 @@ class HealthStatus(models.TextChoices):
     DEGRADED = "degraded", "Degraded"
 
 
+class Language(models.TextChoices):
+    FA = "fa", "Persian"
+    EN = "en", "English"
+
+
+class LicenseMode(models.TextChoices):
+    FULL = "full", "Store and show the text"
+    # Paywalled or foreign press: keep the facts, show a link, never republish the copy.
+    FACTS_LINK_OUT = "facts_link_out", "Facts and a link out"
+
+
+class SourceRole(models.TextChoices):
+    PRIMARY = "primary", "Primary reporter"
+    AGGREGATOR = "aggregator", "Aggregator"
+
+
+AGGREGATOR_GROUP = "aggregator"
+
+
 class Source(models.Model):
     name = models.SlugField(primary_key=True, max_length=64)
     display_name = models.CharField(max_length=128, blank=True)
@@ -66,6 +209,12 @@ class Source(models.Model):
     priority = models.PositiveSmallIntegerField(default=50)
     enabled = models.BooleanField(default=True)
     public_image_allowed = models.BooleanField(default=False)
+    language = models.CharField(max_length=2, choices=Language, default=Language.FA)
+    # Ownership or editorial control. Two sources in one group are one voice: IRIB News
+    # and YJC repeating a story is not two confirmations.
+    independence_group = models.SlugField(max_length=64, blank=True)
+    license_mode = models.CharField(max_length=16, choices=LicenseMode, default=LicenseMode.FULL)
+    role = models.CharField(max_length=16, choices=SourceRole, default=SourceRole.PRIMARY)
     last_item_published_at = models.DateTimeField(null=True, blank=True)
 
     health_status = models.CharField(
@@ -86,6 +235,14 @@ class Source(models.Model):
     @property
     def supports_backfill(self) -> bool:
         return bool(self.archive_url)
+
+    @property
+    def independence_key(self) -> str | None:
+        """What a confirmation counts against, or None when this source cannot confirm
+        anything: an aggregator only relays what another outlet already said."""
+        if self.role == SourceRole.AGGREGATOR or self.independence_group == AGGREGATOR_GROUP:
+            return None
+        return self.independence_group or self.name
 
     def mark_healthy(self) -> None:
         from django.utils import timezone

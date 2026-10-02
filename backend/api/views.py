@@ -40,7 +40,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from articles.models import Article, EventReview, NewsEvent, UrlStatus
-from core.collection import analysis_summary, collection_summary
+from core.collection import analysis_summary, collection_summary, coverage_summary
 from core.events import priority_visibility, split_article_from_event
 from core.review import SESSION_SIZE, record_decision, review_queue, review_stats, score_tier
 from core.vocabulary import AXES
@@ -140,6 +140,15 @@ class CollectionView(APIView):
         if days not in (1, 7, 14, 30):
             raise ValidationError({"days": "choose 1, 7, 14, or 30"})
         return Response(collection_summary(days))
+
+
+class CoverageView(APIView):
+    """Staff only: ownership groups and failure classes are operational detail."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(coverage_summary())
 
 
 class AnalysisSummaryView(APIView):
@@ -378,7 +387,9 @@ def event_review_cards(queryset):
     """The swipe card reads the reader document plus every article id a split can name."""
     return queryset.select_related(
         "event__primary_article__source", "event__primary_article__image"
-    ).prefetch_related("event__articles__source", "event__assessments")
+    ).prefetch_related(
+        "event__articles__source", "event__assessments", "event__watch_links__item"
+    )
 
 
 def event_review_card(review: EventReview) -> dict:
@@ -387,8 +398,9 @@ def event_review_card(review: EventReview) -> dict:
         **event_document(event),
         "review_reason": review.reason,
         "skipped": review.skipped_at is not None,
-        "iran_tier": score_tier(event.iran_score),
-        "global_tier": score_tier(event.global_score),
+        # Reviewer levels 0-4, distinct from the reader's relative iran_tier/global_tier.
+        "iran_level": score_tier(event.iran_score),
+        "global_level": score_tier(event.global_score),
         "articles": [
             {
                 "id": article.id,
@@ -463,7 +475,7 @@ class EventSplitView(APIView):
             raise ValidationError({"article_id": "must be an integer"}) from exc
         get_object_or_404(NewsEvent, pk=event_id)
         try:
-            split = split_article_from_event(event_id, article_id)
+            split = split_article_from_event(event_id, article_id, request.user)
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc
         review = event_review_cards(EventReview.objects.filter(event_id=event_id)).first()

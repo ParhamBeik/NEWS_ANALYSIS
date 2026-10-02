@@ -13,11 +13,19 @@
 # archive_url  present only where a real history endpoint exists. Absent means the source
 #              cannot backfill, and /ops reports that instead of showing a permanent gap.
 #
+# language            fa | en
+# independence_group  who owns or directs the outlet. Two sources in one group are one
+#                     voice, not two confirmations. `aggregator` never counts as independent.
+# license_mode        full            store and show the text
+#                     facts_link_out  paywalled or foreign press: keep facts, link out
+# role                primary | aggregator
+#
 # Not included, and why:
 #   tasnimnews.com  refuses connections from the Frankfurt datacenter IP (curl exit 000 on
 #                   every endpoint tried, including the bare homepage). Needs a different
 #                   egress path, not a config change.
-#   farsnews.ir     /rss is 404 and redirects to a 404. No working feed endpoint found.
+#   farsnews.ir     every /rss path answers a 4 KB JavaScript app shell, no XML.
+#   Other sources tried from the Tehran server: docs/PRODUCT_MAP.md, "Blocked: network".
 
 khabarfoori:
   display_name: خبرفوری
@@ -26,6 +34,10 @@ khabarfoori:
   archive_url: https://www.khabarfoori.com/بخش-اخبار-2
   tier: 2
   priority: 1
+  language: fa
+  independence_group: aggregator
+  license_mode: full
+  role: aggregator
 
 mehr:
   display_name: مهر
@@ -34,6 +46,10 @@ mehr:
   archive_url: https://www.mehrnews.com/archive
   tier: 1
   priority: 2
+  language: fa
+  independence_group: ido-state
+  license_mode: full
+  role: primary
 
 # IRNA and ISNA share Mehr's CMS and their RSS feeds work, but everything behind the feed
 # is Cloudflare-gated - measured from both this laptop and the Frankfurt VPS, with a full
@@ -56,6 +72,10 @@ irna:
   url: https://www.irna.ir/rss
   tier: 1
   priority: 3
+  language: fa
+  independence_group: irna-state
+  license_mode: full
+  role: primary
 
 isna:
   display_name: ایسنا
@@ -63,6 +83,10 @@ isna:
   url: https://www.isna.ir/rss
   tier: 1
   priority: 4
+  language: fa
+  independence_group: acecr-state
+  license_mode: full
+  role: primary
 
 shahrekhabar:
   display_name: شهر خبر
@@ -70,6 +94,10 @@ shahrekhabar:
   url: https://www.shahrekhabar.com/آخرین-اخبار
   tier: 2
   priority: 5
+  language: fa
+  independence_group: aggregator
+  license_mode: full
+  role: aggregator
 
 # Public primary-source feeds validated as HTTP 200 XML with current items on 2026-09-29.
 # They provide titles, summaries and links; no image redistribution is assumed.
@@ -79,6 +107,10 @@ fed_monetary:
   url: https://www.federalreserve.gov/feeds/press_monetary.xml
   tier: 1
   priority: 6
+  language: en
+  independence_group: fed
+  license_mode: full
+  role: primary
 
 ecb_press:
   display_name: European Central Bank
@@ -86,6 +118,10 @@ ecb_press:
   url: https://www.ecb.europa.eu/rss/press.html
   tier: 1
   priority: 7
+  language: en
+  independence_group: ecb
+  license_mode: full
+  role: primary
 
 eia_press:
   display_name: U.S. Energy Information Administration
@@ -93,6 +129,10 @@ eia_press:
   url: https://www.eia.gov/rss/press_rss.xml
   tier: 1
   priority: 8
+  language: en
+  independence_group: us-eia
+  license_mode: full
+  role: primary
 
 eia_energy:
   display_name: EIA Today in Energy
@@ -100,6 +140,10 @@ eia_energy:
   url: https://www.eia.gov/rss/todayinenergy.xml
   tier: 1
   priority: 9
+  language: en
+  independence_group: us-eia
+  license_mode: full
+  role: primary
 
 # Additional official channels checked for HTTP 200, parseable XML and current entries
 # on 2026-09-29. They are separate feed cursors, even where the institution overlaps.
@@ -109,6 +153,10 @@ fed_enforcement:
   url: https://www.federalreserve.gov/feeds/press_enforcement.xml
   tier: 1
   priority: 10
+  language: en
+  independence_group: fed
+  license_mode: full
+  role: primary
 
 fed_speeches:
   display_name: Federal Reserve speeches and testimony
@@ -116,6 +164,10 @@ fed_speeches:
   url: https://www.federalreserve.gov/feeds/speeches_and_testimony.xml
   tier: 1
   priority: 11
+  language: en
+  independence_group: fed
+  license_mode: full
+  role: primary
 
 ecb_blog:
   display_name: European Central Bank blog
@@ -123,6 +175,10 @@ ecb_blog:
   url: https://www.ecb.europa.eu/rss/blog.html
   tier: 1
   priority: 12
+  language: en
+  independence_group: ecb
+  license_mode: full
+  role: primary
 
 ecb_statistics:
   display_name: European Central Bank statistical releases
@@ -130,6 +186,10 @@ ecb_statistics:
   url: https://www.ecb.europa.eu/rss/statpress.html
   tier: 1
   priority: 13
+  language: en
+  independence_group: ecb
+  license_mode: full
+  role: primary
 
 bea_releases:
   display_name: U.S. Bureau of Economic Analysis
@@ -137,3 +197,347 @@ bea_releases:
   url: https://apps.bea.gov/rss/rss.xml
   tier: 1
   priority: 14
+  language: en
+  independence_group: us-bea
+  license_mode: full
+  role: primary
+
+# Phase 1 catalog, 2026-10-02. Every feed below was fetched from the Tehran server
+# (45.139.10.12) and returned HTTP 200 XML with items from the last few days. All use
+# rss_generic, so these rows store the feed's headline and summary, not the page body.
+# shana and sena run the Saba CMS (same as Mehr); switching them to rss_saba would fetch
+# full text at the cost of one extra request per item.
+
+# --- Iranian, Persian ---------------------------------------------------------------
+irib_news:
+  display_name: خبرگزاری صداوسیما
+  strategy: rss_generic
+  url: https://www.irib-news.ir/fa/rss/allnews
+  tier: 1
+  priority: 15
+  language: fa
+  independence_group: irib-state
+  license_mode: full
+  role: primary
+
+yjc:
+  display_name: باشگاه خبرنگاران جوان
+  strategy: rss_generic
+  url: https://www.yjc.ir/fa/rss/allnews
+  tier: 2
+  priority: 16
+  language: fa
+  independence_group: irib-state
+  license_mode: full
+  role: primary
+
+asriran:
+  display_name: عصر ایران
+  strategy: rss_generic
+  url: https://www.asriran.com/fa/rss/allnews
+  tier: 2
+  priority: 17
+  language: fa
+  independence_group: private-asriran
+  license_mode: full
+  role: primary
+
+entekhab:
+  display_name: انتخاب
+  strategy: rss_generic
+  url: https://www.entekhab.ir/fa/rss/allnews
+  tier: 2
+  priority: 18
+  language: fa
+  independence_group: private-entekhab
+  license_mode: full
+  role: primary
+
+khabaronline:
+  display_name: خبرآنلاین
+  strategy: rss_generic
+  url: https://www.khabaronline.ir/rss
+  tier: 2
+  priority: 19
+  language: fa
+  independence_group: private-khabaronline
+  license_mode: full
+  role: primary
+
+hamshahri:
+  display_name: همشهری آنلاین
+  strategy: rss_generic
+  url: https://www.hamshahrionline.ir/rss
+  tier: 2
+  priority: 20
+  language: fa
+  independence_group: tehran-municipality
+  license_mode: full
+  role: primary
+
+ilna:
+  display_name: ایلنا
+  strategy: rss_generic
+  url: https://www.ilna.ir/feeds
+  tier: 2
+  priority: 21
+  language: fa
+  independence_group: workers-house
+  license_mode: full
+  role: primary
+
+nournews:
+  display_name: نورنیوز
+  strategy: rss_generic
+  url: https://nournews.ir/feeds/
+  tier: 2
+  priority: 22
+  language: fa
+  independence_group: snsc-affiliated
+  license_mode: full
+  role: primary
+
+shargh:
+  display_name: شرق
+  strategy: rss_generic
+  url: https://www.sharghdaily.com/fa/feeds
+  tier: 2
+  priority: 23
+  language: fa
+  independence_group: private-reformist-shargh
+  license_mode: full
+  role: primary
+
+etemad:
+  display_name: اعتماد
+  strategy: rss_generic
+  url: https://www.etemadonline.com/feeds/
+  tier: 2
+  priority: 24
+  language: fa
+  independence_group: private-reformist-etemad
+  license_mode: full
+  role: primary
+
+# Economy and markets.
+shana:
+  display_name: شانا
+  strategy: rss_generic
+  url: https://www.shana.ir/rss
+  tier: 1
+  priority: 25
+  language: fa
+  independence_group: oil-ministry
+  license_mode: full
+  role: primary
+
+sena:
+  display_name: سنا
+  strategy: rss_generic
+  url: https://www.sena.ir/rss
+  tier: 1
+  priority: 26
+  language: fa
+  independence_group: seo-state
+  license_mode: full
+  role: primary
+
+donya_eqtesad:
+  display_name: دنیای اقتصاد
+  strategy: rss_generic
+  url: https://donya-e-eqtesad.com/fa/feeds/
+  tier: 1
+  priority: 27
+  language: fa
+  independence_group: private-donya-eqtesad
+  license_mode: full
+  role: primary
+
+eghtesadonline:
+  display_name: اقتصادآنلاین
+  strategy: rss_generic
+  url: https://www.eghtesadonline.com/fa/rss/allnews
+  tier: 2
+  priority: 28
+  language: fa
+  independence_group: private-eghtesadonline
+  license_mode: full
+  role: primary
+
+eghtesadnews:
+  display_name: اقتصادنیوز
+  strategy: rss_generic
+  url: https://www.eghtesadnews.com/fa/feeds/
+  tier: 2
+  priority: 29
+  language: fa
+  independence_group: private-eghtesadnews
+  license_mode: full
+  role: primary
+
+ecoiran:
+  display_name: اکوایران
+  strategy: rss_generic
+  url: https://ecoiran.com/fa/feeds/
+  tier: 2
+  priority: 30
+  language: fa
+  independence_group: private-ecoiran
+  license_mode: full
+  role: primary
+
+tejaratnews:
+  display_name: تجارت نیوز
+  strategy: rss_generic
+  url: https://tejaratnews.com/feed
+  tier: 2
+  priority: 31
+  language: fa
+  independence_group: private-tejaratnews
+  license_mode: full
+  role: primary
+
+# --- Official ----------------------------------------------------------------------
+iaea_news:
+  display_name: IAEA top news
+  strategy: rss_generic
+  url: https://www.iaea.org/feeds/topnews
+  tier: 1
+  priority: 32
+  language: en
+  independence_group: iaea
+  license_mode: full
+  role: primary
+
+state_dept:
+  display_name: U.S. State Department press releases
+  strategy: rss_generic
+  url: https://www.state.gov/rss-feed/press-releases/feed/
+  tier: 1
+  priority: 33
+  language: en
+  independence_group: us-state-dept
+  license_mode: full
+  role: primary
+
+un_news:
+  display_name: UN News
+  strategy: rss_generic
+  url: https://news.un.org/feed/subscribe/en/news/all/rss.xml
+  tier: 1
+  priority: 34
+  language: en
+  independence_group: un
+  license_mode: full
+  role: primary
+
+# --- International press: facts and a link, never the copy -------------------------
+aljazeera:
+  display_name: Al Jazeera
+  strategy: rss_generic
+  url: https://www.aljazeera.com/xml/rss/all.xml
+  tier: 2
+  priority: 35
+  language: en
+  independence_group: foreign-press-aljazeera
+  license_mode: facts_link_out
+  role: primary
+
+wsj_world:
+  display_name: WSJ World
+  strategy: rss_generic
+  url: https://feeds.content.dowjones.io/public/rss/RSSWorldNews
+  tier: 2
+  priority: 36
+  language: en
+  independence_group: foreign-press-dowjones
+  license_mode: facts_link_out
+  role: primary
+
+ft_world:
+  display_name: FT World
+  strategy: rss_generic
+  url: https://www.ft.com/world?format=rss
+  tier: 2
+  priority: 37
+  language: en
+  independence_group: foreign-press-ft
+  license_mode: facts_link_out
+  role: primary
+
+cnbc_world:
+  display_name: CNBC World
+  strategy: rss_generic
+  url: https://www.cnbc.com/id/100727362/device/rss/rss.html
+  tier: 2
+  priority: 38
+  language: en
+  independence_group: foreign-press-cnbc
+  license_mode: facts_link_out
+  role: primary
+
+guardian_iran:
+  display_name: The Guardian, Iran
+  strategy: rss_generic
+  url: https://www.theguardian.com/world/iran/rss
+  tier: 2
+  priority: 39
+  language: en
+  independence_group: foreign-press-guardian
+  license_mode: facts_link_out
+  role: primary
+
+oilprice:
+  display_name: Oilprice.com
+  strategy: rss_generic
+  url: https://oilprice.com/rss/main
+  tier: 2
+  priority: 40
+  language: en
+  independence_group: foreign-press-oilprice
+  license_mode: facts_link_out
+  role: primary
+
+anadolu:
+  display_name: Anadolu Agency
+  strategy: rss_generic
+  url: https://www.aa.com.tr/en/rss/default?cat=guncel
+  tier: 2
+  priority: 41
+  language: en
+  independence_group: foreign-press-anadolu
+  license_mode: facts_link_out
+  role: primary
+
+middle_east_eye:
+  display_name: Middle East Eye
+  strategy: rss_generic
+  url: https://www.middleeasteye.net/rss
+  tier: 2
+  priority: 42
+  language: en
+  independence_group: foreign-press-middleeasteye
+  license_mode: facts_link_out
+  role: primary
+
+al_monitor:
+  display_name: Al-Monitor
+  strategy: rss_generic
+  url: https://www.al-monitor.com/rss
+  tier: 2
+  priority: 43
+  language: en
+  independence_group: foreign-press-almonitor
+  license_mode: facts_link_out
+  role: primary
+
+france24_mideast:
+  display_name: France 24, Middle East
+  strategy: rss_generic
+  url: https://www.france24.com/en/middle-east/rss
+  tier: 2
+  priority: 44
+  language: en
+  independence_group: foreign-press-france24
+  license_mode: facts_link_out
+  role: primary
