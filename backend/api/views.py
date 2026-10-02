@@ -766,6 +766,17 @@ class OpsStaffView(APIView):
         return Response(staff_ops())
 
 
+class CalibrationView(APIView):
+    """Staff only: does a higher impact tier come with bigger market moves?"""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        from market.reactions import calibration
+
+        return Response(calibration())
+
+
 class KPIView(APIView):
     """Quality, not throughput: does the model agree with a human, and was it right about
     the gold price?"""
@@ -894,9 +905,25 @@ class MarketView(APIView):
         symbol = request.query_params.get("symbol", Symbol.GOLD_18K)
         if symbol not in Symbol.values:
             raise ValidationError({"symbol": f"must be one of {Symbol.values}"})
-        series = PriceSnapshot.objects.filter(symbol=symbol, observed_at__gte=since).order_by(
-            "observed_at"
-        )
+        if settings.NEWS_MARKET_SOURCE == "portfolio":
+            from .public import _shared_series
+
+            days = max(1, (timezone.now() - since).days)
+            series = [
+                {"symbol": symbol, "price": point["price"], "observed_at": point["observed_at"]}
+                for point in _shared_series(symbol, days)["points"]
+            ]
+            latest = series[-1] if series else None
+        else:
+            rows = PriceSnapshot.objects.filter(symbol=symbol, observed_at__gte=since)
+            series = PriceSnapshotSerializer(rows.order_by("observed_at"), many=True).data
+            latest = (
+                PriceSnapshotSerializer(
+                    PriceSnapshot.objects.filter(symbol=symbol).order_by("-observed_at").first()
+                ).data
+                if series
+                else None
+            )
         outcomes = (
             PredictionOutcome.objects.filter(symbol=symbol, computed_at__gte=since)
             .select_related("evaluation")
@@ -906,12 +933,9 @@ class MarketView(APIView):
             {
                 "symbol": symbol,
                 "symbols": [{"value": value, "label": label} for value, label in Symbol.choices],
-                "series": PriceSnapshotSerializer(series, many=True).data,
-                "latest": PriceSnapshotSerializer(
-                    PriceSnapshot.objects.filter(symbol=symbol).order_by("-observed_at").first()
-                ).data
-                if series.exists()
-                else None,
+                "source": settings.NEWS_MARKET_SOURCE,
+                "series": series,
+                "latest": latest,
                 "outcomes": PredictionOutcomeSerializer(outcomes, many=True).data,
             }
         )

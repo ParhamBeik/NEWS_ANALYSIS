@@ -14,8 +14,8 @@ backend/                 Django + DRF + Celery application
   articles/              article/image/embedding storage, ingest, deduplication
   inference/             prompts, providers, budgets, circuits, inference tasks
   review/                human labels and blinded A/B comparisons
-  market/                TGJU prices and prediction backtests
-  exports/               Persian workbooks and category feeds
+  market/                prices (TGJU poller, Portfolio client) and event back-tests
+  exports/               Persian workbooks and category feeds, built from events
   api/                   authenticated read API
 frontend/                Next.js App Router dashboard
 deploy/                  Docker Compose, Caddy, backup, and release checks

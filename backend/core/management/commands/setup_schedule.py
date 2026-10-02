@@ -44,6 +44,8 @@ INTERVAL_TASKS = [
     ("inference-cycle", "inference.run_cycle", 30, IntervalSchedule.MINUTES, {}),
     ("poll-market-prices", "market.poll_prices", 15, IntervalSchedule.MINUTES, {}),
     ("backtest-predictions", "market.backtest_predictions", 1, IntervalSchedule.HOURS, {}),
+    # A few Portfolio series reads per run, and a counted skip while it is not connected.
+    ("event-reactions", "market.compute_event_reactions", 1, IntervalSchedule.HOURS, {}),
     ("source-canary", "sources.canary", 1, IntervalSchedule.HOURS, {}),
     ("download-pending-images", "articles.tasks.download_pending_images", 1,
      IntervalSchedule.HOURS, {}),

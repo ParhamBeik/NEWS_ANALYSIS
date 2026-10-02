@@ -44,12 +44,15 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Event page | `frontend/app/events/[id]/` | Live |
 | Market-impact chart | `frontend/app/events/[id]/market/` | Live; asset data limited until portfolio contract |
 | Staff swipe review | `frontend/app/review/swipe/`, `core/review.py` | Live (staff login) |
-| Old article pipeline | `inference` classify/evaluate/summarize, `/review`, `/kpi`, workbooks | Schedule **disabled** (replaced by events); workbooks stale until re-fed |
+| Old article pipeline | `inference` classify/evaluate/summarize, `/review`, `/kpi` | Schedule **disabled** (replaced by events) |
+| Analyst workbooks | `exports/workbook.py`, `exports.build_daily_workbook` (23:50 nightly) | Re-fed from events: occurrence = evidence level, gold = Jev gold relevance, security = Iran score (security topics only), notes = brief + watch items. «جهت طلا» stays **blank**: Jev predicts no direction. Last `EXPORT_KEEP_DAYS` (60) days kept |
+| Event back-test | `market/reactions.py`, `market.EventReaction`, task `market.compute_event_reactions` (hourly) | Built: tier ≥3 events × relevant Portfolio assets; ±2h/+1d (global), +1/+3 trading days (Iran); \|z\| vs trailing 30 days. Skips (counted on /ops) until Portfolio is connected |
+| Price source switch | `NEWS_MARKET_SOURCE=tgju\|portfolio` | `tgju` (default): pages read the TGJU poller; `portfolio`: they read Portfolio. Poller still runs |
 | Alerts (web push) | `articles.AlertSubscription`, `NEWS_ALERTS_ENABLED` | Built; off |
 | Reader accounts | `accounts/`, `core/otp.py`, `api/accounts.py`, `/login`, `/onboarding`, `/settings` | Built (Phase 5): phone OTP via Kavenegar, **off until keys**; staff password login unchanged |
 | Watchlists + personal radar | `accounts.Watch`, `lib/reader.js` `boostWatched` | Built (Phase 5): ≥3 watch items at onboarding; watched events marked and lifted 5 places |
 | Watchlist alerts | `core/alerts.py`, `accounts.fan_out_event`, `/inbox` | Built (Phase 5), behind `NEWS_ALERTS_ENABLED`: dial, 5 pushes/day, quiet hours 23-07, tier 5 exempt; inbox always; web push + FCM adapters, Pushe/Najva tokens stored only |
-| Ops dashboard | `frontend/app/ops/`, `api` `OpsView`, `OpsStaffView`, `core/ops.py` | Live; staff panels: AI cost vs ceilings, errors by cause, freshness SLO (Phase 3) |
+| Ops dashboard | `frontend/app/ops/`, `api` `OpsView`, `OpsStaffView`, `CalibrationView`, `core/ops.py` | Live; staff panels: AI cost vs ceilings, errors by cause, freshness SLO (Phase 3), market calibration per tier/asset class |
 | Staff ops alerts | `core/ops_alerts.py`, task `core.ops_alerts` | Every 5 min, 6 h dedup; logs always, email/webhook once `EMAIL_HOST` / `OPS_ALERT_WEBHOOK_URL` are set |
 | Deploy | `.github/workflows/`, `deploy/` | `main` → CI → GHCR → Mac runner → server; health gate + auto-rollback |
 
@@ -84,6 +87,7 @@ with `date_uncertain`.
 4. Phone login: `KAVENEGAR_API_KEY` + `KAVENEGAR_OTP_TEMPLATE` (a Verify template with one `%token`).
 5. Push: VAPID keys (web), Firebase service account + project id (app); pick Pushe or Najva for an adapter.
 6. Optional email digest: SMTP `EMAIL_HOST`/user/password.
+7. Portfolio prices: `PORTFOLIO_MARKET_*` in the server `.env`, then `NEWS_MARKET_SOURCE=portfolio` once its series answer; confirm Portfolio keys for gold/fx (assumed `gold_18k`, `usd_irr`) and whether `interval=1h` is served (without it the ±2h window is never scored).
 
 ## Next build phases
 

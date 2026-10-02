@@ -23,8 +23,15 @@ CATALOG_TTL = 60 * 60
 SNAPSHOT_TTL = 60
 SERIES_TTL = 10 * 60
 
-#: Keys the reader timeline used against the retired `shared-series` endpoint.
-LEGACY_KEYS = {"tehran_index": "tedpix", "bitcoin": "btc_usd", "oil": "brent"}
+#: Old asset keys -> Portfolio keys: the reader timeline's `shared-series` names and Jev's
+#: five asset classes (`EventAssessment.asset_scores`), which use the same names.
+LEGACY_KEYS = {
+    "tehran_index": "tedpix",
+    "bitcoin": "btc_usd",
+    "oil": "brent",
+    "fx": "usd_irr",
+    "gold": "gold_18k",
+}
 
 
 def configured() -> bool:

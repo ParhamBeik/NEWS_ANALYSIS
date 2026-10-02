@@ -417,7 +417,9 @@ class PublicTimelineView(ReaderView):
         since = timezone.now() - timedelta(days=days)
         caveats = []
         asset = {"key": symbol, **catalog[symbol]}
-        if symbol in Symbol.values:
+        # NEWS_MARKET_SOURCE=portfolio routes the TGJU symbols through Portfolio too.
+        local = symbol in Symbol.values and settings.NEWS_MARKET_SOURCE == "tgju"
+        if local:
             points = list(
                 PriceSnapshot.objects.filter(
                     symbol=symbol,
@@ -472,9 +474,7 @@ class PublicTimelineView(ReaderView):
             {
                 "asset": asset,
                 "range": window,
-                "resolution": remote.get("resolution", "observations")
-                if symbol not in Symbol.values
-                else "observations",
+                "resolution": "observations" if local else remote.get("resolution", "daily"),
                 "as_of": timezone.now(),
                 "points": points,
                 "events": markers,
