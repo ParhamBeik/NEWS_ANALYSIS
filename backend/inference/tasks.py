@@ -163,10 +163,12 @@ def assess_event(self, event_id: int) -> dict:
         match_probability = float(matched.get("probabilities", {}).get(choice, 0))
     except (TypeError, ValueError):
         match_probability = 0
+    merged = False
     if choice in candidates and 0.9 <= match_probability <= 1:
         from core.events import merge_events
 
         event = merge_events(int(choice.removeprefix("event_")), event_id)
+        merged = event.id != event_id
         event_id = event.id
     EventAssessment.objects.create(
         event=event,
@@ -201,9 +203,11 @@ def assess_event(self, event_id: int) -> dict:
     ):
         summarize_event.delay(event_id)
     if settings.NEWS_ALERTS_ENABLED:
+        from accounts.tasks import fan_out_event
         from articles.tasks import alert_event
 
         alert_event.apply_async(args=[event_id], countdown=30)
+        fan_out_event.apply_async(args=[event_id], kwargs={"merged": merged}, countdown=30)
     return {"status": "assessed", "event": event_id}
 
 

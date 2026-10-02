@@ -36,7 +36,7 @@ for path in (
 # The event pipeline replaced the per-article inference cycle, which setup_schedule now
 # keeps disabled; gate on the job that actually drives assessment.
 expected = ("crawl-all-sources", "assess-pending-events", "weekly-circuit-probe",
-            "nightly-storylines")
+            "nightly-storylines", "daily-email-digest")
 enabled = set(PeriodicTask.objects.filter(name__in=expected, enabled=True).values_list("name", flat=True))
 assert enabled == set(expected), f"schedules not enabled: {sorted(set(expected) - enabled)}"
 '

@@ -104,6 +104,29 @@ def test_high_confidence_cross_language_match_keeps_both_source_articles(make_ar
     assert first.articles.count() == 2
 
 
+def test_a_merging_assessment_tells_the_alert_fan_out_it_merged(make_article):
+    first = attach_article(make_article(original_title="Iran central bank changes reserve policy"))
+    second = attach_article(make_article(original_title="Reserve policy changed in Tehran"))
+    response = {"model": "typesafe/jev-1.13", "usage": {"cost": 0}, "answers": {
+        "same_event": {"choice": f"event_{first.id}",
+                       "probabilities": {f"event_{first.id}": 0.96}},
+        "category": {"choice": "macro_monetary", "confidence": 0.95},
+        "iran": {"score": 3, "confidence": 0.95},
+        "global": {"score": 2, "confidence": 0.95},
+        **{f"asset_{key}": {"score": 1} for key in
+           ("fx", "gold", "tehran_index", "oil", "bitcoin")},
+    }}
+    with override_settings(TYPESAFE_API_KEY="test-key", NEWS_ALERTS_ENABLED=True), \
+            patch("inference.jev.decide", return_value=response), \
+            patch("inference.tasks.summarize_event.delay"), \
+            patch("articles.tasks.alert_event.apply_async"), \
+            patch("accounts.tasks.fan_out_event.apply_async") as fan_out:
+        assess_event.run(second.id)
+    assert fan_out.call_args.kwargs == {
+        "args": [first.id], "kwargs": {"merged": True}, "countdown": 30,
+    }
+
+
 def test_malformed_jev_answer_does_not_merge_events(make_article):
     first = attach_article(make_article(original_title="Iran bank updates reserves"))
     second = attach_article(make_article(
