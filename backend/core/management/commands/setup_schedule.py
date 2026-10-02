@@ -35,6 +35,8 @@ TEHRAN = "Asia/Tehran"
 
 INTERVAL_TASKS = [
     ("crawl-all-sources", "sources.crawl_all", 2, IntervalSchedule.MINUTES, {}),
+    # The shortest FetchRetry backoff is 5 minutes, so polling faster finds nothing due.
+    ("drain-fetch-retries", "sources.drain_fetch_retries", 5, IntervalSchedule.MINUTES, {}),
     ("assess-pending-events", "inference.assess_pending_events", 5, IntervalSchedule.MINUTES, {}),
     ("inference-cycle", "inference.run_cycle", 30, IntervalSchedule.MINUTES, {}),
     ("poll-market-prices", "market.poll_prices", 15, IntervalSchedule.MINUTES, {}),

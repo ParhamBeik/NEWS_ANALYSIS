@@ -37,6 +37,14 @@ export default async function OpsPage({ searchParams }) {
     throw error;
   }
 
+  // Staff only. A signed-in non-staff user still sees the rest of the page.
+  let coverage = null;
+  try {
+    coverage = await apiGet("/api/coverage/");
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 403)) throw error;
+  }
+
   const { funnel, budget } = ops;
   const maxCost = Math.max(...ops.cost_by_day.map((row) => row.cost), 0.0001);
   const overBudget = budget.spent_today_usd > budget.daily_ceiling_usd;
@@ -360,7 +368,66 @@ export default async function OpsPage({ searchParams }) {
             </table>
           </TableScroll>
         </Card>
+
+        {coverage && <CoverageTable coverage={coverage} />}
       </div>
     </>
+  );
+}
+
+const GAP_TONE = { gap: "text-rose-400", unknown: "text-amber-400" };
+
+function CoverageTable({ coverage }) {
+  return (
+    <Card className="p-4 lg:col-span-2">
+      <SectionTitle hint={`gap hours over the last ${coverage.window_days} days`}>
+        Source coverage
+      </SectionTitle>
+      <TableScroll>
+        <table className="w-full min-w-[640px] text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
+              <th className="pb-1">Source</th>
+              <th className="pb-1">Lang</th>
+              <th className="pb-1">Group</th>
+              <th className="pb-1">Health</th>
+              <th className="pb-1">Last success</th>
+              <th className="pb-1">Open gap</th>
+              <th className="pb-1 text-right">Gap h</th>
+              <th className="pb-1 text-right">Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {coverage.sources.map((row) => (
+              <tr
+                key={row.name}
+                className={`border-t border-slate-800 ${row.enabled ? "" : "opacity-50"}`}
+              >
+                <td className="py-1.5 text-slate-300">{row.display_name}</td>
+                <td className="py-1.5 text-xs text-slate-500">{row.language}</td>
+                <td className="py-1.5 font-mono text-xs text-slate-500">
+                  {row.independence_group || "—"}
+                </td>
+                <td className={`py-1.5 text-xs ${HEALTH_TONE[row.health] || "text-slate-500"}`}>
+                  {row.health}
+                </td>
+                <td className="whitespace-nowrap py-1.5 text-xs text-slate-500">
+                  {row.last_success_at ? tehranTime(row.last_success_at) : "never"}
+                </td>
+                <td className={`whitespace-nowrap py-1.5 text-xs ${GAP_TONE[row.open_gap?.state] || ""}`}>
+                  {row.open_gap
+                    ? `${row.open_gap.state}${row.open_gap.since ? ` since ${tehranTime(row.open_gap.since)}` : ""}`
+                    : "—"}
+                </td>
+                <td className="py-1.5 text-right tabular">{row.gap_hours_7d}</td>
+                <td className="py-1.5 text-right text-xs text-slate-400">
+                  {row.error_class || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+    </Card>
   );
 }

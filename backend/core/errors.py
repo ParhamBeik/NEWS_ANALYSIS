@@ -17,6 +17,8 @@ nine HTTP calls and nine budget charges for one logical inference.
 
 from __future__ import annotations
 
+import re
+
 
 class PipelineError(Exception):
     """Base for errors the runtime knows how to route."""
@@ -50,3 +52,32 @@ def classify_exception(exc: BaseException) -> type[PipelineError]:
     name = type(exc).__name__.lower()
     retryable = ("timeout", "connection", "ssl", "socket")
     return Transient if any(marker in name for marker in retryable) else Permanent
+
+
+# Why a fetch failed, in the words an operator acts on. Stored on CrawlAttempt and
+# CoverageInterval; the exception class name alone said "Transient" for both a 429 and a
+# dropped connection, which need opposite responses (slow down vs. wait).
+ERROR_CLASSES = ("network", "blocked", "parse", "rate_limit", "gone", "provider")
+_STATUS_IN_MESSAGE = re.compile(r"\bHTTP (\d{3})\b")
+
+
+def error_class(exc: BaseException) -> str:
+    """Map a fetch failure onto ERROR_CLASSES. Unknown means `parse`: anything that is
+    not the network, the remote refusing us, or our own provider is our code meeting a
+    page it did not expect."""
+    if isinstance(exc, Gone):
+        return "gone"
+    if isinstance(exc, Fatal):
+        return "provider"
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is None and (match := _STATUS_IN_MESSAGE.search(str(exc))):
+        status = int(match.group(1))
+    if status == 429:
+        return "rate_limit"
+    if status in {404, 410}:
+        return "gone"
+    if status in {401, 403, 451} or "blocked" in type(exc).__name__.lower():
+        return "blocked"
+    if (status and status >= 500) or classify_exception(exc) is Transient:
+        return "network"
+    return "parse"
