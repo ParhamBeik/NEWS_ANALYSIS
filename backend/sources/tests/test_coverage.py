@@ -59,3 +59,27 @@ def test_failed_crawl_opens_classified_gap(source):
     assert CrawlAttempt.objects.get().error_class == "blocked"
     gap = CoverageInterval.objects.get()
     assert (gap.state, gap.error_class) == ("gap", "blocked")
+
+
+@pytest.mark.django_db
+def test_closing_a_gap_queues_one_bounded_backfill(source, django_capture_on_commit_callbacks):
+    from sources.extraction import RawArticle
+    from sources.tasks import backfill_gap
+
+    started = timezone.now() - timedelta(hours=5)
+    CoverageInterval.objects.create(source=source, started_at=started,
+                                    ended_at=timezone.now(), state="gap", error_class="network")
+    raw = RawArticle(source=source.name, url="https://www.mehrnews.com/news/77",
+                     title="تیتر بازیابی‌شده", content="متن کامل " * 40)
+    with patch("sources.tasks.strategies.fetch", return_value=[raw]), \
+            patch("sources.tasks.backfill_gap.delay") as queued, \
+            django_capture_on_commit_callbacks(execute=True):
+        crawl_source.apply(args=[source.name], throw=True)
+        crawl_source.apply(args=[source.name], throw=True)  # still covered: no second run
+    queued.assert_called_once_with(source.name, started.date().isoformat())
+
+    archive = [RawArticle(source=source.name, url=f"https://www.mehrnews.com/news/{n}",
+                          title=f"تیتر آرشیو {n}", content="متن " * 40) for n in (78, 79)]
+    with patch("sources.tasks.strategies.backfill", return_value=iter(archive)), \
+            patch("sources.tasks.BACKFILL_MAX_ARTICLES", 1):
+        assert backfill_gap.run(source.name, started.date().isoformat())["new"] == 1
