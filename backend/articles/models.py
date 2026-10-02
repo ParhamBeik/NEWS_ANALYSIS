@@ -134,6 +134,14 @@ class NewsEvent(models.Model):
         CORRECTED = "corrected", "Corrected"
         WITHDRAWN = "withdrawn", "Withdrawn"
 
+    class Evidence(models.TextChoices):
+        """How independently the occurrence is reported; see core.events.evidence_level."""
+
+        SINGLE = "single", "One source group"
+        MULTI = "multi", "Several independent source groups"
+        OFFICIAL = "official", "Reported by an official source"
+        DISPUTED = "disputed", "Sources disagree"
+
     primary_article = models.OneToOneField(
         Article, on_delete=models.PROTECT, related_name="led_event"
     )
@@ -141,6 +149,7 @@ class NewsEvent(models.Model):
     event_time = models.DateTimeField(db_index=True)
     first_seen_at = models.DateTimeField(db_index=True)
     status = models.CharField(max_length=16, choices=Status, default=Status.DEVELOPING)
+    evidence_level = models.CharField(max_length=16, choices=Evidence, default=Evidence.SINGLE)
     category = models.CharField(max_length=32, blank=True, db_index=True)
     iran_score = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
     global_score = models.PositiveSmallIntegerField(null=True, blank=True)

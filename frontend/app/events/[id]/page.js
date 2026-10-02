@@ -3,7 +3,7 @@ import EventImage from "@/components/EventImage";
 import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { language, label } from "@/lib/language";
 import { loadEvent } from "./load";
-import { digits, groupSources, headline, sep } from "@/lib/reader";
+import { EVIDENCE, digits, groupSources, headline, sep } from "@/lib/reader";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +45,7 @@ export default async function EventDetail({ params }) {
         {primaryName ? <span className="font-semibold text-ink">{primaryName}</span> : null}
         <When iso={event.event_time} lang={lang} time />
         <StatusBadge status={event.status} lang={lang} />
+        {EVIDENCE[event.evidence_level] ? <span className="rounded-full border border-line px-2.5 py-0.5 text-xs">{EVIDENCE[event.evidence_level][lang]}</span> : null}
       </div>
       <div className="grid gap-3 rounded-2xl border border-line bg-card p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-center">
         <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge tier={event.iran_tier} lang={lang} prefix={false} /></div>

@@ -134,6 +134,7 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
     document = {
         "id": event.id,
         "status": event.status,
+        "evidence_level": event.evidence_level,
         "category": event_topic(event.category) or None,
         "title": event.title_fa or primary.original_title,
         "title_fa": event.title_fa or None,

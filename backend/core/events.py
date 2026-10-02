@@ -88,11 +88,26 @@ def kept_apart(event_id: int) -> set[int]:
     return set(against_ours) | set(ours_against)
 
 
+def evidence_level(articles, current: str = "") -> str:
+    """single / multi / official from distinct source groups; `disputed` is staff-set.
+
+    Outlets in one independence group (e.g. state agencies that copy each other) count
+    once. Until sources carry `independence_group`, each source is its own group.
+    """
+    if current == NewsEvent.Evidence.DISPUTED:
+        return current
+    groups = {getattr(a.source, "independence_group", "") or a.source.name for a in articles}
+    if any(group.startswith("official") for group in groups):
+        return NewsEvent.Evidence.OFFICIAL
+    return NewsEvent.Evidence.MULTI if len(groups) > 1 else NewsEvent.Evidence.SINGLE
+
+
 def refresh_event(event: NewsEvent) -> None:
-    """Keep the timeline and correction state in sync with source observations."""
-    articles = list(event.articles.all())
+    """Keep the timeline, correction state and evidence level in sync with the sources."""
+    articles = list(event.articles.select_related("source"))
     if not articles:
         return
+    event.evidence_level = evidence_level(articles, event.evidence_level)
     event.event_time = min(a.published_at or a.fetched_at for a in articles)
     event.first_seen_at = min(a.created_at or a.fetched_at for a in articles)
     if all(a.url_status == UrlStatus.GONE for a in articles):
@@ -101,7 +116,9 @@ def refresh_event(event: NewsEvent) -> None:
         event.status = NewsEvent.Status.CORRECTED
     elif event.assessments.exists():
         event.status = NewsEvent.Status.ASSESSED
-    event.save(update_fields=["event_time", "first_seen_at", "status", "updated_at"])
+    event.save(
+        update_fields=["event_time", "first_seen_at", "status", "evidence_level", "updated_at"]
+    )
 
 
 @transaction.atomic

@@ -112,6 +112,14 @@ export const STATUS = {
   withdrawn: { en: "Withdrawn", fa: "پس‌گرفته‌شده", tone: "alert" },
 };
 
+/** How independently the occurrence is reported (core.events.evidence_level). */
+export const EVIDENCE = {
+  single: { en: "One source group", fa: "یک گروه منبع" },
+  multi: { en: "Independent sources", fa: "منابع مستقل" },
+  official: { en: "Official source", fa: "منبع رسمی" },
+  disputed: { en: "Sources disagree", fa: "روایت‌های متناقض" },
+};
+
 export function sourceCount(event) {
   return new Set((event.sources || []).map((source) => source.original_outlet || source.name)).size;
 }
