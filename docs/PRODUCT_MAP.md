@@ -41,7 +41,8 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Staff swipe review | `frontend/app/review/swipe/`, `core/review.py` | Live (staff login) |
 | Old article pipeline | `inference` classify/evaluate/summarize, `/review`, `/kpi`, workbooks | Schedule **disabled** (replaced by events); workbooks stale until re-fed |
 | Alerts (web push) | `articles.AlertSubscription`, `NEWS_ALERTS_ENABLED` | Built; off |
-| Ops dashboard | `frontend/app/ops/`, `api` `OpsView` | Live |
+| Ops dashboard | `frontend/app/ops/`, `api` `OpsView`, `OpsStaffView`, `core/ops.py` | Live; staff panels: AI cost vs ceilings, errors by cause, freshness SLO (Phase 3) |
+| Staff ops alerts | `core/ops_alerts.py`, task `core.ops_alerts` | Every 5 min, 6 h dedup; logs always, email/webhook once `EMAIL_HOST` / `OPS_ALERT_WEBHOOK_URL` are set |
 | Deploy | `.github/workflows/`, `deploy/` | `main` → CI → GHCR → Mac runner → server; health gate + auto-rollback |
 
 ## Blocked: network

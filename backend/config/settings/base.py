@@ -285,6 +285,16 @@ NEWS_VAPID_PRIVATE_KEY = env("NEWS_VAPID_PRIVATE_KEY")
 NEWS_VAPID_SUBJECT = env("NEWS_VAPID_SUBJECT")
 # Keep delivery off until the reviewed shadow sample meets the alert quality gate.
 NEWS_ALERTS_ENABLED = env_bool("NEWS_ALERTS_ENABLED", False)
+# Staff ops notices (core.ops_alerts). Email only when EMAIL_HOST is set; the webhook gets a
+# JSON {"text", "alerts"} POST only when its URL is set. Both off by default: always logged.
+EMAIL_HOST = env("EMAIL_HOST")
+EMAIL_PORT = env_int("EMAIL_PORT", 587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", "newsintel@localhost")
+OPS_ALERT_WEBHOOK_URL = env("OPS_ALERT_WEBHOOK_URL")
 # Runaway-loop breaker on request COUNT, not money. Belongs well above a normal cycle.
 NEWS_MAX_PROVIDER_CALLS_PER_RUN = env_int("NEWS_MAX_PROVIDER_CALLS_PER_RUN", 1000)
 # Automatic provider halt. Not a user toggle: the first empty-wallet response opens the
