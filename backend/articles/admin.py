@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from core.admin import EvidenceAdmin
 
-from .models import Article, EventReview, NewsEvent
+from .models import Article, EventReview, NewsEvent, WatchItem
 
 
 @admin.register(Article)
@@ -56,3 +56,10 @@ class EventReviewAdmin(admin.ModelAdmin):
             obj.reviewer = request.user
             obj.reviewed_at = timezone.now()
         super().save_model(request, obj, form, change)
+
+
+@admin.register(WatchItem)
+class WatchItemAdmin(admin.ModelAdmin):
+    list_display = ["slug", "kind", "name_en", "name_fa", "enabled"]
+    list_filter = ["kind", "enabled"]
+    search_fields = ["slug", "name_en", "name_fa"]

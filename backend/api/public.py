@@ -19,8 +19,10 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 
-from articles.models import AlertSubscription, NewsEvent
+from articles.models import AlertSubscription, NewsEvent, StorylineEvent
+from core import tiers
 from core.events import ranked_events
+from core.vocabulary import event_topic
 from market import portfolio
 from market.models import PriceSnapshot, Symbol
 from sources.models import Source
@@ -118,7 +120,7 @@ class AlertSubscriptionView(APIView):
         return Response(status=204)
 
 
-def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
+def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None = None) -> dict:
     articles = sorted(event.articles.all(), key=lambda row: row.published_at or row.fetched_at)
     primary = event.primary_article
     image = getattr(primary, "image", None)
@@ -129,10 +131,12 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
     permitted_image = card.url if card else None
     permitted_large = image.file.url if allowed and image.file else None
     latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
+    asset_scores = latest.asset_scores if latest else {}
     document = {
         "id": event.id,
         "status": event.status,
-        "category": event.category or None,
+        "evidence_level": event.evidence_level,
+        "category": event_topic(event.category) or None,
         "title": event.title_fa or primary.original_title,
         "title_fa": event.title_fa or None,
         "title_en": event.title_en or None,
@@ -145,8 +149,24 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
         "uncertainty_en": event.uncertainty_en or None,
         "iran_score": event.iran_score,
         "global_score": event.global_score,
-        "asset_scores": latest.asset_scores if latest else {},
+        # Tiers 1-5 are decided here (core.tiers), never recomputed by the reader.
+        "iran_tier": tiers.tier(event.iran_score, "iran", cuts),
+        "global_tier": tiers.tier(event.global_score, "global", cuts),
+        "impact_tier": tiers.tier(
+            tiers.impact(event.iran_score, event.global_score), "impact", cuts
+        ),
+        "asset_scores": asset_scores,
+        "asset_tiers": {key: tiers.band(value) for key, value in asset_scores.items()},
         "assessment_confidence": event.assessment_confidence,
+        "watch_items": [
+            {
+                "slug": link.item.slug,
+                "kind": link.item.kind,
+                "name_fa": link.item.name_fa,
+                "name_en": link.item.name_en,
+            }
+            for link in sorted(event.watch_links.all(), key=lambda row: row.id)
+        ],
         "event_time": event.event_time,
         "first_seen_at": event.first_seen_at,
         "image_url": permitted_image,
@@ -166,6 +186,30 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
         ],
     }
     if detail:
+        link = (
+            StorylineEvent.objects.filter(event=event).select_related("storyline").first()
+        )
+        document["storyline"] = (
+            {
+                "id": link.storyline_id,
+                "name_fa": link.storyline.name_fa,
+                "name_en": link.storyline.name_en,
+                "events": [
+                    {
+                        "id": row.id,
+                        "title_fa": row.title_fa or row.primary_article.original_title,
+                        "title_en": row.title_en or None,
+                        "event_time": row.event_time,
+                    }
+                    for row in NewsEvent.objects.filter(storyline_link__storyline=link.storyline)
+                    .exclude(status=NewsEvent.Status.WITHDRAWN)
+                    .select_related("primary_article")
+                    .order_by("event_time", "id")[:20]
+                ],
+            }
+            if link
+            else None
+        )
         document["history"] = sorted(
             [
                 {"source": article.source.display_name or article.source_id,
@@ -201,20 +245,25 @@ class PublicEventsView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source", "primary_article__image")
-            .prefetch_related("articles__source", "assessments")
+            .prefetch_related("articles__source", "assessments", "watch_links__item")
             .order_by("-event_time", "-id")[:300]
         )
         events = list(queryset)
         if mode == "ranked" and period != "latest":
             events = ranked_events(events, now)
-        return Response({"results": [event_document(event) for event in events[:50]], "as_of": now})
+        cuts = tiers.cutoffs()
+        return Response(
+            {"results": [event_document(e, cuts=cuts) for e in events[:50]], "as_of": now}
+        )
 
 
 class PublicEventDetailView(ReaderView):
     def get(self, request, event_id: int):
         event = (
             NewsEvent.objects.select_related("primary_article__source", "primary_article__image")
-            .prefetch_related("articles__source", "articles__revisions", "assessments")
+            .prefetch_related(
+                "articles__source", "articles__revisions", "assessments", "watch_links__item"
+            )
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .filter(pk=event_id)
             .first()
@@ -374,13 +423,14 @@ class PublicTimelineView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source")
-            .prefetch_related("articles__source", "assessments")
+            .prefetch_related("articles__source", "assessments", "watch_links__item")
             .order_by("event_time")[:500]
         )
         asset_class = asset["class"]
         markers = []
+        cuts = tiers.cutoffs()
         for event in events:
-            document = event_document(event)
+            document = event_document(event, cuts=cuts)
             relevance = document["asset_scores"].get(asset_class)
             if not all_events and (relevance is None or relevance < 50):
                 continue

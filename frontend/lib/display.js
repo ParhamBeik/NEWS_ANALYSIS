@@ -40,12 +40,14 @@ export const CATEGORY_STYLE = {
 
 // Reader-event categories ([English, Persian]); keys mirror core.vocabulary.EVENT_CATEGORIES.
 export const EVENT_CATEGORY = {
-  monetary: ["Monetary policy", "سیاست پولی"],
-  macro: ["Macroeconomy", "اقتصاد کلان"],
-  sanctions_trade: ["Trade & sanctions", "تجارت و تحریم"],
-  geopolitics: ["Geopolitics", "ژئوپلیتیک"],
-  energy: ["Energy", "انرژی"],
-  markets: ["Markets", "بازارها"],
+  conflict_security: ["Conflict & security", "امنیت و درگیری"],
+  sanctions_diplomacy: ["Sanctions & diplomacy", "تحریم و دیپلماسی"],
+  macro_monetary: ["Macro & monetary", "اقتصاد کلان و پولی"],
+  energy_commodities: ["Energy & commodities", "انرژی و کالاها"],
+  iran_economy_policy: ["Iran economic policy", "سیاست اقتصادی ایران"],
+  markets_companies: ["Markets & companies", "بازارها و شرکت‌ها"],
+  disasters: ["Disasters & accidents", "حوادث و بلایا"],
+  social_unrest: ["Protests & strikes", "اعتراض و اعتصاب"],
   other: ["Other", "سایر"],
 };
 

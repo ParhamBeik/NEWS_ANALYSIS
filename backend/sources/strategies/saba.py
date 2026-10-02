@@ -30,6 +30,7 @@ from core.errors import Gone, Permanent
 from core.text import clean
 
 from ..extraction import RawArticle, fetch_text, parse_generic_article
+from ..models import FetchRetry
 
 CONTENT_NS = "{http://purl.org/rss/1.0/modules/content/}encoded"
 
@@ -88,6 +89,13 @@ def parse_feed(xml: str, source: str, outlet: str) -> list[RawArticle]:
     return [article for article in articles if article.url and article.title]
 
 
+def fetch_one(spec, session: requests.Session, url: str) -> RawArticle:
+    """Retry path: the article page alone, without the feed's category and enclosure.
+    The stored feed row keeps those; ingest only replaces its text."""
+    page = fetch_text(session, url)
+    return parse_generic_article(page, spec.name, url, spec.display_name or spec.name)
+
+
 def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     outlet = spec.display_name or spec.name
     entries = parse_feed(fetch_text(session, spec.url), spec.name, outlet)[:limit]
@@ -102,10 +110,12 @@ def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
             code = 410 if "410" in str(exc) else 404
             articles.append(replace(entry, gone_http_status=code))
             continue
-        except Exception:
+        except Exception as exc:
             # One unreachable article page must not fail the whole feed. The entry still
             # carries a title, a date, an image and a category - enough to store and to
-            # notice later that its body never arrived.
+            # notice later that its body never arrived. A transient failure is queued so
+            # the body is fetched later rather than never.
+            FetchRetry.schedule(spec, entry.url, exc)
             articles.append(entry)
             continue
         full = parse_generic_article(page, entry.source, entry.url, entry.original_outlet)

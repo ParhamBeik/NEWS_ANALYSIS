@@ -19,6 +19,8 @@ Cadences and their reasons:
   sooner that is visible the fewer empty cycles get filed as normal.
 - run finalisation every 10 minutes. A run whose books are never closed reports $0 spent
   forever, so the one table an operator reads for cost is the one that would lie.
+- storylines nightly: membership is SQL and set arithmetic, and a day's events are enough
+  to see a thread; only naming may call a model, and it degrades to a derived name.
 - review sampling and A/B pairing hourly. Both queues are consumed by a human at their own
   pace; the cost of queueing a little ahead is a row, and the cost of queueing nothing is
   that every agreement metric on /kpi stays null.
@@ -35,6 +37,8 @@ TEHRAN = "Asia/Tehran"
 
 INTERVAL_TASKS = [
     ("crawl-all-sources", "sources.crawl_all", 2, IntervalSchedule.MINUTES, {}),
+    # The shortest FetchRetry backoff is 5 minutes, so polling faster finds nothing due.
+    ("drain-fetch-retries", "sources.drain_fetch_retries", 5, IntervalSchedule.MINUTES, {}),
     ("assess-pending-events", "inference.assess_pending_events", 5, IntervalSchedule.MINUTES, {}),
     ("inference-cycle", "inference.run_cycle", 30, IntervalSchedule.MINUTES, {}),
     ("poll-market-prices", "market.poll_prices", 15, IntervalSchedule.MINUTES, {}),
@@ -64,6 +68,8 @@ CRON_TASKS = [
     # Dedup sweep at 03:00, when nothing else is competing for the worker.
     ("nightly-dedupe-sweep", "articles.tasks.backfill_dedupe", {"hour": "3", "minute": "0"},
      {"dry_run": False}),
+    # Storylines at 02:30, after the day's assessments; a cheap SQL pass plus a few names.
+    ("nightly-storylines", "inference.build_storylines", {"hour": "2", "minute": "30"}, {}),
     # Re-check articles that have fallen off listings; 404 becomes GONE, once.
     ("weekly-url-health", "articles.tasks.check_stale_urls",
      {"hour": "4", "minute": "30", "day_of_week": "0"}, {}),

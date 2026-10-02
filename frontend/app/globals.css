@@ -81,12 +81,14 @@ body {
 .tier-5 { background: var(--tier-5-bg); color: var(--tier-5-fg); }
 
 /* Category art: shown in place of a photo the source does not let us republish. */
-.art-monetary { background: linear-gradient(135deg, #0f5f59, #14a394); }
-.art-macro { background: linear-gradient(135deg, #075985, #3aa5d8); }
-.art-sanctions_trade { background: linear-gradient(135deg, #8a4b0f, #d08a1c); }
-.art-geopolitics { background: linear-gradient(135deg, #273449, #5b6b84); }
-.art-energy { background: linear-gradient(135deg, #9a3412, #e07a3a); }
-.art-markets { background: linear-gradient(135deg, #065f46, #2fa57c); }
+.art-conflict_security { background: linear-gradient(135deg, #7f1d1d, #c2410c); }
+.art-sanctions_diplomacy { background: linear-gradient(135deg, #273449, #5b6b84); }
+.art-macro_monetary { background: linear-gradient(135deg, #0f5f59, #14a394); }
+.art-energy_commodities { background: linear-gradient(135deg, #9a3412, #e07a3a); }
+.art-iran_economy_policy { background: linear-gradient(135deg, #075985, #3aa5d8); }
+.art-markets_companies { background: linear-gradient(135deg, #065f46, #2fa57c); }
+.art-disasters { background: linear-gradient(135deg, #713f12, #b7791f); }
+.art-social_unrest { background: linear-gradient(135deg, #581c87, #9f5bd6); }
 .art-pending { background: linear-gradient(135deg, #3a3d52, #6b6f88); }
 
 .persian {

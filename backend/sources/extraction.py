@@ -11,6 +11,7 @@ coming, and it shows up on /ops before anyone notices the workbook getting thinn
 
 from __future__ import annotations
 
+import codecs
 import json
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -108,6 +109,10 @@ def fetch_text(session: requests.Session, url: str) -> str:
     # `text/html; charset=UTF-8`, so the fallback below is unreachable for every configured
     # source. `.text` would fall back to chardet, which cannot run here anyway - the body
     # has already been streamed and `response.content` is spent.
+    # A byte-order mark outranks the header: federalreserve.gov answers a bare `text/xml`,
+    # which `requests` reads as ISO-8859-1, turning the BOM into junk before `<?xml`.
+    if payload.startswith(codecs.BOM_UTF8):
+        return payload.decode("utf-8-sig", errors="replace")
     return payload.decode(response.encoding or "utf-8", errors="replace")
 
 

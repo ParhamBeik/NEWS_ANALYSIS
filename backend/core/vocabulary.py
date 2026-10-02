@@ -54,8 +54,27 @@ LEVELS: tuple[str, ...] = tuple(Level.values)
 CATEGORIES: tuple[str, ...] = tuple(Category.values)
 GOLD_TRENDS: tuple[str, ...] = tuple(GoldTrend.values)
 
-# Jev's reader-event categories: a separate vocabulary from the legacy article `Category`.
+# Jev's reader-event topics: a separate vocabulary from the legacy article `Category`.
 # The assessment task validates against it and the swipe reviewer may only correct to it.
+# The eight investor topics are locked; criteria live in inference.jev.CATEGORIES.
 EVENT_CATEGORIES: tuple[str, ...] = (
-    "monetary", "macro", "sanctions_trade", "geopolitics", "energy", "markets", "other",
+    "conflict_security", "sanctions_diplomacy", "macro_monetary", "energy_commodities",
+    "iran_economy_policy", "markets_companies", "disasters", "social_unrest", "other",
 )
+
+# The first reader vocabulary, before the investor topics. Assessments and reviews are
+# append-only and keep these slugs, so every reader of a stored category goes through
+# `event_topic`. "geopolitics" covered diplomacy first and conflict second.
+LEGACY_EVENT_CATEGORIES: dict[str, str] = {
+    "monetary": "macro_monetary",
+    "macro": "macro_monetary",
+    "sanctions_trade": "sanctions_diplomacy",
+    "geopolitics": "sanctions_diplomacy",
+    "energy": "energy_commodities",
+    "markets": "markets_companies",
+}
+
+
+def event_topic(slug: str | None) -> str:
+    """A stored event category in the current vocabulary; unknown and empty pass through."""
+    return LEGACY_EVENT_CATEGORIES.get(slug or "", slug or "")

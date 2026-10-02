@@ -86,7 +86,7 @@ export default function SwipeReview({ initialCards, pending, lang }) {
 
   function openFix() {
     if (!card) return;
-    setDraft({ category: card.category, iran_tier: card.iran_tier, global_tier: card.global_tier });
+    setDraft({ category: card.category, iran_tier: card.iran_level, global_tier: card.global_level });
     setMode("fix");
   }
 
@@ -216,8 +216,8 @@ export default function SwipeReview({ initialCards, pending, lang }) {
             ) : null}
 
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Judgment label={t("Impact on Iran", "اثر بر ایران")} value={tier(card.iran_tier)} tierValue={card.iran_tier} big />
-              <Judgment label={t("Global impact", "اثر جهانی")} value={tier(card.global_tier)} tierValue={card.global_tier} big />
+              <Judgment label={t("Impact on Iran", "اثر بر ایران")} value={tier(card.iran_level)} tierValue={card.iran_level} big />
+              <Judgment label={t("Global impact", "اثر جهانی")} value={tier(card.global_level)} tierValue={card.global_level} big />
             </div>
             <div className="mt-2 rounded-xl border border-slate-700 bg-slate-950 p-3">
               <p className="text-xs text-slate-300">{t("Category", "دسته")}</p>

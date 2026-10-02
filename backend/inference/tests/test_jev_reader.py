@@ -24,7 +24,7 @@ def test_typesafe_402_is_credit_exhaustion():
 
 def test_without_typesafe_key_decisions_use_the_gapgpt_fallback():
     raw = {
-        "category": {"choice": "energy", "confidence": 0.8},
+        "category": {"choice": "energy_commodities", "confidence": 0.8},
         "iran": {"score": 3, "confidence": 0.7},
         "global": {"score": 2, "confidence": 0.9},
         **{f"asset_{k}": {"score": 1, "confidence": 0.5}
@@ -35,13 +35,13 @@ def test_without_typesafe_key_decisions_use_the_gapgpt_fallback():
             patch("inference.jev._gapgpt", return_value=(raw, usage)) as call:
         answers = jev.decide({"title": "x"}, "run-test")["answers"]
     assert call.called
-    assert answers["category"]["choice"] == "energy"
+    assert answers["category"]["choice"] == "energy_commodities"
     assert answers["iran"]["score"] == 3.0
 
 
 def test_fallback_rejects_answers_jev_could_never_give():
     questions = jev._questions(None)
-    bad = {name: {"score": 9, "choice": "energy", "confidence": 1} for name in questions}
+    bad = {name: {"score": 9, "choice": "energy_commodities", "confidence": 1} for name in questions}
     with pytest.raises(Permanent):
         jev._fallback_answers(bad, questions)
 
@@ -54,7 +54,7 @@ def test_uncertain_high_impact_event_enters_review_without_losing_correction(mak
         status="live",
     )
     response = {"model": "typesafe/jev-1.13", "usage": {"cost": 0.00002}, "answers": {
-        "category": {"choice": "monetary", "confidence": 0.62},
+        "category": {"choice": "macro_monetary", "confidence": 0.62},
         "iran": {"score": 3.7, "confidence": 0.64},
         "global": {"score": 2.0, "confidence": 0.9},
         **{f"asset_{key}": {"score": 2.0} for key in
@@ -89,7 +89,7 @@ def test_high_confidence_cross_language_match_keeps_both_source_articles(make_ar
     response = {"model": "typesafe/jev-1.13", "usage": {"cost": 0.00002}, "answers": {
         "same_event": {"choice": f"event_{first.id}",
                        "probabilities": {f"event_{first.id}": 0.96}},
-        "category": {"choice": "monetary", "confidence": 0.95},
+        "category": {"choice": "macro_monetary", "confidence": 0.95},
         "iran": {"score": 3, "confidence": 0.95},
         "global": {"score": 2, "confidence": 0.95},
         **{f"asset_{key}": {"score": 1} for key in
@@ -113,7 +113,7 @@ def test_malformed_jev_answer_does_not_merge_events(make_article):
     response = {"answers": {
         "same_event": {"choice": f"event_{first.id}",
                        "probabilities": {f"event_{first.id}": 0.99}},
-        "category": {"choice": "monetary", "confidence": 0.9},
+        "category": {"choice": "macro_monetary", "confidence": 0.9},
         "iran": {"score": 7, "confidence": 0.9},
         "global": {"score": 2, "confidence": 0.9},
         **{f"asset_{key}": {"score": 1} for key in
@@ -128,7 +128,7 @@ def test_malformed_jev_answer_does_not_merge_events(make_article):
 def test_low_impact_event_gets_no_paid_brief(make_article):
     event = attach_article(make_article(original_title="Provincial bank opens a new branch office"))
     response = {"model": "jev", "answers": {
-        "category": {"choice": "markets", "confidence": 0.9},
+        "category": {"choice": "markets_companies", "confidence": 0.9},
         "iran": {"score": 1, "confidence": 0.9},
         "global": {"score": 0, "confidence": 0.9},
         **{f"asset_{key}": {"score": 0} for key in
