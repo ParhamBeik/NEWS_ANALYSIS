@@ -1,5 +1,6 @@
 import localFont from "next/font/local";
 import AppShell from "@/components/AppShell";
+import ServiceWorker from "@/components/ServiceWorker";
 import { currentUser } from "@/lib/api";
 import { language } from "@/lib/language";
 import "./globals.css";
@@ -15,7 +16,10 @@ const vazirmatn = localFont({
 export const metadata = {
   title: "News Intelligence",
   description: "Iran-focused economic and geopolitical news intelligence",
+  appleWebApp: { capable: true, title: "رادار خبر", statusBarStyle: "black-translucent" },
 };
+
+export const viewport = { themeColor: "#4b33c9" };
 
 /**
  * Document direction follows the reader's chosen language. Headlines from another
@@ -30,6 +34,7 @@ export default async function RootLayout({ children }) {
     <html lang={lang} dir={lang === "fa" ? "rtl" : "ltr"} className={vazirmatn.variable}>
       <body className="min-h-screen font-sans">
         <AppShell user={user} lang={lang}>{children}</AppShell>
+        <ServiceWorker />
       </body>
     </html>
   );
