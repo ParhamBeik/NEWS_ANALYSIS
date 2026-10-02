@@ -17,9 +17,10 @@ import { NextResponse } from "next/server";
 // `/logout` must reach its route even after the cookie has already been cleared. Otherwise a
 // second click is redirected to `/login?next=/logout`, which turns the next sign-in into a
 // misleading round-trip through the logout URL.
+// `/privacy` and `/terms` must open signed out: the login page and the Android app link to them.
 // `/media` reaches Next only in development (Caddy serves it in production); the reader's
 // images must load for a signed-out visitor there too.
-const PUBLIC = ["/", "/events", "/market", "/macro", "/media", "/login", "/signup", "/logout", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg",
+const PUBLIC = ["/", "/events", "/market", "/macro", "/media", "/login", "/signup", "/logout", "/privacy", "/terms", "/_next", "/favicon.ico", "/robots.txt", "/icon.svg",
   "/apple-icon.png", "/icon-192.png", "/icon-512.png", "/manifest.webmanifest", "/sw.js"];
 
 function withPathname(request, pathname) {

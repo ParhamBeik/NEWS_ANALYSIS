@@ -5,14 +5,14 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { View } from "react-native";
+import { AccountProvider } from "../lib/account";
 import { prune } from "../lib/cache";
 import { SettingsProvider, useSettings } from "../lib/settings";
 import { FONT, useTheme } from "../lib/theme";
-import { register } from "../push";
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({ Vazirmatn_400Regular, Vazirmatn_700Bold });
-  return <SettingsProvider><Shell fontsLoaded={fontsLoaded} /></SettingsProvider>;
+  return <SettingsProvider><AccountProvider><Shell fontsLoaded={fontsLoaded} /></AccountProvider></SettingsProvider>;
 }
 
 function Shell({ fontsLoaded }: { fontsLoaded: boolean }) {
@@ -21,7 +21,7 @@ function Shell({ fontsLoaded }: { fontsLoaded: boolean }) {
 
   useEffect(() => {
     prune().catch(() => {});
-    register().catch(() => {}); // no-op until push keys are configured
+    // Push registration runs in AccountProvider once someone is signed in.
   }, []);
 
   if (!fontsLoaded || !ready) return <View style={{ flex: 1, backgroundColor: theme.paper }} />;
@@ -40,6 +40,10 @@ function Shell({ fontsLoaded }: { fontsLoaded: boolean }) {
       <Stack.Screen name="event/[id]" options={{ title: "" }} />
       <Stack.Screen name="settings" options={{ title: tr("Settings", "تنظیمات") }} />
       <Stack.Screen name="review" options={{ title: tr("Swipe review", "بازبینی سریع") }} />
+      <Stack.Screen name="login" options={{ title: tr("Sign in", "ورود") }} />
+      <Stack.Screen name="onboarding" options={{ title: tr("Your radar", "رادار شما") }} />
+      <Stack.Screen name="watchlist" options={{ title: tr("Watchlist & alerts", "فهرست پیگیری و هشدارها") }} />
+      <Stack.Screen name="inbox" options={{ title: tr("Alerts", "هشدارها") }} />
     </Stack>
   </View>;
 }

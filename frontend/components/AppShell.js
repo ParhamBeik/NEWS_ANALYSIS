@@ -17,7 +17,17 @@ const NAV = [
 ];
 
 const AUTH_PATHS = ["/login", "/signup"];
-const READER_PATHS = ["/events", "/onboarding", "/settings", "/inbox"];
+const READER_PATHS = ["/events", "/onboarding", "/settings", "/inbox", "/privacy", "/terms"];
+
+/** Privacy and terms on every page with the shell; the login page (no shell) links them inline. */
+export function LegalFooter({ lang = "en" }) {
+  const fa = lang === "fa";
+  return <footer className="mx-auto flex max-w-7xl flex-wrap gap-x-4 gap-y-1 border-t border-line px-3 py-5 text-xs text-muted sm:px-5">
+    <Link href="/privacy" className="hover:text-ink">{fa ? "حریم خصوصی" : "Privacy"}</Link>
+    <Link href="/terms" className="hover:text-ink">{fa ? "شرایط استفاده" : "Terms"}</Link>
+    <span>{fa ? "توصیهٔ سرمایه‌گذاری نیست." : "Not investment advice."}</span>
+  </footer>;
+}
 
 export default function AppShell({ children, user = null, lang = "en" }) {
   const pathname = usePathname();
@@ -100,6 +110,7 @@ export default function AppShell({ children, user = null, lang = "en" }) {
       <main id="main" tabIndex={-1} className="mx-auto max-w-7xl px-3 py-6 sm:px-5 sm:py-8">
         {children}
       </main>
+      <LegalFooter lang={lang} />
     </div>
   );
 }

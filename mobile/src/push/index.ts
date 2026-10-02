@@ -1,13 +1,10 @@
 /**
  * Concrete push providers. Keys come from app.json `expo.extra.push`; see mobile/README.md.
- *
- * TODO(accounts phase): send the returned token to the backend. There is no device-token
- * endpoint yet (AlertSubscription stores browser Web Push only), so the token is shown in
- * Settings and not uploaded.
+ * The token reaches the account through ./device.ts (syncDevice / forgetDevice).
  */
 import Constants from "expo-constants";
 import { Platform } from "react-native";
-import { configuredProviders, registerForPush, type PushConfig, type PushProvider, type ProviderName } from "./registry";
+import { configuredProviders, registerForPush, type PushConfig, type PushProvider, type ProviderName, type Registration } from "./registry";
 
 export function pushConfig(): PushConfig {
   return (Constants.expoConfig?.extra?.push as PushConfig | undefined) || {};
@@ -48,3 +45,13 @@ export const PROVIDERS: Record<ProviderName, PushProvider> = {
 
 export const register = () => registerForPush(pushConfig(), PROVIDERS);
 export const enabledProviders = () => configuredProviders(pushConfig(), PROVIDERS);
+
+/** Call `onChange` when FCM rotates the device token. No-op (and no native import) without FCM keys. */
+export async function watchTokenChanges(onChange: (registration: Registration) => void): Promise<() => void> {
+  if (!PROVIDERS.fcm.isConfigured(pushConfig())) return () => {};
+  const Notifications = await import("expo-notifications");
+  const subscription = Notifications.addPushTokenListener((token) => {
+    if (typeof token.data === "string") onChange({ provider: "fcm", token: token.data });
+  });
+  return () => subscription.remove();
+}

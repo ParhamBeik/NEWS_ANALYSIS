@@ -3,8 +3,22 @@
 Expo (React Native, TypeScript, expo-router). Android ships from this app (Bazaar, Myket,
 Play); iOS uses the installable web app (PWA) at https://news.parhambm.ir.
 
-Screens: radar (image-led cards) → event detail (brief, sources, link to the market page on
-the web) · settings (فارسی/English, server address) · staff swipe review (staff login).
+Screens: radar (image-led cards, "on your watchlist" badge) → event detail (brief, sources,
+link to the market page on the web) · phone sign-in → onboarding (≥3 watch items + alert dial)
+· watchlist & alerts (dial, quiet hours) · inbox · settings (فارسی/English, server address,
+account, delete account, privacy/terms on the web) · staff swipe review (staff login).
+
+## Reader accounts
+
+Phone sign-in uses `POST /api/auth/otp/request/` then `/api/auth/otp/verify/`, which returns
+the same DRF token as staff sign-in; it is kept in expo-secure-store (`src/lib/settings.tsx`).
+`src/lib/account.tsx` loads `/api/account/` whenever the token changes and registers the
+device for push. Until the server has `KAVENEGAR_API_KEY` + `KAVENEGAR_OTP_TEMPLATE`, sign-in
+answers `sms_unavailable` and the screen says "SMS sign-in is not available yet".
+
+On the radar, watched events are marked and lifted 5 places (`boostWatched` in
+`src/lib/reader.ts`, a port of `frontend/lib/reader.js`; keep them in step). Deleting the
+account calls `DELETE /api/account/` and drops the token and cached account data.
 
 ## Run
 
@@ -43,8 +57,10 @@ package listing.
 
 ## Offline
 
-The last radar and every opened event are saved to AsyncStorage for 48 hours (`src/lib/cache.ts`)
-and shown with "last synced" when the network fails. Older rows are pruned at start-up.
+The last radar, every opened event, and for a signed-in reader the account (watchlist) and
+inbox are saved to AsyncStorage for 48 hours (`src/lib/cache.ts`) and shown with "last synced"
+when the network fails. Older rows are pruned at start-up; account and inbox rows are removed
+on sign-out and account deletion.
 
 ## Push notifications
 
@@ -55,8 +71,9 @@ until its keys exist, so today registration is a no-op.
   and `extra.push.fcm.enabled: true`, then rebuild.
 - **Pushe / Najva:** set `extra.push.pushe.appId` or `extra.push.najva.apiKey` + `websiteId`. Their
   native SDKs have no Expo module yet; a config plugin must be added before they can register.
-- **Backend:** there is no device-token endpoint yet (accounts phase). The token is obtained but
-  not uploaded.
+- **Backend:** after sign-in, on start and whenever FCM rotates the token, `src/push/device.ts`
+  posts `{kind: fcm|pushe|najva, token}` to `/api/account/devices/` (a changed token first
+  deletes the old one); sign-out deletes it. With no keys nothing is registered or sent.
 
 ## Staff review
 

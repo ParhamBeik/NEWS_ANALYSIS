@@ -1,4 +1,4 @@
-import { Image, Pressable, StyleSheet, Text, View, type TextProps, type ViewStyle } from "react-native";
+import { Image, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps, type TextProps, type ViewStyle } from "react-native";
 import { formatGregorian, formatJalali } from "../lib/jalali";
 import { absoluteUrl, categoryOf, headline, impactScore, impactTier, type ReaderEvent } from "../lib/reader";
 import { useSettings } from "../lib/settings";
@@ -37,6 +37,27 @@ export function CategoryChip({ category }: { category: string | null }) {
   </View>;
 }
 
+/** Same words as the web radar's watchlist badge. */
+export function WatchedChip() {
+  const theme = useTheme();
+  const { tr } = useSettings();
+  return <View style={[styles.chip, { backgroundColor: theme.accentStrong, borderColor: theme.accentStrong }]}>
+    <Text style={{ color: theme.onAccent, fontFamily: FONT.bold, fontSize: 12 }}>{`★ ${tr("On your watchlist", "در فهرست پیگیری شما")}`}</Text>
+  </View>;
+}
+
+/** Text input in the app's style. `ltr` for numbers, phones and URLs inside Persian screens. */
+export function Field({ ltr, invalid, style, ...props }: TextInputProps & { ltr?: boolean; invalid?: boolean }) {
+  const theme = useTheme();
+  const { lang } = useSettings();
+  const left = ltr || lang === "en";
+  return <TextInput placeholderTextColor={theme.muted} {...props} style={[{
+    borderWidth: 1, borderColor: invalid ? theme.error : theme.line, borderRadius: 12, padding: 12, color: theme.ink,
+    backgroundColor: theme.card, fontFamily: FONT.regular, fontSize: 16,
+    textAlign: left ? "left" : "right", writingDirection: left ? "ltr" : "rtl",
+  }, style]} />;
+}
+
 /** Jalali first; Gregorian secondary, smaller. */
 export function When({ iso }: { iso: string | null }) {
   const { lang } = useSettings();
@@ -54,7 +75,10 @@ export function EventCard({ event, onPress, hero }: { event: ReaderEvent; onPres
       ? <Image source={{ uri: image }} style={[styles.image, hero && styles.hero]} resizeMode="cover" accessibilityIgnoresInvertColors />
       : <View style={[styles.image, hero && styles.hero, { backgroundColor: categoryOf(event.category).color }]} />}
     <View style={styles.body}>
-      <Row><CategoryChip category={event.category} /><TierChip score={impactScore(event)} /></Row>
+      <Row>
+        <CategoryChip category={event.category} /><TierChip score={impactScore(event)} />
+        {event.watched ? <WatchedChip /> : null}
+      </Row>
       <Txt bold size={hero ? 20 : 16}>{headline(event, lang)}</Txt>
       <When iso={event.event_time} />
     </View>

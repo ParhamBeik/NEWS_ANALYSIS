@@ -10,6 +10,13 @@ export const MAX_AGE_MS = 48 * 3600 * 1000;
 const PREFIX = "ni:cache:";
 export const RADAR_KEY = "radar";
 export const eventKey = (id: number | string) => `event:${id}`;
+/** Signed-in rows: dropped on sign-out and account deletion (see forgetAccount). */
+export const ACCOUNT_KEY = "account";
+export const INBOX_KEY = "inbox";
+
+export async function remove(...keys: string[]): Promise<void> {
+  await AsyncStorage.multiRemove(keys.map((key) => PREFIX + key));
+}
 
 export type Entry<T> = { savedAt: number; data: T };
 
