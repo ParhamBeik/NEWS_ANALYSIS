@@ -155,7 +155,13 @@ jobs:
             echo "BACKEND_IMAGE=${{ needs.build.outputs.image_base }}-backend:${{ needs.build.outputs.tag }}" >> .env
             echo "FRONTEND_IMAGE=${{ needs.build.outputs.image_base }}-frontend:${{ needs.build.outputs.tag }}" >> .env
 
-            docker compose -f docker-compose.prod.yml pull
+            # GHCR resets connections from Iran mid-layer (2026-10-02: "read: connection reset
+            # by peer"). Finished layers are kept, so each retry only resumes the rest.
+            for attempt in 1 2 3 4 5; do
+              docker compose -f docker-compose.prod.yml pull && break
+              [ "\$attempt" = 5 ] && exit 1
+              sleep \$((attempt * 15))
+            done
             # A paused crawl worker has accumulated periodic jobs. Recreating it would
             # immediately run every stale cycle. Preserve both queues under release-tagged
             # keys, then let Beat enqueue fresh work for the replacement worker.
