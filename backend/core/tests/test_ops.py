@@ -41,7 +41,7 @@ def test_ai_cost_splits_month_and_today_by_stage_and_provider(monkeypatch):
     report = ops.ai_cost(now=NOW)
 
     stages = {row["stage"]: row for row in report["by_stage"]}
-    assert set(stages) == {"jev", "brief", "storyline"}
+    assert set(stages) == {"jev", "brief", "title", "storyline"}
     assert stages["jev"]["today_usd"] == pytest.approx(0.10)
     assert stages["brief"]["cost_usd"] == pytest.approx(0.40)
     assert stages["brief"]["today_usd"] == 0

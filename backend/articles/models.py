@@ -420,6 +420,26 @@ class ArticleRevision(models.Model):
         return f"revision of article {self.article_id} at {self.observed_at}"
 
 
+class TitleTranslation(models.Model):
+    """A cheap machine translation of one article's headline into the other UI language.
+
+    Used for events that get no brief. Cached per article and keyed by the headline it
+    translated, so a re-assessment costs nothing and a corrected headline is redone.
+    """
+
+    article = models.OneToOneField(
+        Article, on_delete=models.CASCADE, related_name="title_translation"
+    )
+    language = models.CharField(max_length=2)
+    source_title = models.TextField()
+    title = models.TextField()
+    model = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.language} title for article {self.article_id}"
+
+
 class ImageStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     STORED = "stored", "Stored"

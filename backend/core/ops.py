@@ -33,7 +33,7 @@ from sources.models import CrawlAttempt, Source
 
 logger = logging.getLogger(__name__)
 
-AI_STAGES = ("jev", "brief", "storyline")
+AI_STAGES = ("jev", "brief", "title", "storyline")
 FAILURE_KINDS = ("budget", "fatal", "permanent", "transient", "invalid_answer", "other")
 FAILURE_DAYS = 7
 FAILURE_TTL = 60 * 60 * 24 * (FAILURE_DAYS + 1)

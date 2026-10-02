@@ -489,3 +489,37 @@ def storyline_name(titles: list[str], run_id: str) -> dict:
     ):
         raise Permanent("storyline name did not match the expected schema")
     return {key: result[key].strip()[:120] for key in ("name_fa", "name_en")}
+
+
+LANGUAGE_NAMES = {"fa": "Persian", "en": "English"}
+
+
+def translate_title(title: str, language: str, run_id: str) -> tuple[str, str]:
+    """One short headline translation into `language`; returns (title, model).
+
+    Optional spend: it stops first under budget pressure (budget.check_optional).
+    """
+    if not settings.GAPGPT_API_KEY:
+        raise Fatal("GAPGPT_API_KEY is not configured")
+    budget.check_optional()
+    result, usage = _gapgpt(
+        settings.NEWS_DECISION_FALLBACK_MODEL or settings.GAPGPT_MODEL,
+        [
+            {
+                "role": "system",
+                "content": (
+                    f"Translate this news headline into {LANGUAGE_NAMES[language]}. Keep "
+                    "names, numbers and attribution; add nothing. Return one JSON object "
+                    'with one string field "title".'
+                ),
+            },
+            {"role": "user", "content": title[:400]},
+        ],
+        120,
+        run_id,
+        "title",
+    )
+    text = result.get("title") if isinstance(result, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise Permanent("title translation did not match the expected schema")
+    return text.strip()[:300], usage.model

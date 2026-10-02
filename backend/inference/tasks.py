@@ -28,6 +28,7 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
 
@@ -223,6 +224,8 @@ def assess_event(self, event_id: int) -> dict:
         and len(evidence.strip()) >= 40
     ):
         summarize_event.delay(event_id)
+    elif category != "other":
+        transaction.on_commit(lambda event_id=event_id: translate_event_title.delay(event_id))
     if settings.NEWS_ALERTS_ENABLED:
         from accounts.tasks import fan_out_event
         from articles.tasks import alert_event
@@ -278,6 +281,51 @@ def summarize_event(self, event_id: int) -> dict:
         return {"status": "unassessed", "reason": type(exc).__name__}
     NewsEvent.objects.filter(pk=event_id).update(**result)
     return {"status": "summarized", "event": event_id}
+
+
+@shared_task(
+    name="inference.translate_event_title",
+    bind=True,
+    autoretry_for=(Transient,),
+    retry_backoff=True,
+    retry_backoff_max=300,
+    max_retries=2,
+)
+def translate_event_title(self, event_id: int) -> dict:
+    """Headline in the other UI language for an event without a brief (one cheap call)."""
+    from articles.models import TitleTranslation
+
+    from .jev import translate_title
+
+    event = (
+        NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
+    )
+    if event is None or event.category in {"", "other"} or event.brief_fa:
+        return {"status": "skipped"}
+    article = event.primary_article
+    language = "fa" if article.source.language == "en" else "en"
+    cached = TitleTranslation.objects.filter(
+        article=article, language=language, source_title=article.original_title
+    ).first()
+    if cached is None:
+        try:
+            text, model = translate_title(article.original_title, language, f"event-{event_id}")
+        except BudgetExceeded:
+            record_ai_failure("title", "budget")
+            return {"status": "skipped", "reason": "budget_or_credits"}
+        except (Fatal, Permanent, Transient) as exc:
+            record_ai_failure("title", failure_kind(exc))
+            if isinstance(exc, Transient):
+                raise
+            return {"status": "skipped", "reason": type(exc).__name__}
+        cached, _ = TitleTranslation.objects.update_or_create(
+            article=article,
+            defaults={"language": language, "source_title": article.original_title,
+                      "title": text, "model": model},
+        )
+    # A brief written meanwhile owns the titles; never overwrite it.
+    NewsEvent.objects.filter(pk=event_id, brief_fa="").update(**{f"title_{language}": cached.title})
+    return {"status": "translated", "event": event_id, "language": language}
 
 
 @shared_task(name="inference.build_storylines")
