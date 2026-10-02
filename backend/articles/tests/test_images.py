@@ -185,7 +185,7 @@ def test_an_image_url_pointing_into_our_own_network_is_refused(image_row, monkey
 
 
 @pytest.mark.django_db
-def test_one_webp_copy_is_stored_per_article(image_row, monkeypatch, settings, tmp_path):
+def test_one_webp_copy_is_stored_per_article(image_row, monkeypatch):
     """docs/STORAGE-POLICY.md: one stored copy serves card and hero; no thumbnail file."""
     from io import BytesIO
 
@@ -194,7 +194,6 @@ def test_one_webp_copy_is_stored_per_article(image_row, monkeypatch, settings, t
     from articles.models import ArticleImage, ImageStatus
     from articles.tasks import IMAGE_MAX, download_image
 
-    settings.MEDIA_ROOT = tmp_path
     buffer = BytesIO()
     Image.new("RGB", (2000, 1000), "red").save(buffer, format="PNG")
     monkeypatch.setattr("articles.tasks.open_checked", lambda *a, **k: FakeResponse(10))
@@ -204,28 +203,34 @@ def test_one_webp_copy_is_stored_per_article(image_row, monkeypatch, settings, t
     stored = ArticleImage.objects.get(pk=image_row.pk)
     assert stored.status == ImageStatus.STORED
     assert stored.file.name.endswith(".webp") and not stored.thumbnail
-    with Image.open(stored.file.path) as saved:
+    with stored.file.open() as handle, Image.open(handle) as saved:
         assert saved.format == "WEBP" and max(saved.size) == IMAGE_MAX[0]
 
 
 @pytest.mark.django_db
-def test_compact_images_keeps_one_webp_and_requeues_missing(make_article, settings, tmp_path):
+def test_compact_images_keeps_one_webp_and_requeues_missing(make_article):
     """compact_images: legacy pair -> one WebP; missing files -> PENDING; strays deleted."""
+    from io import BytesIO
+
+    from django.core.files.base import ContentFile
+    from django.core.files.storage import default_storage
     from django.core.management import call_command
     from PIL import Image
 
+    from articles.management.commands.compact_images import _walk
     from articles.models import ArticleImage, ImageStatus
 
-    settings.MEDIA_ROOT = tmp_path
-    folder = tmp_path / "articles/2026/09"
-    (folder / "thumbs").mkdir(parents=True)
-    Image.new("RGB", (1200, 600), "blue").save(folder / "1.jpg")
-    Image.new("RGB", (400, 200), "blue").save(folder / "thumbs/1_thumb.jpg")
-    (folder / "stray.jpg").write_bytes(b"x")
+    def jpeg(size):
+        buffer = BytesIO()
+        Image.new("RGB", size, "blue").save(buffer, format="JPEG")
+        return ContentFile(buffer.getvalue())
+
+    big = default_storage.save("articles/2026/09/1.jpg", jpeg((1200, 600)))
+    thumb = default_storage.save("articles/2026/09/thumbs/1_thumb.jpg", jpeg((400, 200)))
+    stray = default_storage.save("articles/2026/09/stray.jpg", ContentFile(b"x"))
     kept = ArticleImage.objects.create(
         article=make_article(), source_url="https://cdn.example/a.jpg",
-        status=ImageStatus.STORED, file="articles/2026/09/1.jpg",
-        thumbnail="articles/2026/09/thumbs/1_thumb.jpg")
+        status=ImageStatus.STORED, file=big, thumbnail=thumb)
     lost = ArticleImage.objects.create(
         article=make_article(), source_url="https://cdn.example/b.jpg",
         status=ImageStatus.STORED, file="articles/2026/09/gone.jpg")
@@ -235,6 +240,6 @@ def test_compact_images_keeps_one_webp_and_requeues_missing(make_article, settin
     kept.refresh_from_db()
     lost.refresh_from_db()
     assert kept.file.name.endswith(".webp") and not kept.thumbnail
-    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == [
-        kept.file.name.rsplit("/", 1)[1]]
+    remaining = set(_walk(default_storage, "articles"))
+    assert kept.file.name in remaining and not {big, thumb, stray} & remaining
     assert (lost.status, lost.file.name) == (ImageStatus.PENDING, "")

@@ -14,9 +14,8 @@
 from __future__ import annotations
 
 import json
-import os
 
-from django.conf import settings
+from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
 from PIL import Image, UnidentifiedImageError
 
@@ -71,12 +70,20 @@ class Command(BaseCommand):
         referenced = set()
         for file, thumbnail in ArticleImage.objects.values_list("file", "thumbnail").iterator():
             referenced.update(n for n in (file, thumbnail) if n)
-        root = os.path.join(settings.MEDIA_ROOT, "articles")
-        for directory, _, names in os.walk(root):
-            for name in names:
-                path = os.path.join(directory, name)
-                if os.path.relpath(path, settings.MEDIA_ROOT) not in referenced:
-                    counts["orphan_files"] += 1
-                    if not dry_run:
-                        os.remove(path)
+        for name in _walk(default_storage, "articles"):
+            if name not in referenced:
+                counts["orphan_files"] += 1
+                if not dry_run:
+                    default_storage.delete(name)
         self.stdout.write(json.dumps(counts))
+
+
+def _walk(storage, directory):
+    """Every file name under `directory`, through the storage API."""
+    if not storage.exists(directory):
+        return
+    folders, files = storage.listdir(directory)
+    for name in files:
+        yield f"{directory}/{name}"
+    for folder in folders:
+        yield from _walk(storage, f"{directory}/{folder}")
