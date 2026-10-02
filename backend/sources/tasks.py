@@ -21,11 +21,11 @@ from django.utils import timezone
 
 from articles.ingest import upsert
 from articles.models import ImageStatus
-from core.errors import Permanent, Transient
+from core.errors import Permanent, Transient, error_class
 
 from . import strategies
 from .extraction import build_session
-from .models import CrawlAttempt, Source
+from .models import CoverageInterval, CrawlAttempt, Source
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +95,19 @@ def crawl_source(self, source_name: str, limit: int | None = None, run_id: str =
         # Store the class, not arbitrary HTTP exception text that can contain credentials.
         attempt.status = "failed"
         attempt.error = type(exc).__name__
+        attempt.error_class = error_class(exc)
         source.mark_degraded(attempt.error)
         raise
     finally:
         attempt.finished_at = timezone.now()
-        attempt.save(update_fields=["status", "error", "finished_at"])
+        attempt.save(update_fields=["status", "error", "error_class", "finished_at"])
+        covered = attempt.status in {"success", "partial"}
+        CoverageInterval.record(
+            source,
+            CoverageInterval.COVERED if covered else CoverageInterval.GAP,
+            "" if covered else attempt.error_class,
+            now=attempt.finished_at,
+        )
     return stats
 
 
@@ -165,6 +173,9 @@ def _crawl(source, limit, run_id, attempt):
         attempt.error = (
             "Some articles could not be stored" if stats["failed"] else "No articles found"
         )
+        if not stats["fetched"]:
+            # The page answered but nothing parsed: a redesign, not an outage.
+            attempt.error_class = "parse"
         source.mark_degraded(attempt.error)
     logger.info("crawl %s: %s", source.name, stats)
     return stats

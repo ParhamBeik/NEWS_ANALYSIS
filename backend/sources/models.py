@@ -7,8 +7,14 @@ here too, so `/ops` can answer "is each source still alive?" without a crawl.
 
 from __future__ import annotations
 
-from django.db import models
+from datetime import timedelta
+
+from django.db import models, transaction
 from django.utils import timezone
+
+from core.errors import ERROR_CLASSES
+
+ERROR_CLASS_CHOICES = [(name, name) for name in ERROR_CLASSES]
 
 
 class CrawlAttempt(models.Model):
@@ -27,6 +33,7 @@ class CrawlAttempt(models.Model):
     repeated = models.PositiveIntegerField(default=0)
     failed = models.PositiveIntegerField(default=0)
     error = models.CharField(max_length=255, blank=True)
+    error_class = models.CharField(max_length=16, blank=True, choices=ERROR_CLASS_CHOICES)
 
     class Meta:
         ordering = ["-started_at", "-id"]
@@ -34,6 +41,57 @@ class CrawlAttempt(models.Model):
 
     def __str__(self):
         return f"{self.source_id}: {self.status} ({self.started_at})"
+
+
+class CoverageInterval(models.Model):
+    """When a source was watched, when it failed, and when nobody was looking.
+
+    One row per run of the same outcome, not per crawl: a crawl every two minutes would
+    write 720 rows a day per source, so a repeat outcome extends the latest row instead.
+    Intervals are contiguous - a gap starts where the last covered stretch ended - so
+    "how many hours did we miss" is a sum, not a reconstruction.
+
+    `unknown` is the honest state for a silence longer than UNOBSERVED_AFTER: the worker
+    or beat was down, so we cannot claim the source was covered or that it failed.
+    """
+
+    COVERED, GAP, UNKNOWN = "covered", "gap", "unknown"
+    # Five crawl cadences (every 2 min, see setup_schedule) plus retry backoff headroom.
+    UNOBSERVED_AFTER = timedelta(minutes=10)
+
+    source = models.ForeignKey("Source", on_delete=models.PROTECT, related_name="coverage")
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField()
+    state = models.CharField(max_length=8, choices=[(s, s) for s in (COVERED, GAP, UNKNOWN)])
+    error_class = models.CharField(max_length=16, blank=True, choices=ERROR_CLASS_CHOICES)
+
+    class Meta:
+        ordering = ["-ended_at", "-id"]
+        indexes = [models.Index(fields=["source", "-ended_at"])]
+
+    def __str__(self):
+        return f"{self.source_id}: {self.state} {self.started_at} - {self.ended_at}"
+
+    @classmethod
+    def record(cls, source, state: str, error_class: str = "", *, now=None) -> None:
+        now = now or timezone.now()
+        with transaction.atomic():
+            last = cls.objects.select_for_update().filter(source=source).first()
+            if last and now - last.ended_at > cls.UNOBSERVED_AFTER:
+                cls.objects.create(
+                    source=source, started_at=last.ended_at, ended_at=now, state=cls.UNKNOWN
+                )
+                last = None
+            if last and (last.state, last.error_class) == (state, error_class):
+                cls.objects.filter(pk=last.pk).update(ended_at=now)
+                return
+            cls.objects.create(
+                source=source,
+                started_at=last.ended_at if last else now,
+                ended_at=now,
+                state=state,
+                error_class=error_class,
+            )
 
 
 class Strategy(models.TextChoices):
