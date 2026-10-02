@@ -109,66 +109,110 @@ def _formula(row: int) -> str:
 # ------------------------------------------------------------------------- data source
 
 
-def _jalali_day(moment) -> str:
-    """Tehran-local Jalali date for a UTC timestamp, or '' when there is no timestamp."""
-    if moment is None:
-        return ""
-    from zoneinfo import ZoneInfo
+#: Investor topics -> the team's legacy categories, which name the text feeds and decide
+#: what reaches the workbook (`other` never did).
+LEGACY_CATEGORY = {
+    "conflict_security": "security",
+    "social_unrest": "security",
+    "sanctions_diplomacy": "security/economics",
+    "disasters": "security/economics",
+    "macro_monetary": "economics",
+    "energy_commodities": "economics",
+    "iran_economy_policy": "economics",
+    "markets_companies": "economics",
+}
 
-    from core.text import jalali_str, to_jalali
+#: «اطمینان از وقوع خبر» from how independently the occurrence is reported.
+OCCURRENCE_LEVEL = {
+    "official": LEVELS[4],
+    "multi": LEVELS[3],
+    "single": LEVELS[2],
+    "disputed": LEVELS[1],
+}
 
-    return jalali_str(to_jalali(moment.astimezone(ZoneInfo(settings.TEHRAN_TZ))))
+
+def _level(score) -> str:
+    """A 0-100 score on the team's five-level scale; unassessed stays blank."""
+    from core.tiers import band
+
+    tier = band(score)
+    return LEVELS[tier - 1] if tier else ""
 
 
-def rows(articles=None) -> list[dict[str, str]]:
-    """One record per canonical article, keyed by the workbook's own column headers.
+def rows(events=None, *, since=None) -> list[dict[str, str]]:
+    """One record per news event, keyed by the workbook's own column headers.
+
+    Re-fed from `NewsEvent` now that the per-article pipeline is off. Column sources:
+
+    - «اطمینان از وقوع خبر»: the event's evidence level (official > several independent
+      groups > one group > disputed), not an AI guess as the team's column was.
+    - «چقدر بر تغییر قیمت طلا اثر دارد؟»: Jev's gold relevance (`asset_scores["gold"]`).
+    - «چقدربا امنیت مرتبط است ؟»: the Iran score, for security topics only; blank for the
+      rest, because no event field measures security relevance on its own.
+    - «جهت طلا»: always blank. Jev scores relevance, not direction, and writing «نامطمئن»
+      would claim an assessment nobody made.
+    - «توضیحات»: the Persian brief, then the event's watch items.
 
     Deliberately does NOT number the rows. «شناسه خبر» is a position within a file, and
     this function does not know which file a record will end up in - see `build_workbook`.
     """
-    from articles.models import Article
-    from inference.models import Classification, Evaluation, Summary
+    from zoneinfo import ZoneInfo
 
-    queryset = articles if articles is not None else Article.objects.canonical()
-    queryset = queryset.order_by("published_at", "url")
+    from articles.models import NewsEvent
+    from core.text import jalali_str, to_jalali
+    from core.vocabulary import event_topic
 
-    # Three queries rather than a correlated subquery per row: DISTINCT ON gives the latest
-    # answer per article in one pass each, and the corpus is small enough to index in memory.
-    latest_class = {c.article_id: c for c in Classification.objects.latest_per_article()}
-    latest_eval = {e.article_id: e for e in Evaluation.objects.latest_per_article()}
-    latest_summary = {s.article_id: s for s in Summary.objects.latest_per_article()}
+    queryset = events if events is not None else NewsEvent.objects.all()
+    if since is not None:
+        queryset = queryset.filter(event_time__gte=since)
+    queryset = (
+        queryset.exclude(status=NewsEvent.Status.WITHDRAWN)
+        .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
+        .select_related("primary_article__source")
+        .prefetch_related("articles__source", "assessments", "watch_links__item")
+        .order_by("event_time", "id")
+    )
 
     records = []
-    for article in queryset:
-        # Normally written at ingest. Derived here as a fallback because an article with a
-        # publication date but an empty Jalali field would otherwise be silently dropped
-        # from every daily workbook - the file would just be shorter, with nothing to see.
-        day = article.published_at_jalali or _jalali_day(article.published_at)
-        classification = latest_class.get(article.pk)
-        evaluation = latest_eval.get(article.pk)
-        summary = latest_summary.get(article.pk)
+    for event in queryset:
+        primary = event.primary_article
+        local = event.event_time.astimezone(ZoneInfo(settings.TEHRAN_TZ))
+        day = jalali_str(to_jalali(local))
+        latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
+        category = LEGACY_CATEGORY.get(event_topic(event.category), "other")
+        outlets = []
+        for article in [primary, *sorted(event.articles.all(), key=lambda row: row.id)]:
+            name = article.original_outlet or article.source.display_name or article.source_id
+            if name and name not in outlets:
+                outlets.append(name)
         scores = (
-            evaluation.confidence_occurrence if evaluation else None,
-            evaluation.gold_price_impact if evaluation else None,
-            evaluation.security_relevance if evaluation else None,
+            OCCURRENCE_LEVEL.get(event.evidence_level, ""),
+            _level((latest.asset_scores if latest else {}).get("gold")),
+            _level(event.iran_score) if "security" in category else "",
+        )
+        watched = "، ".join(
+            link.item.name_fa for link in sorted(event.watch_links.all(), key=lambda r: r.id)
+        )
+        notes = "\n".join(
+            part for part in (event.brief_fa, watched and f"پایش: {watched}") if part
         )
         records.append({
             "_day": day,
-            # Fetch time, not publication time: it is what decides whether this day's
-            # workbook can still change. See `_days_worth_rebuilding`.
-            "_fetched_at": article.fetched_at,
-            "_category": classification.category if classification else "other",
+            # Last change, not event time: it decides whether this day's file can still
+            # differ. See `_days_worth_rebuilding`.
+            "_fetched_at": event.updated_at,
+            "_category": category,
             "تاریخ انتشار": persian_date(day),
-            "ساعت انتشار": article.published_time or "",
-            "منبع": article.original_outlet or article.source_id,
-            "تیتر خبر": (summary.optimized_title if summary else "") or article.original_title,
-            "اطمینان از وقوع خبر": scores[0] or "",
-            "چقدر بر تغییر قیمت طلا اثر دارد؟": scores[1] or "",
-            "چقدربا امنیت مرتبط است ؟": scores[2] or "",
-            "جهت طلا": (evaluation.gold_trend if evaluation else "") or "",
-            NOTIFY_HEADER: decide(*scores).status,
-            "توضیحات": (summary.one_line if summary else "") or "",
-            "لینک": article.url,
+            "ساعت انتشار": local.strftime("%H:%M"),
+            "منبع": "، ".join(outlets),
+            "تیتر خبر": event.title_fa or primary.original_title,
+            "اطمینان از وقوع خبر": scores[0],
+            "چقدر بر تغییر قیمت طلا اثر دارد؟": scores[1],
+            "چقدربا امنیت مرتبط است ؟": scores[2],
+            "جهت طلا": "",
+            NOTIFY_HEADER: decide(*(score or None for score in scores)).status,
+            "توضیحات": notes,
+            "لینک": primary.url,
         })
     return records
 
@@ -340,18 +384,16 @@ def feed_text(records: list[dict[str, str]]) -> str:
 def _days_worth_rebuilding(records: list[dict], window_days: int) -> set[str]:
     """The Jalali days whose workbook could still say something different.
 
-    A day's content changes only when one of its articles gets a new answer, and
-    `inference.run_cycle` only ever considers articles fetched inside the same rolling
-    window - so a day with nothing fetched recently is a day whose file would be rewritten
-    byte for byte.
+    A day's content changes only when one of its events changes (a new source, a new
+    assessment), which `core.events.refresh_event` stamps on `NewsEvent.updated_at`; a brief
+    follows its assessment within minutes, well inside the window. So a day with no event
+    touched recently is a day whose file would be rewritten byte for byte.
 
-    Keyed on FETCH time, not publication time, and for the same reason `in_window` is: a
-    backfill run pulls in months-old articles today, and their workbook is an old day's file
-    that genuinely does need rebuilding.
+    Keyed on the last CHANGE, not event time: a late assessment of an old event belongs in
+    that old day's file, which genuinely does need rebuilding.
 
     Computed from the records rather than by a second query, so `_day` here is necessarily
-    the same string `rows()` filed the article under - including its fallback for an article
-    whose Jalali field was never written.
+    the same string `rows()` filed the event under.
     """
     from django.utils import timezone
 
@@ -368,18 +410,21 @@ def export_all(
 ) -> dict[str, Path]:
     """One workbook per Jalali day, plus the notify feed and one file per category.
 
-    `window_days` bounds which workbooks are REBUILT. None means every day in the corpus,
-    which is what a fresh deployment or a post-import backfill wants; the scheduled path in
-    `exports.tasks.build_daily_workbook` passes the rolling window instead. The text feeds
-    always cover the whole corpus either way - they are one file each rather than one per
-    day, so bounding them would just lose data.
+    `window_days` bounds which workbooks are REBUILT. None means every day in the kept span,
+    which is what a fresh deployment wants; the scheduled path in
+    `exports.tasks.build_daily_workbook` passes the rolling window instead.
+
+    Storage policy: everything covers the last EXPORT_KEEP_DAYS days of events, and only the
+    newest EXPORT_KEEP_DAYS workbooks stay on the export volume (`prune_workbooks`).
     """
+    from django.utils import timezone
+
     from core.vocabulary import CATEGORIES
 
     directory = Path(directory or settings.EXPORT_DIR)
     directory.mkdir(parents=True, exist_ok=True)
-    records = rows()
-    # `other` articles are stored and visible in the app, but the analyst workbook is a
+    records = rows(since=timezone.now() - timedelta(days=settings.EXPORT_KEEP_DAYS))
+    # `other` events are stored and visible in the app, but the analyst workbook is a
     # security/economics instrument and the team's own files never carried them.
     eligible = [record for record in records if record["_category"] != "other"]
     wanted = (
@@ -410,4 +455,16 @@ def export_all(
             feed_text([r for r in records if r["_category"] == category]), encoding="utf-8"
         )
         files[f"text:{category}"] = path
+    prune_workbooks(directory / "Excel Files", settings.EXPORT_KEEP_DAYS)
     return files
+
+
+def prune_workbooks(folder: Path, keep: int) -> list[Path]:
+    """Delete all but the `keep` most recently written daily workbooks."""
+    if not folder.is_dir():
+        return []
+    workbooks = sorted(folder.glob("*.xlsx"), key=lambda path: path.stat().st_mtime, reverse=True)
+    removed = workbooks[max(keep, 1):]
+    for path in removed:
+        path.unlink(missing_ok=True)
+    return removed

@@ -16,6 +16,7 @@ Two things make it honest rather than flattering:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 
 from django.db import models
@@ -29,6 +30,37 @@ class Symbol(models.TextChoices):
     COIN_EMAMI = "coin_emami", "Emami coin (سکه امامی)"
     USD_IRR = "usd_irr", "US Dollar / Rial (دلار)"
     EUR_IRR = "eur_irr", "Euro / Rial (یورو)"
+
+
+def nth_trading_day(timestamps: Iterable[datetime], start: datetime, days: int) -> datetime | None:
+    """The first observation of the `days`-th trading day after `start`, or None.
+
+    `timestamps` are observations in ascending order. A trading day is a Tehran calendar
+    day with at least one observation, so no holiday calendar is needed. The start day is
+    day ZERO and is skipped. Shared by the TGJU back-test and the event reactions, which
+    read Portfolio series instead of PriceSnapshot rows.
+    """
+    from zoneinfo import ZoneInfo
+
+    from django.conf import settings
+    from django.utils import timezone
+
+    tz = ZoneInfo(getattr(settings, "TEHRAN_TZ", "Asia/Tehran"))
+
+    def _market_date(dt: datetime):
+        return dt.astimezone(tz).date() if timezone.is_aware(dt) else dt.date()
+
+    start_day, last_day, seen = _market_date(start), None, 0
+    for observed_at in timestamps:
+        if observed_at <= start:
+            continue
+        day = _market_date(observed_at)
+        if day == start_day or day == last_day:
+            continue
+        last_day, seen = day, seen + 1
+        if seen >= days:
+            return observed_at
+    return None
 
 
 class PriceSnapshot(models.Model):
@@ -74,28 +106,8 @@ class PriceSnapshot(models.Model):
         movement scored as a one-day window - and `days=3` span about two calendar days.
         Every realised return was measured over less time than it claimed.
         """
-        from zoneinfo import ZoneInfo
-
-        from django.conf import settings
-        from django.utils import timezone
-
-        tz = ZoneInfo(getattr(settings, "TEHRAN_TZ", "Asia/Tehran"))
-
-        def _market_date(dt: datetime):
-            return dt.astimezone(tz).date() if timezone.is_aware(dt) else dt.date()
-
-        seen: list[datetime] = []
-        start_day = _market_date(start)
         rows = cls.objects.filter(symbol=symbol, observed_at__gt=start).order_by("observed_at")
-        for observed_at in rows.values_list("observed_at", flat=True).iterator():
-            day = _market_date(observed_at)
-            if day == start_day:
-                continue
-            if not seen or _market_date(seen[-1]) != day:
-                seen.append(observed_at)
-            if len(seen) >= days:
-                return seen[-1]
-        return None
+        return nth_trading_day(rows.values_list("observed_at", flat=True).iterator(), start, days)
 
 
 class PredictionOutcome(models.Model):
@@ -131,3 +143,43 @@ class PredictionOutcome(models.Model):
 
     def __str__(self) -> str:
         return f"{self.symbol} {self.realized_pct:+.2f}% over {self.window_trading_days}d"
+
+
+class EventReaction(models.Model):
+    """How one asset moved around one news event: the event-level back-test.
+
+    Not a verdict on the model either. It records the move and how unusual it was against
+    the asset's own trailing 30 days of daily moves (`abs_z`); calibration (does a higher
+    tier come with bigger moves?) is an aggregation over these rows on /ops.
+
+    Prices come from Portfolio, the single price authority. Windows: `2h` (two hours either
+    side) and `1d` for 24-hour global markets; `1td` and `3td` trading days for Iranian
+    markets, which close on Fridays and holidays.
+    """
+
+    event = models.ForeignKey(
+        "articles.NewsEvent", on_delete=models.CASCADE, related_name="reactions"
+    )
+    asset_key = models.CharField(max_length=64)
+    asset_class = models.CharField(max_length=32, blank=True)
+    window = models.CharField(max_length=8)
+    # The event's impact tier when the reaction was computed. Tiers are relative to the
+    # trailing 30 days, so recomputing them later would rewrite history.
+    tier = models.PositiveSmallIntegerField()
+    price_before = models.DecimalField(max_digits=24, decimal_places=8)
+    price_after = models.DecimalField(max_digits=24, decimal_places=8)
+    pct_change = models.FloatField()
+    # None when the trailing series is too short or flat to say what "usual" is.
+    abs_z = models.FloatField(null=True, blank=True)
+    computed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-computed_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "asset_key", "window"], name="unique_event_reaction"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"event {self.event_id} {self.asset_key} {self.window} {self.pct_change:+.2f}%"

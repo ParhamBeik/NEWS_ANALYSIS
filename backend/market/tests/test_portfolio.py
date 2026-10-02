@@ -101,3 +101,18 @@ def test_macro_endpoint_groups_tiles_with_quotes_and_sparklines():
     tile = body["groups"][0]["tiles"][0]
     assert tile["price"] == "99.8" and tile["spark"] == ["98", "102"]
     assert body["selected"]["key"] == "brent" and len(body["selected"]["points"]) == 2
+
+
+@pytest.mark.django_db
+@override_settings(NEWS_MARKET_SOURCE="portfolio", **CONFIGURED)
+def test_market_source_portfolio_routes_tgju_symbols_through_portfolio(user):
+    series = {"provider": "Portfolio", "caveats": [], "points": [
+        {"observed_at": "2026-10-01T00:00:00+03:30", "price": "98"}]}
+    client = APIClient()
+    client.force_authenticate(user)
+    with patch("market.portfolio.requests.get", return_value=_response(series)) as get:
+        timeline = client.get("/api/public/assets/gold_18k/timeline/").data
+        market = client.get("/api/market/", {"symbol": "gold_18k"}).data
+    assert get.call_args.kwargs["params"]["key"] == "gold_18k"
+    assert [str(p["price"]) for p in timeline["points"]] == ["98"]
+    assert market["source"] == "portfolio" and str(market["latest"]["price"]) == "98"

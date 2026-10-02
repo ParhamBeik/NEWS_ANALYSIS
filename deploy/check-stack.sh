@@ -43,6 +43,7 @@ expected = (
     "nightly-storylines",
     "daily-email-digest",
     "ops-staff-alerts",
+    "event-reactions",
 )
 enabled = set(PeriodicTask.objects.filter(name__in=expected, enabled=True).values_list("name", flat=True))
 assert enabled == set(expected), f"schedules not enabled: {sorted(set(expected) - enabled)}"

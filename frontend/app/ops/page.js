@@ -5,6 +5,7 @@ import { ApiError, apiGet } from "@/lib/api";
 import { money, number, percent, tehranTime } from "@/lib/display";
 import { label, language } from "@/lib/language";
 import { AiCostPanel, AiPausedBanner, CrawlErrorsPanel, FreshnessPanel } from "./StaffPanels";
+import CalibrationPanel from "./CalibrationPanel";
 
 export const metadata = { title: "Ops · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -126,6 +127,7 @@ export default async function OpsPage({ searchParams }) {
             <AiCostPanel ai={staff.ai} tr={tr} />
             <CrawlErrorsPanel errors={staff.crawl_errors} tr={tr} />
             <FreshnessPanel freshness={staff.freshness} gaps={staff.priority_gaps} tr={tr} />
+            <CalibrationPanel tr={tr} />
           </>
         )}
 

@@ -25,13 +25,12 @@ def build_daily_workbook(window_days: int | None = None, rebuild_all: bool = Fal
     every night: a template copy, an openpyxl parse, a save and a zip rewrite each. That is
     work that grows without limit for the life of the deployment - six months in it is ~180
     files a night, almost all of them rewritten byte-for-byte - inside a worker with a
-    640 MB ceiling. A day can only change if one of its articles was fetched inside the
-    rolling window, because that is the only set `inference.run_cycle` will re-answer, so
-    that is the set rebuilt here. Older files stay on disk and stay downloadable; they are
-    simply not rewritten to say what they already said.
+    640 MB ceiling. A day can only change if one of its events changed inside the rolling
+    window, so that is the set rebuilt here. Files stay downloadable until they fall out of
+    the newest EXPORT_KEEP_DAYS (storage policy); they are simply not rewritten to say what
+    they already said.
 
-    `rebuild_all=True` is the escape for the cases where the bound is wrong: a fresh
-    deployment, or a `manage.py import_legacy` that just brought in months of corpus.
+    `rebuild_all=True` is the escape for a fresh deployment: every day in the kept span.
     """
     window = None if rebuild_all else (
         window_days if window_days is not None else settings.NEWS_ROLLING_WINDOW_DAYS

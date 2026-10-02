@@ -284,6 +284,11 @@ PORTFOLIO_MARKET_SERVICE_KEY = env("PORTFOLIO_MARKET_SERVICE_KEY")
 # Host header for Portfolio when reached by its Docker alias (it must be in Portfolio's
 # ALLOWED_HOSTS). Empty = derive it from PORTFOLIO_MARKET_BASE_URL.
 PORTFOLIO_MARKET_HOST = env("PORTFOLIO_MARKET_HOST")
+# Which feed the market pages read: "tgju" (the local PriceSnapshot poller) until the owner
+# flips it to "portfolio", the single price authority. The poller keeps running either way.
+NEWS_MARKET_SOURCE = env("NEWS_MARKET_SOURCE", "tgju")
+if NEWS_MARKET_SOURCE not in {"tgju", "portfolio"}:
+    raise ImproperlyConfigured("NEWS_MARKET_SOURCE must be tgju or portfolio")
 NEWS_VAPID_PUBLIC_KEY = env("NEWS_VAPID_PUBLIC_KEY")
 NEWS_VAPID_PRIVATE_KEY = env("NEWS_VAPID_PRIVATE_KEY")
 NEWS_VAPID_SUBJECT = env("NEWS_VAPID_SUBJECT")
@@ -355,6 +360,9 @@ WORKBOOK_TEMPLATE_PATH = BASE_DIR / "exports" / "assets" / "workbook_template.xl
 # ExportDownloadView, which requires a login; keeping them off that volume is what makes
 # that the only way in.
 EXPORT_DIR = Path(env("EXPORT_DIR", str(BASE_DIR / "var" / "exports")))
+# Storage policy: the export volume holds at most this many days of daily workbooks; older
+# files are pruned by the nightly export, and the text feeds cover the same span.
+EXPORT_KEEP_DAYS = env_int("EXPORT_KEEP_DAYS", 60)
 
 LOGGING = {
     "version": 1,

@@ -162,3 +162,15 @@ def backtest_predictions(
             else:
                 skipped += 1
     return {"symbol": symbol, "scored": scored, "not_yet_scorable": skipped}
+
+
+@shared_task(name="market.compute_event_reactions")
+def compute_event_reactions(limit: int = 300) -> dict:
+    """Event-level back-test over Portfolio prices; see market.reactions.
+
+    Never raises for an absent price service: an unconfigured or unreachable Portfolio is a
+    counted skip on /ops, not a failed task.
+    """
+    from .reactions import compute
+
+    return compute(limit=limit)
