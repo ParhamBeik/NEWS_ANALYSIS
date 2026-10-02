@@ -39,6 +39,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
+from accounts.models import Account
 from articles.models import Article, EventReview, NewsEvent, UrlStatus
 from core.collection import analysis_summary, collection_summary
 from core.events import priority_visibility, split_article_from_event
@@ -152,10 +153,16 @@ class AnalysisSummaryView(APIView):
 
 class MeView(APIView):
     def get(self, request):
+        account = Account.objects.filter(user=request.user).first()
+        phone = account.phone if account else None
         return Response(
             {
                 "username": request.user.get_username(),
                 "is_staff": request.user.is_staff,
+                # What the header shows: a phone account's local number, else the username.
+                "display_name": "0" + phone.removeprefix("+98") if phone
+                else request.user.get_username(),
+                "onboarded": bool(account and account.onboarded_at),
             }
         )
 

@@ -54,20 +54,37 @@ class AlertConfigView(ReaderView):
         )
 
 
+def valid_push_subscription(subscription) -> bool:
+    """A browser PushSubscription JSON aimed at a known push service, with sane keys."""
+    if not isinstance(subscription, dict):
+        return False
+    endpoint = subscription.get("endpoint", "")
+    keys = subscription.get("keys") or {}
+    hostname = urlsplit(endpoint).hostname if isinstance(endpoint, str) else None
+    allowed = hostname in {
+        "fcm.googleapis.com",
+        "updates.push.services.mozilla.com",
+        "web.push.apple.com",
+    } or (bool(hostname) and hostname.endswith(".push.apple.com"))
+    return (
+        isinstance(endpoint, str)
+        and endpoint.startswith("https://")
+        and allowed
+        and len(endpoint) <= 2048
+        and isinstance(keys, dict)
+        and all(
+            isinstance(keys.get(name), str) and 20 <= len(keys[name]) <= 255
+            for name in ("p256dh", "auth")
+        )
+    )
+
+
 class AlertSubscriptionView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_classes = [AlertThrottle]
 
     def post(self, request):
         subscription = request.data.get("subscription") or {}
-        endpoint = subscription.get("endpoint", "") if isinstance(subscription, dict) else ""
-        keys = subscription.get("keys") or {} if isinstance(subscription, dict) else {}
-        hostname = urlsplit(endpoint).hostname if isinstance(endpoint, str) else None
-        allowed = hostname in {
-            "fcm.googleapis.com",
-            "updates.push.services.mozilla.com",
-            "web.push.apple.com",
-        } or (bool(hostname) and hostname.endswith(".push.apple.com"))
         if not (
             settings.NEWS_ALERTS_ENABLED
             and settings.NEWS_VAPID_PUBLIC_KEY
@@ -75,18 +92,9 @@ class AlertSubscriptionView(APIView):
             and settings.NEWS_VAPID_SUBJECT
         ):
             raise ValidationError({"subscription": "browser alerts are not configured"})
-        if (
-            not isinstance(endpoint, str)
-            or not endpoint.startswith("https://")
-            or not allowed
-            or len(endpoint) > 2048
-            or not isinstance(keys, dict)
-            or not all(
-                isinstance(keys.get(name), str) and 20 <= len(keys[name]) <= 255
-                for name in ("p256dh", "auth")
-            )
-        ):
+        if not valid_push_subscription(subscription):
             raise ValidationError({"subscription": "invalid browser push subscription"})
+        endpoint, keys = subscription["endpoint"], subscription["keys"]
         assets = request.data.get("asset_classes") or []
         if (
             not isinstance(assets, list)
