@@ -41,6 +41,9 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Staff swipe review | `frontend/app/review/swipe/`, `core/review.py` | Live (staff login) |
 | Old article pipeline | `inference` classify/evaluate/summarize, `/review`, `/kpi`, workbooks | Schedule **disabled** (replaced by events); workbooks stale until re-fed |
 | Alerts (web push) | `articles.AlertSubscription`, `NEWS_ALERTS_ENABLED` | Built; off |
+| Reader accounts | `accounts/`, `core/otp.py`, `api/accounts.py`, `/login`, `/onboarding`, `/settings` | Built (Phase 5): phone OTP via Kavenegar, **off until keys**; staff password login unchanged |
+| Watchlists + personal radar | `accounts.Watch`, `lib/reader.js` `boostWatched` | Built (Phase 5): ≥3 watch items at onboarding; watched events marked and lifted 5 places |
+| Watchlist alerts | `core/alerts.py`, `accounts.fan_out_event`, `/inbox` | Built (Phase 5), behind `NEWS_ALERTS_ENABLED`: dial, 5 pushes/day, quiet hours 23-07, tier 5 exempt; inbox always; web push + FCM adapters, Pushe/Najva tokens stored only |
 | Ops dashboard | `frontend/app/ops/`, `api` `OpsView`, `OpsStaffView`, `core/ops.py` | Live; staff panels: AI cost vs ceilings, errors by cause, freshness SLO (Phase 3) |
 | Staff ops alerts | `core/ops_alerts.py`, task `core.ops_alerts` | Every 5 min, 6 h dedup; logs always, email/webhook once `EMAIL_HOST` / `OPS_ALERT_WEBHOOK_URL` are set |
 | Deploy | `.github/workflows/`, `deploy/` | `main` → CI → GHCR → Mac runner → server; health gate + auto-rollback |
@@ -73,11 +76,13 @@ with `date_uncertain`.
 1. Top up GapGPT (AI is stalled until then).
 2. TypeSafe API key → `TYPESAFE_API_KEY` in the server `.env` (Jev; cheaper than fallback).
 3. `NEWS_MONTHLY_BUDGET_USD=30`, `NEWS_DAILY_BUDGET_USD=1.00` in the server `.env`.
-4. Later phases: Kavenegar (SMS login), Firebase + Pushe/Najva (mobile push).
+4. Phone login: `KAVENEGAR_API_KEY` + `KAVENEGAR_OTP_TEMPLATE` (a Verify template with one `%token`).
+5. Push: VAPID keys (web), Firebase service account + project id (app); pick Pushe or Najva for an adapter.
+6. Optional email digest: SMTP `EMAIL_HOST`/user/password.
 
 ## Next build phases
 
 1. Collection backbone: source catalog to ~38, coverage gaps, durable retries.
 2. AI backbone: 8 investor topics, watch-item vocabulary, quantile tiers, storylines (built).
 3. Ops page for coverage and AI cost; 4. portfolio price contract; 5. accounts, watchlists,
-   alerts; 6. mobile app.
+   alerts (built); 6. mobile app.

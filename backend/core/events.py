@@ -155,6 +155,15 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
             retained.sent_at = alert.sent_at
             retained.save(update_fields=["sent_at"])
     EventAssessment.objects.filter(event=incoming).update(event=target)
+    # Reader alerts follow the merge: inbox rows move, and a user told about the absorbed
+    # event keeps that ledger row (unless already on the target), so the merge rebases it
+    # instead of re-alerting (core.alerts).
+    from accounts.models import Alert, AlertState
+
+    Alert.objects.filter(event=incoming).update(event=target)
+    AlertState.objects.filter(event=incoming).exclude(
+        user__in=AlertState.objects.filter(event=target).values("user")
+    ).update(event=target)
     for item_id in EventWatchItem.objects.filter(event=incoming).values_list("item", flat=True):
         EventWatchItem.objects.get_or_create(event=target, item_id=item_id)
     # A ruling against the absorbed event now holds against the event that absorbed it.

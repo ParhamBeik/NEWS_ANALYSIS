@@ -1,6 +1,6 @@
 import Link from "next/link";
 import EventImage from "@/components/EventImage";
-import { CategoryChip, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
+import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { digits, headline, sourceCount, whyItMatters } from "@/lib/reader";
 
 function Meta({ event, lang }) {
@@ -36,6 +36,9 @@ export default function EventTile({ event, lang, variant = "card" }) {
       <div className="flex flex-wrap items-center gap-2">
         <TierBadge tier={event.impact_tier} lang={lang} />
         <StatusBadge status={event.status} lang={lang} />
+        {event.watched ? <span className="inline-flex items-center gap-1 rounded-full bg-accent-strong px-2.5 py-0.5 text-xs font-semibold text-white">
+          <Icon name="star" className="h-3.5 w-3.5" />{lang === "fa" ? "در فهرست پیگیری شما" : "On your watchlist"}
+        </span> : null}
       </div>
       <h3 className={`font-bold text-ink ${hero ? "text-2xl leading-snug md:text-3xl" : compact ? "line-clamp-3 text-[15px] leading-7 sm:text-base" : "text-lg leading-8"}`} dir="auto">
         <Link href={`/events/${event.id}`} className="outline-none after:absolute after:inset-0 hover:text-accent">{title}</Link>

@@ -6,7 +6,7 @@ import { removeAlertSubscription, saveAlertSubscription } from "@/app/alerts/act
 
 const CLASSES = ["fx", "gold", "tehran_index", "oil", "bitcoin"];
 
-function decodeKey(value) {
+export function decodeKey(value) {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/");
   const bytes = atob(padded + "=".repeat((4 - padded.length % 4) % 4));
   return Uint8Array.from(bytes, (byte) => byte.charCodeAt(0));

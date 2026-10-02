@@ -41,6 +41,7 @@ expected = (
     "assess-pending-events",
     "weekly-circuit-probe",
     "nightly-storylines",
+    "daily-email-digest",
     "ops-staff-alerts",
 )
 enabled = set(PeriodicTask.objects.filter(name__in=expected, enabled=True).values_list("name", flat=True))

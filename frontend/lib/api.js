@@ -94,10 +94,23 @@ export async function currentUser() {
   try {
     const response = await apiFetch("/api/auth/me/");
     if (!response.ok) return null;
-    const { username, is_staff: isStaff } = await response.json();
-    return { username, isStaff: Boolean(isStaff) };
+    const { username, is_staff: isStaff, display_name: displayName, onboarded } = await response.json();
+    return { username, displayName: displayName || username, isStaff: Boolean(isStaff), onboarded: Boolean(onboarded) };
   } catch {
     return null;
+  }
+}
+
+/** The signed-in reader's watch-item slugs; [] when signed out or on any failure. The radar
+ *  must render for everyone, so this never redirects or throws. */
+export async function myWatchlist() {
+  if (!(await cookies()).get("news_token")) return [];
+  try {
+    const response = await apiFetch("/api/account/watchlist/");
+    if (!response.ok) return [];
+    return (await response.json()).results.map((item) => item.slug);
+  } catch {
+    return [];
   }
 }
 

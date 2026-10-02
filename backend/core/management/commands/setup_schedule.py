@@ -21,6 +21,7 @@ Cadences and their reasons:
   forever, so the one table an operator reads for cost is the one that would lie.
 - storylines nightly: membership is SQL and set arithmetic, and a day's events are enough
   to see a thread; only naming may call a model, and it degrades to a derived name.
+- email digest daily at 08:00 Tehran, after quiet hours end; a no-op until SMTP is set.
 - review sampling and A/B pairing hourly. Both queues are consumed by a human at their own
   pace; the cost of queueing a little ahead is a row, and the cost of queueing nothing is
   that every agreement metric on /kpi stays null.
@@ -74,6 +75,7 @@ CRON_TASKS = [
      {"dry_run": False}),
     # Storylines at 02:30, after the day's assessments; a cheap SQL pass plus a few names.
     ("nightly-storylines", "inference.build_storylines", {"hour": "2", "minute": "30"}, {}),
+    ("daily-email-digest", "accounts.send_email_digests", {"hour": "8", "minute": "0"}, {}),
     # Re-check articles that have fallen off listings; 404 becomes GONE, once.
     ("weekly-url-health", "articles.tasks.check_stale_urls",
      {"hour": "4", "minute": "30", "day_of_week": "0"}, {}),

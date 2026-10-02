@@ -8,6 +8,17 @@ during development. Both are configured in REST_FRAMEWORK; this module only name
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .accounts import (
+    AccountView,
+    DeviceView,
+    InboxReadView,
+    InboxView,
+    OTPRequestView,
+    OTPVerifyView,
+    PublicWatchItemsView,
+    WatchlistItemView,
+    WatchlistView,
+)
 from .macro import PublicMacroView
 from .public import (
     AlertConfigView,
@@ -83,6 +94,17 @@ urlpatterns = [
     path("auth/signup/", SignupView.as_view(), name="auth-signup"),
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("auth/otp/request/", OTPRequestView.as_view(), name="auth-otp-request"),
+    path("auth/otp/verify/", OTPVerifyView.as_view(), name="auth-otp-verify"),
+    path("account/", AccountView.as_view(), name="account"),
+    path("account/watchlist/", WatchlistView.as_view(), name="account-watchlist"),
+    path(
+        "account/watchlist/<slug:slug>/", WatchlistItemView.as_view(), name="account-watch-item"
+    ),
+    path("account/devices/", DeviceView.as_view(), name="account-devices"),
+    path("account/inbox/", InboxView.as_view(), name="account-inbox"),
+    path("account/inbox/read/", InboxReadView.as_view(), name="account-inbox-read"),
+    path("public/watch-items/", PublicWatchItemsView.as_view(), name="public-watch-items"),
     path("feed-stats/", FeedStatsView.as_view(), name="feed-stats"),
     path("ops/", OpsView.as_view(), name="ops"),
     path("ops/staff/", OpsStaffView.as_view(), name="ops-staff"),

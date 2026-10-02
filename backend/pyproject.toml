@@ -1,7 +1,7 @@
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
 python_files = ["test_*.py"]
-testpaths = ["core", "sources", "articles", "inference", "review", "market", "exports", "api"]
+testpaths = ["accounts", "core", "sources", "articles", "inference", "review", "market", "exports", "api"]
 addopts = "-q --strict-markers"
 markers = [
     "network: hits a real external service; excluded from the default run",
