@@ -1,7 +1,7 @@
 import Link from "next/link";
 import EventImage from "@/components/EventImage";
 import { CategoryChip, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
-import { digits, headline, impactScore, sourceCount, whyItMatters } from "@/lib/reader";
+import { digits, headline, sourceCount, whyItMatters } from "@/lib/reader";
 
 function Meta({ event, lang }) {
   const count = sourceCount(event);
@@ -34,7 +34,7 @@ export default function EventTile({ event, lang, variant = "card" }) {
     </div>
     <div className={`flex min-w-0 flex-col gap-2.5 ${hero ? "p-5 md:col-span-2 md:justify-center md:p-7" : compact ? "p-3 sm:p-4" : "p-4"}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <TierBadge score={impactScore(event)} lang={lang} />
+        <TierBadge tier={event.impact_tier} lang={lang} />
         <StatusBadge status={event.status} lang={lang} />
       </div>
       <h3 className={`font-bold text-ink ${hero ? "text-2xl leading-snug md:text-3xl" : compact ? "line-clamp-3 text-[15px] leading-7 sm:text-base" : "text-lg leading-8"}`} dir="auto">

@@ -1,19 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  impactScore, impactTier, jalali, groupSources, rangeFor, linkedAssets, digits,
+  tierMeta, jalali, groupSources, rangeFor, linkedAssets, digits,
 } from "../lib/reader.js";
 
-test("impact scores map to five tiers and missing scores stay unassessed", () => {
-  const tier = (score) => impactTier(score)?.level ?? null;
-  assert.deepEqual([0, 19, 20, 39, 40, 59, 60, 79, 80, 100].map(tier), [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
-  assert.equal(tier(null), null);
-  assert.equal(tier(undefined), null);
-  assert.equal(impactTier(85).fa, "خیلی زیاد");
-  assert.equal(impactTier(10).en, "Very low");
-  assert.equal(impactScore({ iran_score: 90, global_score: 40 }), 70);
-  assert.equal(impactScore({ iran_score: null, global_score: 40 }), 40);
-  assert.equal(impactScore({}), null);
+test("API tiers 1-5 get labels and a missing tier stays unassessed", () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map((level) => tierMeta(level).level), [1, 2, 3, 4, 5]);
+  assert.equal(tierMeta(5).fa, "خیلی زیاد");
+  assert.equal(tierMeta(1).en, "Very low");
+  for (const missing of [null, undefined, 0, 6, 2.5, ""]) assert.equal(tierMeta(missing), null);
 });
 
 test("dates are Jalali in both languages with Persian digits in Persian", () => {

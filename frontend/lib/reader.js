@@ -1,5 +1,5 @@
 /**
- * Reader presentation rules: impact tiers, Jalali dates, Persian digits, category art and
+ * Reader presentation rules: tier labels, Jalali dates, Persian digits, category art and
  * source grouping. Pure functions with no Next.js imports, so tests load this file as-is.
  */
 
@@ -11,23 +11,12 @@ export const TIERS = [
   { level: 5, en: "Very high", fa: "خیلی زیاد" },
 ];
 
-/** 0-100 score to tier 1-5 in equal 20-point bands; 80+ matches the alert threshold.
- *  A missing score stays null - "not assessed" is never shown as "very low". */
-export function impactTier(score) {
-  if (score === null || score === undefined || score === "") return null;
-  const value = Number(score);
-  if (!Number.isFinite(value)) return null;
-  return TIERS[Math.min(4, Math.max(0, Math.floor(value / 20)))];
-}
-
-/** The same Iran/global weighting the API ranks by (core.events.ranked_events). */
-export function impactScore(event) {
-  const iran = event?.iran_score;
-  const global = event?.global_score;
-  if (iran == null && global == null) return null;
-  if (iran == null) return global;
-  if (global == null) return iran;
-  return Math.round(0.6 * iran + 0.4 * global);
+/** Labels for the API's tier 1-5 (core/tiers.py decides it; the reader never does).
+ *  A missing tier stays null - "not assessed" is never shown as "very low". */
+export function tierMeta(level) {
+  const value = Number(level);
+  if (level === null || level === undefined || !Number.isInteger(value)) return null;
+  return TIERS[value - 1] || null;
 }
 
 const TEHRAN = "Asia/Tehran";

@@ -389,8 +389,9 @@ def event_review_card(review: EventReview) -> dict:
         **event_document(event),
         "review_reason": review.reason,
         "skipped": review.skipped_at is not None,
-        "iran_tier": score_tier(event.iran_score),
-        "global_tier": score_tier(event.global_score),
+        # Reviewer levels 0-4, distinct from the reader's relative iran_tier/global_tier.
+        "iran_level": score_tier(event.iran_score),
+        "global_level": score_tier(event.global_score),
         "articles": [
             {
                 "id": article.id,

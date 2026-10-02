@@ -72,7 +72,7 @@ export default async function MarketImpact({ params, searchParams }) {
       {asset ? <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-bold">{name(asset)} <span className="text-sm font-normal text-muted">({timeline?.asset.unit || asset.unit})</span></h2>
         {event.asset_scores?.[asset.class] != null ? <span className="flex items-center gap-2 text-xs text-muted">
-          {tr("Assessed relevance", "ارتباط ارزیابی‌شده")} <TierBadge score={event.asset_scores[asset.class]} lang={lang} prefix={false} />
+          {tr("Assessed relevance", "ارتباط ارزیابی‌شده")} <TierBadge tier={event.asset_tiers?.[asset.class]} lang={lang} prefix={false} />
         </span> : null}
       </div> : null}
       {timeline?.points.length

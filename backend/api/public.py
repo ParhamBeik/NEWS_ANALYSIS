@@ -20,6 +20,7 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 
 from articles.models import AlertSubscription, NewsEvent
+from core import tiers
 from core.events import ranked_events
 from core.vocabulary import event_topic
 from market.models import PriceSnapshot, Symbol
@@ -118,7 +119,7 @@ class AlertSubscriptionView(APIView):
         return Response(status=204)
 
 
-def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
+def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None = None) -> dict:
     articles = sorted(event.articles.all(), key=lambda row: row.published_at or row.fetched_at)
     primary = event.primary_article
     image = getattr(primary, "image", None)
@@ -129,6 +130,7 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
     permitted_image = card.url if card else None
     permitted_large = image.file.url if allowed and image.file else None
     latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
+    asset_scores = latest.asset_scores if latest else {}
     document = {
         "id": event.id,
         "status": event.status,
@@ -145,7 +147,14 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
         "uncertainty_en": event.uncertainty_en or None,
         "iran_score": event.iran_score,
         "global_score": event.global_score,
-        "asset_scores": latest.asset_scores if latest else {},
+        # Tiers 1-5 are decided here (core.tiers), never recomputed by the reader.
+        "iran_tier": tiers.tier(event.iran_score, "iran", cuts),
+        "global_tier": tiers.tier(event.global_score, "global", cuts),
+        "impact_tier": tiers.tier(
+            tiers.impact(event.iran_score, event.global_score), "impact", cuts
+        ),
+        "asset_scores": asset_scores,
+        "asset_tiers": {key: tiers.band(value) for key, value in asset_scores.items()},
         "assessment_confidence": event.assessment_confidence,
         "watch_items": [
             {
@@ -216,7 +225,10 @@ class PublicEventsView(ReaderView):
         events = list(queryset)
         if mode == "ranked" and period != "latest":
             events = ranked_events(events, now)
-        return Response({"results": [event_document(event) for event in events[:50]], "as_of": now})
+        cuts = tiers.cutoffs()
+        return Response(
+            {"results": [event_document(e, cuts=cuts) for e in events[:50]], "as_of": now}
+        )
 
 
 class PublicEventDetailView(ReaderView):
@@ -390,8 +402,9 @@ class PublicTimelineView(ReaderView):
         )
         asset_class = asset["class"]
         markers = []
+        cuts = tiers.cutoffs()
         for event in events:
-            document = event_document(event)
+            document = event_document(event, cuts=cuts)
             relevance = document["asset_scores"].get(asset_class)
             if not all_events and (relevance is None or relevance < 50):
                 continue

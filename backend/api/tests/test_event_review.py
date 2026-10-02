@@ -41,7 +41,7 @@ def test_queue_agree_split_and_session_stats(user, review, django_assert_max_num
         queue = api.get("/api/review/queue/?limit=25").json()
     card = queue["results"][0]
     assert queue["pending"] == 1
-    assert (card["id"], card["iran_tier"], card["global_tier"], card["category"]) == (
+    assert (card["id"], card["iran_level"], card["global_level"], card["category"]) == (
         review.event_id, 2, 3, "markets_companies",
     )
     assert len(card["articles"]) == 2

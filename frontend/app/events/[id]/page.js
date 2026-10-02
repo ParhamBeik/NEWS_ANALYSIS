@@ -47,8 +47,8 @@ export default async function EventDetail({ params }) {
         <StatusBadge status={event.status} lang={lang} />
       </div>
       <div className="grid gap-3 rounded-2xl border border-line bg-card p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-center">
-        <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge score={event.iran_score} lang={lang} prefix={false} /></div>
-        <div className="space-y-1"><p className="text-xs text-muted">{tr("Global significance", "اهمیت جهانی")}</p><TierBadge score={event.global_score} lang={lang} prefix={false} /></div>
+        <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge tier={event.iran_tier} lang={lang} prefix={false} /></div>
+        <div className="space-y-1"><p className="text-xs text-muted">{tr("Global significance", "اهمیت جهانی")}</p><TierBadge tier={event.global_tier} lang={lang} prefix={false} /></div>
         <Link href={`/events/${event.id}/market`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent-strong px-4 py-3 font-semibold text-white hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
           <Icon name="candles" />{tr("Market impact", "اثر بر بازار")}
         </Link>

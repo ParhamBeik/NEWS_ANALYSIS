@@ -25,9 +25,9 @@ def make_review(make_article, *, reason="audit_sample", confidence=0.8, category
     return EventReview.objects.create(event=event, reason=reason)
 
 
-def test_score_tier_maps_jev_steps_and_neighbours():
+def test_score_tier_is_the_fixed_band_so_jev_levels_map_one_to_one():
     assert [score_tier(s) for s in (0, 12, 13, 25, 50, 62, 63, 75, 88, 100)] == [
-        0, 0, 1, 1, 2, 2, 3, 3, 4, 4,
+        0, 0, 0, 1, 2, 3, 3, 3, 4, 4,
     ]
     assert score_tier(None) is None
 
