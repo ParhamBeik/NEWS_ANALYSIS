@@ -100,6 +100,22 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --ci
+
   # The Dockerfiles were previously validated for the first time by `deploy.yml`, which
   # only runs on a push to main - so a broken base image or a missing system library was
   # discovered during a production deploy, by the deploy failing. Building here (without

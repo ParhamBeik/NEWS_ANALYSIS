@@ -50,6 +50,15 @@ def fetch(source, session: requests.Session, *, limit: int) -> list[RawArticle]:
     return _module(source.strategy).fetch(source, session, limit=limit)
 
 
+def fetch_one(source, session: requests.Session, url: str) -> RawArticle:
+    """Fetch one article page again, for `sources.drain_fetch_retries`. Only strategies
+    that fetch detail pages define it; a feed-only strategy never queues a retry."""
+    module = _module(source.strategy)
+    if not hasattr(module, "fetch_one"):
+        raise Permanent(f"strategy {source.strategy!r} has no single-article fetch")
+    return module.fetch_one(source, session, url)
+
+
 def supports_backfill(source) -> bool:
     """A source can backfill only if its strategy implements it AND it has an archive URL.
     Sharing a fetch shape does not mean sharing a history mechanism: Mehr's RSS feed and

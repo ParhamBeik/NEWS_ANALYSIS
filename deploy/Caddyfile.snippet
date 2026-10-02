@@ -61,6 +61,14 @@
 		reverse_proxy backend:8000
 	}
 
+	# The Android app calls Django directly (it has no Next server to do it). Only the
+	# anonymous reader API and the staff token/review endpoints it uses; every other /api
+	# path stays reachable only from the Next server. Django remains the auth boundary.
+	@mobile_api path /api/public/* /api/auth/token/ /api/auth/me/ /api/auth/logout/ /api/review/queue/ /api/review/events/*
+	handle @mobile_api {
+		reverse_proxy backend:8000
+	}
+
 	# Everything else is the Next.js app. `flush_interval -1` disables response buffering,
 	# which streaming server components need - without it the whole page is withheld until
 	# the last suspense boundary resolves.

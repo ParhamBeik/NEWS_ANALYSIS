@@ -20,6 +20,7 @@ from urllib.parse import urljoin
 import requests
 
 from ..extraction import RawArticle, fetch_text, node_text, parse_generic_article, soup_of
+from ..models import FetchRetry
 
 
 def parse_listing(html: str, base_url: str) -> list[RawArticle]:
@@ -52,14 +53,26 @@ def relay_target(html: str, page_url: str) -> str:
     return page_url
 
 
+def _follow(session: requests.Session, url: str) -> tuple[str, str]:
+    """(article html, article url) behind one relay link."""
+    relay = fetch_text(session, url)
+    target = relay_target(relay, url)
+    return (relay if target == url else fetch_text(session, target)), target
+
+
+def fetch_one(spec, session: requests.Session, url: str) -> RawArticle:
+    """Retry path: the relay URL alone. The listing's crediting outlet is not kept."""
+    detail, target = _follow(session, url)
+    return parse_generic_article(detail, spec.name, target)
+
+
 def fetch(spec, session: requests.Session, *, limit: int) -> list[RawArticle]:
     articles: list[RawArticle] = []
     for listed in parse_listing(fetch_text(session, spec.url), spec.url):
         try:
-            relay = fetch_text(session, listed.url)
-            target = relay_target(relay, listed.url)
-            detail = relay if target == listed.url else fetch_text(session, target)
-        except Exception:
+            detail, target = _follow(session, listed.url)
+        except Exception as exc:
+            FetchRetry.schedule(spec, listed.url, exc)
             continue
         extracted = parse_generic_article(
             detail, listed.source, target, listed.original_outlet

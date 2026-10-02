@@ -19,6 +19,7 @@ from .accounts import (
     WatchlistItemView,
     WatchlistView,
 )
+from .macro import PublicMacroView
 from .public import (
     AlertConfigView,
     AlertSubscriptionView,
@@ -33,6 +34,7 @@ from .views import (
     AnalysisSummaryView,
     ArticleViewSet,
     CollectionView,
+    CoverageView,
     EventReviewDecisionView,
     EventReviewQueueView,
     EventReviewStatsView,
@@ -69,6 +71,7 @@ urlpatterns = [
     path("public/events/<int:event_id>/", PublicEventDetailView.as_view(), name="public-event"),
     path("public/sources/", PublicSourcesView.as_view(), name="public-sources"),
     path("public/assets/", PublicAssetsView.as_view(), name="public-assets"),
+    path("public/macro/", PublicMacroView.as_view(), name="public-macro"),
     path(
         "public/assets/<str:symbol>/timeline/",
         PublicTimelineView.as_view(),
@@ -83,6 +86,7 @@ urlpatterns = [
     ),
     path("review/events/<int:event_id>/split/", EventSplitView.as_view(), name="event-split"),
     path("collection/", CollectionView.as_view(), name="collection"),
+    path("coverage/", CoverageView.as_view(), name="coverage"),
     path("analysis-summary/", AnalysisSummaryView.as_view(), name="analysis-summary"),
     path("health/", HealthView.as_view(), name="health"),
     path("auth/token/", LoginView.as_view(), name="auth-token"),
