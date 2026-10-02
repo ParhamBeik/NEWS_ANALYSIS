@@ -89,3 +89,21 @@ def test_facts_link_out_sources_never_expose_text_publicly():
     source_row = detail["sources"][0]
     assert (source_row["name"], source_row["url"], source_row["headline"]) == (
         "Financial Times", "https://www.ft.com/content/oil", "Oil tanker seized in the Gulf")
+
+
+def test_signed_in_readers_get_no_text_from_facts_link_out_articles(staff):
+    """Phone sign-in made 'authenticated' mean 'reader', so /api/articles/ must not quote."""
+    paywalled = Source.objects.create(
+        name="ft", display_name="Financial Times", strategy=Strategy.RSS_GENERIC,
+        url="https://www.ft.com/rss", language="en", license_mode=LicenseMode.FACTS_LINK_OUT,
+    )
+    article = Article.objects.create(
+        url="https://www.ft.com/content/oil", source=paywalled, original_title="Oil tanker",
+        lead="Paywalled standfirst.", content="Paywalled body.", content_hash="d" * 32,
+        fetched_at=timezone.now(),
+    )
+    reader = APIClient()
+    reader.force_authenticate(get_user_model().objects.create_user("reader2", password="x"))
+    for path in ("/api/articles/", f"/api/articles/{article.id}/"):
+        assert "Paywalled" not in str(reader.get(path).data)
+    assert staff.get(f"/api/articles/{article.id}/").data["content"] == "Paywalled body."

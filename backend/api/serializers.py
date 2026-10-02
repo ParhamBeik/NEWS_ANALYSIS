@@ -24,7 +24,7 @@ from core.vocabulary import AXES, Category, GoldTrend, Level, NotifyStatus
 from inference.models import Classification, Evaluation, PromptVariant, Run, Summary
 from market.models import PredictionOutcome, PriceSnapshot
 from review.models import ABPair, ReviewCase
-from sources.models import Source
+from sources.models import LicenseMode, Source
 
 # One place to build the English gloss for a Persian value, so every endpoint agrees.
 LEVEL_LABELS = dict(Level.choices)
@@ -184,6 +184,18 @@ class ArticleListSerializer(serializers.ModelSerializer):
             "prefilter_reason", "quality_flag",
             "category", "scores", "decision",
         ]
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        # Reader logins exist now (phone OTP), so "authenticated" no longer means staff. A
+        # facts_link_out source is never quoted to readers: title, outlet and link only.
+        request = self.context.get("request")
+        staff = bool(request and request.user.is_staff)
+        if not staff and obj.source.license_mode == LicenseMode.FACTS_LINK_OUT:
+            data["lead"] = ""
+            if "content" in data:
+                data["content"] = ""
+        return data
 
     def _latest(self, obj, attr):
         return latest_of(obj, attr)
