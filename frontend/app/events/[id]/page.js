@@ -91,12 +91,23 @@ export default async function EventDetail({ params }) {
 
     <section aria-labelledby="story-title" className="space-y-3">
       <h2 id="story-title" className="text-xl font-bold">{tr("Storyline", "روند رویداد")}</h2>
-      {event.history?.length ? <ul className="space-y-2 text-sm">{event.history.map((change, index) =>
-        <li key={`${change.observed_at}-${index}`} className="rounded-xl border border-line bg-card p-3">
-          <p className="text-xs text-muted">{change.source}{sep(lang)}<When iso={change.observed_at} lang={lang} time showRelative={false} />{sep(lang)}{change.previous_status}</p>
-          <p className="mt-1" dir="auto">{change.previous_headline}</p>
-        </li>)}</ul>
-        : <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">{tr("Related events and earlier chapters of this story will appear here.", "رویدادهای مرتبط و مراحل پیشین این خبر به‌زودی اینجا نمایش داده می‌شوند.")}</p>}
+      {event.storyline ? <div className="rounded-2xl border border-line bg-card p-4">
+        <p className="mb-2 font-semibold" dir="auto">{(lang === "en" && event.storyline.name_en) || event.storyline.name_fa}</p>
+        <ol className="space-y-2 border-s border-line ps-4 text-sm">{event.storyline.events.map((item) => <li key={item.id}>
+          <p className="text-xs text-muted"><When iso={item.event_time} lang={lang} showRelative={false} /></p>
+          {item.id === event.id
+            ? <p className="font-semibold" dir="auto" aria-current="page">{(lang === "en" && item.title_en) || item.title_fa}</p>
+            : <Link href={`/events/${item.id}`} className="text-accent hover:underline" dir="auto">{(lang === "en" && item.title_en) || item.title_fa}</Link>}
+        </li>)}</ol>
+      </div> : <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">{tr("Related events will appear here once this story develops.", "رویدادهای مرتبط پس از ادامه‌یافتن این خبر اینجا نمایش داده می‌شوند.")}</p>}
+      {event.history?.length ? <>
+        <h3 className="pt-2 font-semibold">{tr("Earlier versions of these reports", "نسخه‌های پیشین این گزارش‌ها")}</h3>
+        <ul className="space-y-2 text-sm">{event.history.map((change, index) =>
+          <li key={`${change.observed_at}-${index}`} className="rounded-xl border border-line bg-card p-3">
+            <p className="text-xs text-muted">{change.source}{sep(lang)}<When iso={change.observed_at} lang={lang} time showRelative={false} />{sep(lang)}{change.previous_status}</p>
+            <p className="mt-1" dir="auto">{change.previous_headline}</p>
+          </li>)}</ul>
+      </> : null}
     </section>
   </article>;
 }

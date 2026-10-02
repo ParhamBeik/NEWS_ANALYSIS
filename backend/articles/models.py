@@ -310,6 +310,37 @@ class EventWatchItem(models.Model):
         return f"event {self.event_id} tagged {self.item_id}"
 
 
+class Storyline(models.Model):
+    """A developing situation followed across events, built nightly by core.storylines.
+
+    Named from its first events. The name may be regenerated until the storyline holds
+    NAME_FROZEN_AFTER events, then it is frozen so readers can follow it; every replaced
+    name is kept in `previous_names`.
+    """
+
+    name_fa = models.TextField(blank=True)
+    name_en = models.TextField(blank=True)
+    previous_names = models.JSONField(default=list, blank=True)
+    last_event_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"storyline {self.pk}: {self.name_en or self.name_fa}"[:80]
+
+
+class StorylineEvent(models.Model):
+    storyline = models.ForeignKey(Storyline, on_delete=models.CASCADE, related_name="links")
+    # One storyline per event: a reader follows one thread, not a graph.
+    event = models.OneToOneField(
+        NewsEvent, on_delete=models.CASCADE, related_name="storyline_link"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"event {self.event_id} in storyline {self.storyline_id}"
+
+
 class AlertSubscription(models.Model):
     """An opted-in browser endpoint; credentials stay server-side."""
 

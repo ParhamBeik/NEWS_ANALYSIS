@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 
-from articles.models import AlertSubscription, NewsEvent
+from articles.models import AlertSubscription, NewsEvent, StorylineEvent
 from core import tiers
 from core.events import ranked_events
 from core.vocabulary import event_topic
@@ -185,6 +185,30 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
         ],
     }
     if detail:
+        link = (
+            StorylineEvent.objects.filter(event=event).select_related("storyline").first()
+        )
+        document["storyline"] = (
+            {
+                "id": link.storyline_id,
+                "name_fa": link.storyline.name_fa,
+                "name_en": link.storyline.name_en,
+                "events": [
+                    {
+                        "id": row.id,
+                        "title_fa": row.title_fa or row.primary_article.original_title,
+                        "title_en": row.title_en or None,
+                        "event_time": row.event_time,
+                    }
+                    for row in NewsEvent.objects.filter(storyline_link__storyline=link.storyline)
+                    .exclude(status=NewsEvent.Status.WITHDRAWN)
+                    .select_related("primary_article")
+                    .order_by("event_time", "id")[:20]
+                ],
+            }
+            if link
+            else None
+        )
         document["history"] = sorted(
             [
                 {"source": article.source.display_name or article.source_id,

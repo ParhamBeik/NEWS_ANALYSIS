@@ -251,6 +251,21 @@ def summarize_event(self, event_id: int) -> dict:
     return {"status": "summarized", "event": event_id}
 
 
+@shared_task(name="inference.build_storylines")
+def build_storylines() -> dict:
+    """Nightly: link recent events into storylines; naming degrades to derived names."""
+    from core.storylines import build
+
+    from .jev import storyline_name
+
+    run_id = f"storylines-{timezone.now():%Y%m%d}"
+
+    def namer(titles):
+        return storyline_name(titles, run_id) if settings.GAPGPT_API_KEY else None
+
+    return build(namer=namer)
+
+
 @shared_task(name="inference.assess_pending_events")
 def assess_pending_events(limit: int = 200) -> dict:
     """Retry unassessed events after outages or credit top-ups."""

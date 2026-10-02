@@ -422,3 +422,33 @@ def brief(state: dict, run_id: str) -> dict:
     ):
         raise Transient("brief did not match the expected schema")
     return {name: result[name] for name in BRIEF_FIELDS}
+
+
+def storyline_name(titles: list[str], run_id: str) -> dict:
+    """A short neutral bilingual name for a storyline, from its first event headlines."""
+    if not settings.GAPGPT_API_KEY:
+        raise Fatal("GAPGPT_API_KEY is not configured")
+    budget.check_optional()
+    result, _ = _gapgpt(
+        settings.NEWS_DECISION_FALLBACK_MODEL or settings.GAPGPT_MODEL,
+        [
+            {
+                "role": "system",
+                "content": (
+                    "These headlines are consecutive reports of one developing situation. "
+                    "Name the situation neutrally in at most six words in Persian and in "
+                    "English, without dates, verdicts or forecasts. Return one JSON object "
+                    'with string fields "name_fa" and "name_en".'
+                ),
+            },
+            {"role": "user", "content": json.dumps(titles, ensure_ascii=False)},
+        ],
+        120,
+        run_id,
+        "storyline",
+    )
+    if not isinstance(result, dict) or not all(
+        isinstance(result.get(key), str) and result[key].strip() for key in ("name_fa", "name_en")
+    ):
+        raise Permanent("storyline name did not match the expected schema")
+    return {key: result[key].strip()[:120] for key in ("name_fa", "name_en")}
