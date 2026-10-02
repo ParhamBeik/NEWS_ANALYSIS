@@ -33,6 +33,7 @@ from django.utils import timezone
 
 from articles.models import (
     Article,
+    ArticleStance,
     EventAssessment,
     EventReview,
     NewsEvent,
@@ -173,9 +174,19 @@ def assess_event(self, event_id: int) -> dict:
     if choice in candidates and 0.9 <= match_probability <= 1:
         from core.events import merge_events
 
+        joining = list(event.articles.values_list("id", flat=True))
         event = merge_events(int(choice.removeprefix("event_")), event_id)
         merged = event.id != event_id
         event_id = event.id
+        if merged:
+            from .jev import stance
+
+            label, stance_confidence = stance(answers)
+            for article_id in joining:
+                ArticleStance.objects.update_or_create(
+                    event=event, article_id=article_id,
+                    defaults={"stance": label, "confidence": stance_confidence},
+                )
     EventAssessment.objects.create(
         event=event,
         model=str(response.get("model") or "jev"),

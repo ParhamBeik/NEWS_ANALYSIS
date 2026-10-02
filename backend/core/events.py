@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from articles.models import (
     Article,
+    ArticleStance,
     EventAlert,
     EventAssessment,
     EventRevision,
@@ -88,15 +89,27 @@ def kept_apart(event_id: int) -> set[int]:
     return set(against_ours) | set(ours_against)
 
 
-def evidence_level(articles, current: str = "") -> str:
-    """single / multi / official from distinct source groups; `disputed` is staff-set.
+def _group(source) -> str:
+    return getattr(source, "independence_group", "") or source.name
+
+
+def evidence_level(articles, current: str = "", contradicting=(), primary=None) -> str:
+    """single / multi / official from distinct source groups, or disputed.
 
     Outlets in one independence group (e.g. state agencies that copy each other) count
-    once. Until sources carry `independence_group`, each source is its own group.
+    once. `disputed` wins when a report Jev judged `contradicts` comes from a group other
+    than the lead report's; an aggregator only relays, so it cannot dispute anything.
+    Once disputed (by that rule or by staff) the level stays disputed.
     """
     if current == NewsEvent.Evidence.DISPUTED:
         return current
-    groups = {getattr(a.source, "independence_group", "") or a.source.name for a in articles}
+    lead = _group(primary.source) if primary is not None else None
+    if any(
+        getattr(a.source, "role", "") != "aggregator" and _group(a.source) != lead
+        for a in contradicting
+    ):
+        return NewsEvent.Evidence.DISPUTED
+    groups = {_group(a.source) for a in articles}
     if any(group.startswith("official") for group in groups):
         return NewsEvent.Evidence.OFFICIAL
     return NewsEvent.Evidence.MULTI if len(groups) > 1 else NewsEvent.Evidence.SINGLE
@@ -107,7 +120,15 @@ def refresh_event(event: NewsEvent) -> None:
     articles = list(event.articles.select_related("source"))
     if not articles:
         return
-    event.evidence_level = evidence_level(articles, event.evidence_level)
+    disputing = set(
+        event.stances.filter(stance=ArticleStance.Stance.CONTRADICTS)
+        .values_list("article_id", flat=True)
+    )
+    contradicting = [a for a in articles if a.id in disputing]
+    primary = next((a for a in articles if a.id == event.primary_article_id), None)
+    event.evidence_level = evidence_level(
+        articles, event.evidence_level, contradicting, primary
+    )
     event.event_time = min(a.published_at or a.fetched_at for a in articles)
     event.first_seen_at = min(a.created_at or a.fetched_at for a in articles)
     if all(a.url_status == UrlStatus.GONE for a in articles):
@@ -207,6 +228,7 @@ def split_article_from_event(event_id: int, article_id: int, user=None) -> NewsE
         )
         event.save(update_fields=["primary_article", "updated_at"])
     event.articles.remove(*moving)
+    ArticleStance.objects.filter(event=event, article__in=moving).delete()
     split = NewsEvent.objects.create(
         primary_article=article,
         event_time=article.published_at or article.fetched_at,

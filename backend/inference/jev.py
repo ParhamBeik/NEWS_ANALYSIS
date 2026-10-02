@@ -63,6 +63,16 @@ WATCH_LEVELS = [
 ]
 MAX_WATCH_TAGS = 5
 
+# Asked only alongside `same_event`, so it costs one extra answer, not one extra call. It
+# is read only when the report does merge; a missing fallback answer means "reports".
+STANCES = {
+    "reports": "Reports the occurrence without confirming or disputing earlier accounts.",
+    "supports": "Confirms or corroborates facts the candidate already reported.",
+    "contradicts": "Denies, disputes or contradicts facts the candidate reported.",
+    "updates": "Adds a later development or corrects a figure, time or detail.",
+}
+OPTIONAL_ANSWERS = {"stance"}
+
 BRIEF_FIELDS = (
     "title_fa",
     "title_en",
@@ -153,6 +163,14 @@ def _questions(
                 **candidates,
             },
         }
+        questions["stance"] = {
+            "type": "choice",
+            "instructions": (
+                "If this report is the same occurrence as a candidate, how does it relate "
+                "to that candidate's report? If it is not, answer reports."
+            ),
+            "criteria": STANCES,
+        }
     for key, description in {
         "fx": "Iranian foreign exchange rates",
         "gold": "Iranian gold and coins",
@@ -201,6 +219,21 @@ def watch_tags(answers: dict) -> list[str]:
         if level >= 1:
             scored.append((-level, name.removeprefix("watch_")))
     return [slug for _, slug in sorted(scored)][:MAX_WATCH_TAGS]
+
+
+def stance(answers: dict) -> tuple[str, float | None]:
+    """The joining report's stance from either backend, defaulting to `reports`."""
+    answer = answers.get("stance") or {}
+    choice = answer.get("choice")
+    if choice not in STANCES:
+        return "reports", None
+    try:
+        confidence = float(answer.get("confidence", answer.get("probabilities", {}).get(choice)))
+    except (TypeError, ValueError):
+        confidence = None
+    if confidence is not None and not 0 <= confidence <= 1:
+        confidence = None
+    return choice, confidence
 
 
 # ---------------------------------------------------------------------- TypeSafe
@@ -296,6 +329,10 @@ def _fallback_answers(raw: dict, questions: dict) -> dict:
         item = raw.get(name)
         if question["type"] == "multi" and item is None:
             answers[name] = {"type": "multi", "choices": [], "confidence": 0.0}
+            continue
+        if name in OPTIONAL_ANSWERS and (
+            not isinstance(item, dict) or item.get("choice") not in question["criteria"]
+        ):
             continue
         if not isinstance(item, dict):
             raise Permanent(f"fallback answer missing {name}")

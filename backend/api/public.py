@@ -139,6 +139,7 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
     permitted_image = card.url if card else None
     permitted_large = image.file.url if allowed and image.file else None
     latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
+    stances = {row.article_id: row.stance for row in event.stances.all()}
     asset_scores = latest.asset_scores if latest else {}
     document = {
         "id": event.id,
@@ -188,6 +189,9 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
                 "first_seen_at": a.created_at,
                 "date_uncertain": a.date_uncertain,
                 "status": a.url_status,
+                # Independence group: outlets that copy each other share one.
+                "group": a.source.independence_group or a.source_id,
+                "stance": stances.get(a.id, "reports"),
                 **({"headline": a.original_title, "lead": a.lead[:500]} if detail else {}),
             }
             for a in articles
@@ -253,7 +257,8 @@ class PublicEventsView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source", "primary_article__image")
-            .prefetch_related("articles__source", "assessments", "watch_links__item")
+            .prefetch_related("articles__source", "assessments", "watch_links__item",
+                              "stances")
             .order_by("-event_time", "-id")[:300]
         )
         events = list(queryset)
@@ -270,7 +275,8 @@ class PublicEventDetailView(ReaderView):
         event = (
             NewsEvent.objects.select_related("primary_article__source", "primary_article__image")
             .prefetch_related(
-                "articles__source", "articles__revisions", "assessments", "watch_links__item"
+                "articles__source", "articles__revisions", "assessments", "watch_links__item",
+                "stances",
             )
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .filter(pk=event_id)
@@ -431,7 +437,8 @@ class PublicTimelineView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source")
-            .prefetch_related("articles__source", "assessments", "watch_links__item")
+            .prefetch_related("articles__source", "assessments", "watch_links__item",
+                              "stances")
             .order_by("event_time")[:500]
         )
         asset_class = asset["class"]

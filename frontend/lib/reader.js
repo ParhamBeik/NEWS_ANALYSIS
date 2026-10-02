@@ -124,20 +124,32 @@ export function sourceCount(event) {
   return new Set((event.sources || []).map((source) => source.original_outlet || source.name)).size;
 }
 
+/** How one report relates to its event (articles.ArticleStance); `reports` is the default. */
+export const STANCE = {
+  reports: { en: "Reports", fa: "گزارش" },
+  supports: { en: "Confirms", fa: "تأیید" },
+  contradicts: { en: "Disputes", fa: "رد یا تناقض" },
+  updates: { en: "Update", fa: "به‌روزرسانی" },
+};
+
 /**
- * Sources grouped for the event page.
- * TODO(reader): group by independence (official / state / private / international) once
- * Source carries that metadata; the API exposes only a display name today.
+ * Sources grouped by independence group (outlets that copy each other count once), largest
+ * first. Each group lists its outlet names and whether any of its reports disputes the event.
  */
 export function groupSources(sources = []) {
   const groups = new Map();
   for (const source of sources) {
-    const name = source.original_outlet || source.name;
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(source);
+    const key = source.group || source.original_outlet || source.name;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(source);
   }
   return [...groups]
-    .map(([name, items]) => ({ name, items }))
+    .map(([key, items]) => ({
+      key,
+      name: [...new Set(items.map((item) => item.original_outlet || item.name))].join(" · "),
+      items,
+      disputes: items.some((item) => item.stance === "contradicts"),
+    }))
     .sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name));
 }
 

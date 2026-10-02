@@ -171,6 +171,36 @@ class NewsEvent(models.Model):
         return f"event {self.pk}: {self.primary_article.original_title[:60]}"
 
 
+class ArticleStance(models.Model):
+    """How one report relates to the event it was grouped into, as Jev judged it on joining.
+
+    A separate table rather than a through-model on `NewsEvent.articles`: the M2M stays
+    untouched, and a member without a row simply `reports` (the event's first report and
+    dedup copies never get asked). Rows die with their event, so a merge or split leaves
+    no stale stance behind.
+    """
+
+    class Stance(models.TextChoices):
+        REPORTS = "reports", "Reports the occurrence"
+        SUPPORTS = "supports", "Confirms what was reported"
+        CONTRADICTS = "contradicts", "Disputes what was reported"
+        UPDATES = "updates", "Adds a later development"
+
+    event = models.ForeignKey("NewsEvent", on_delete=models.CASCADE, related_name="stances")
+    article = models.ForeignKey(Article, on_delete=models.CASCADE, related_name="stances")
+    stance = models.CharField(max_length=16, choices=Stance, default=Stance.REPORTS)
+    confidence = models.FloatField(null=True, blank=True)
+    decided_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["event", "article"], name="one_stance_per_member")
+        ]
+
+    def __str__(self) -> str:
+        return f"article {self.article_id} {self.stance} event {self.event_id}"
+
+
 class EventAssessment(models.Model):
     """Append-only Jev decisions; an event's current fields are its read projection."""
 

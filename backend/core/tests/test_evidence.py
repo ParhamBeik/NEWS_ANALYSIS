@@ -35,3 +35,14 @@ def test_second_source_makes_an_event_multi(make_article):
     refresh_event(event)
     event.refresh_from_db()
     assert event.evidence_level == NewsEvent.Evidence.MULTI
+
+
+def test_a_contradiction_from_another_independent_group_disputes_the_event():
+    lead, state_copy, bbc = report("irna", "state"), report("irib", "state"), report("bbc")
+    aggregator = report("khabarfoori")
+    aggregator.source.role = "aggregator"
+    articles = [lead, state_copy, bbc, aggregator]
+    assert evidence_level(articles, "", [bbc], lead) == "disputed"
+    # The lead's own group revising itself, or an aggregator relaying, is not a dispute.
+    assert evidence_level(articles, "", [state_copy], lead) == "multi"
+    assert evidence_level(articles, "", [aggregator], lead) == "multi"
