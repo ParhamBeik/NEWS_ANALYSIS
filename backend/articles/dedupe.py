@@ -67,7 +67,7 @@ def candidates(article):
     from .models import Article
 
     base = (
-        Article.objects.canonical()
+        Article.objects.canonical(include_hidden=True)
         .exclude(pk=article.pk)
         .exclude(original_title="")
         # Titles only. `find_duplicate` reads nothing else off these rows, and `content` is
@@ -90,7 +90,7 @@ def find_duplicate(article) -> Match | None:
     from .models import Article
 
     exact = (
-        Article.objects.canonical()
+        Article.objects.canonical(include_hidden=True)
         .filter(content_hash=article.content_hash)
         .exclude(pk=article.pk)
         .order_by("id")
@@ -194,7 +194,7 @@ def backfill(
     from .models import Article
 
     rows = (
-        Article.objects.canonical()
+        Article.objects.canonical(include_hidden=True)
         .exclude(original_title="")
         .filter(pk__gt=after_id)
         .order_by("id")

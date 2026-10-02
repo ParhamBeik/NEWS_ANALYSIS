@@ -159,6 +159,10 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
     if target_id in kept_apart(incoming_id):
         log_action("event.merge", "refused_by_staff_split", event=target_id, incoming=incoming_id)
         return incoming
+    if target.hidden or incoming.hidden:
+        # A takedown must not leak through, or be lifted by, an automatic merge.
+        log_action("event.merge", "refused_hidden", event=target_id, incoming=incoming_id)
+        return incoming
     had_presentation = bool(target.brief_fa)
     if had_presentation:
         invalidate_presentation(target, "event_merge")

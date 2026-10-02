@@ -51,6 +51,8 @@ def alert_event(event_id: int) -> dict:
     event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
     if (
         event is None
+        or event.hidden
+        or event.primary_article.hidden
         or event.status == NewsEvent.Status.WITHDRAWN
         or event.category == "other"
         or (event.assessment_confidence or 0) < 0.8
@@ -81,9 +83,14 @@ def send_event_alert(self, event_id: int, subscription_id: int) -> dict:
     if not settings.NEWS_ALERTS_ENABLED or not settings.NEWS_VAPID_PRIVATE_KEY:
         return {"status": "disabled"}
     subscription = AlertSubscription.objects.filter(pk=subscription_id).first()
-    event = NewsEvent.objects.select_related("primary_article").filter(pk=event_id).first()
+    event = (
+        NewsEvent.objects.visible().select_related("primary_article__source")
+        .filter(pk=event_id).first()
+    )
     if subscription is None or event is None or event.status == NewsEvent.Status.WITHDRAWN:
         return {"status": "missing"}
+    primary = event.primary_article
+    lead = primary.lead if primary.source.license_mode != "facts_link_out" else ""
     alert, _ = EventAlert.objects.get_or_create(event=event, subscription=subscription)
     if alert.sent_at:
         return {"status": "already_sent"}
@@ -101,7 +108,7 @@ def send_event_alert(self, event_id: int, subscription_id: int) -> dict:
             data=json.dumps(
                 {
                     "title": event.title_fa or event.primary_article.original_title,
-                    "body": (event.brief_fa or event.primary_article.lead)[:180],
+                    "body": (event.brief_fa or lead)[:180],
                     "url": f"/events/{event.id}",
                 },
                 ensure_ascii=False,

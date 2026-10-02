@@ -101,6 +101,7 @@ def assess_event(self, event_id: int) -> dict:
         for row in NewsEvent.objects.filter(
             event_time__range=(event_time - timedelta(hours=36), event_time + timedelta(hours=36))
         )
+        .visible()
         .exclude(pk=event_id)
         .exclude(pk__in=kept_apart(event_id))
         .select_related("primary_article")

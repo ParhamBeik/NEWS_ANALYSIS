@@ -23,7 +23,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import Account, Alert, Device, Watch
-from articles.models import WatchItem
+from articles.models import NewsEvent, WatchItem
 from core.otp import OTPError, normalize_phone, request_code, verify_code
 
 from .public import AlertThrottle, ReaderView, valid_push_subscription
@@ -292,6 +292,7 @@ class InboxView(APIView):
     def get(self, request):
         rows = (
             Alert.objects.filter(user=request.user)
+            .filter(event__in=NewsEvent.objects.visible())
             .select_related("event__primary_article")
             .order_by("-created_at", "-id")[:100]
         )

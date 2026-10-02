@@ -2,7 +2,8 @@ import Link from "next/link";
 import EventImage from "@/components/EventImage";
 import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { language, label } from "@/lib/language";
-import { loadEvent } from "./load";
+import { loadEvent, loadTakedown } from "./load";
+import TakedownControl from "./TakedownControl";
 import { EVIDENCE, STANCE, digits, groupSources, headline, sep } from "@/lib/reader";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +17,15 @@ function Block({ title, icon, children }) {
 
 export default async function EventDetail({ params }) {
   const { id } = await params;
-  const event = await loadEvent(id);
+  const takedown = await loadTakedown(id);
+  const event = await loadEvent(id, { allowMissing: Boolean(takedown) });
   const lang = await language();
+  if (!event) {
+    return <article className="mx-auto max-w-3xl space-y-4">
+      <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">Hidden from readers.</p>
+      <TakedownControl state={takedown} />
+    </article>;
+  }
   const tr = (en, fa) => label(lang, en, fa);
   const pick = (field) => event[`${field}_${lang}`];
   const title = headline(event, lang);
@@ -93,6 +101,8 @@ export default async function EventDetail({ params }) {
         </li>)}</ul>
       </div>)}</div>
     </section>
+
+    {takedown ? <TakedownControl state={takedown} /> : null}
 
     <section aria-labelledby="story-title" className="space-y-3">
       <h2 id="story-title" className="text-xl font-bold">{tr("Storyline", "روند رویداد")}</h2>

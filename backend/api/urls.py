@@ -29,6 +29,7 @@ from .public import (
     PublicSourcesView,
     PublicTimelineView,
 )
+from .takedown import ArticleVisibilityView, EventVisibilityView
 from .views import (
     ABPairViewSet,
     AnalysisSummaryView,
@@ -86,6 +87,16 @@ urlpatterns = [
         name="event-review-decision",
     ),
     path("review/events/<int:event_id>/split/", EventSplitView.as_view(), name="event-split"),
+    path(
+        "staff/events/<int:event_id>/visibility/",
+        EventVisibilityView.as_view(),
+        name="staff-event-visibility",
+    ),
+    path(
+        "staff/articles/<int:article_id>/visibility/",
+        ArticleVisibilityView.as_view(),
+        name="staff-article-visibility",
+    ),
     path("collection/", CollectionView.as_view(), name="collection"),
     path("coverage/", CoverageView.as_view(), name="coverage"),
     path("analysis-summary/", AnalysisSummaryView.as_view(), name="analysis-summary"),

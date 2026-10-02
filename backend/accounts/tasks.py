@@ -36,7 +36,7 @@ def fan_out_event(event_id: int, merged: bool = False) -> dict:
     """
     if not settings.NEWS_ALERTS_ENABLED:
         return {"status": "disabled"}
-    event = NewsEvent.objects.filter(pk=event_id).first()
+    event = NewsEvent.objects.visible().filter(pk=event_id).first()
     if (
         event is None
         or event.status == NewsEvent.Status.WITHDRAWN
@@ -113,14 +113,22 @@ def fan_out_event(event_id: int, merged: bool = False) -> dict:
 @shared_task(name="accounts.deliver_alert")
 def deliver_alert(alert_id: int) -> dict:
     """Push one alert to each of the user's devices; one Delivery row per device."""
-    alert = Alert.objects.select_related("event__primary_article").filter(pk=alert_id).first()
+    alert = (
+        Alert.objects.select_related("event__primary_article__source")
+        .filter(pk=alert_id).first()
+    )
     if alert is None:
         return {"status": "missing"}
     event = alert.event
+    if event.hidden or event.primary_article.hidden:
+        return {"status": "hidden"}
     prefix = "به‌روزرسانی: " if alert.kind == Alert.Kind.UPDATE else ""
+    primary = event.primary_article
+    # A facts_link_out source is never quoted, not even in a push body.
+    lead = primary.lead if primary.source.license_mode != "facts_link_out" else ""
     payload = {
-        "title": prefix + (event.title_fa or event.primary_article.original_title)[:120],
-        "body": (event.brief_fa or event.primary_article.lead)[:180],
+        "title": prefix + (event.title_fa or primary.original_title)[:120],
+        "body": (event.brief_fa or lead)[:180],
         "url": f"/events/{event.id}",
     }
     done = set(alert.deliveries.filter(status="sent").values_list("device_id", flat=True))

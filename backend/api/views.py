@@ -248,6 +248,8 @@ class ArticleViewSet(viewsets.ReadOnlyModelViewSet):
         # FilterSet field: an absent parameter has to narrow, and django-filter cannot.
         if self.request.query_params.get("include_duplicates", "").lower() not in {"1", "true"}:
             queryset = queryset.filter(duplicate_of__isnull=True)
+        if not self.request.user.is_staff:
+            queryset = queryset.filter(hidden=False)
         if self.action == "retrieve":
             queryset = queryset.prefetch_related("duplicates")
         if self.request.query_params.get("order") == "stored":

@@ -25,7 +25,7 @@ from core.events import ranked_events
 from core.vocabulary import event_topic
 from market import portfolio
 from market.models import PriceSnapshot, Symbol
-from sources.models import Source
+from sources.models import LicenseMode, Source
 
 
 class ReaderThrottle(AnonRateThrottle):
@@ -129,7 +129,10 @@ class AlertSubscriptionView(APIView):
 
 
 def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None = None) -> dict:
-    articles = sorted(event.articles.all(), key=lambda row: row.published_at or row.fetched_at)
+    articles = sorted(
+        (row for row in event.articles.all() if not row.hidden),
+        key=lambda row: row.published_at or row.fetched_at,
+    )
     primary = event.primary_article
     image = getattr(primary, "image", None)
     allowed = bool(image) and primary.source.public_image_allowed
@@ -192,7 +195,14 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
                 # Independence group: outlets that copy each other share one.
                 "group": a.source.independence_group or a.source_id,
                 "stance": stances.get(a.id, "reports"),
-                **({"headline": a.original_title, "lead": a.lead[:500]} if detail else {}),
+                **({"headline": a.original_title} if detail else {}),
+                # A facts_link_out source (paywalled or foreign press) is never quoted:
+                # title, source name and link only; the event brief is the summary.
+                **(
+                    {"lead": a.lead[:500]}
+                    if detail and a.source.license_mode != LicenseMode.FACTS_LINK_OUT
+                    else {}
+                ),
             }
             for a in articles
         ],
@@ -213,7 +223,8 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
                         "title_en": row.title_en or None,
                         "event_time": row.event_time,
                     }
-                    for row in NewsEvent.objects.filter(storyline_link__storyline=link.storyline)
+                    for row in NewsEvent.objects.visible()
+                    .filter(storyline_link__storyline=link.storyline)
                     .exclude(status=NewsEvent.Status.WITHDRAWN)
                     .select_related("primary_article")
                     .order_by("event_time", "id")[:20]
@@ -252,7 +263,7 @@ class PublicEventsView(ReaderView):
             "latest": now - timedelta(days=30),
         }[period]
         queryset = (
-            NewsEvent.objects.filter(event_time__gte=since)
+            NewsEvent.objects.visible().filter(event_time__gte=since)
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
@@ -273,7 +284,8 @@ class PublicEventsView(ReaderView):
 class PublicEventDetailView(ReaderView):
     def get(self, request, event_id: int):
         event = (
-            NewsEvent.objects.select_related("primary_article__source", "primary_article__image")
+            NewsEvent.objects.visible()
+            .select_related("primary_article__source", "primary_article__image")
             .prefetch_related(
                 "articles__source", "articles__revisions", "assessments", "watch_links__item",
                 "stances",
@@ -432,7 +444,7 @@ class PublicTimelineView(ReaderView):
                 provider=remote.get("provider") or asset["provider"],
             )
         events = list(
-            NewsEvent.objects.filter(event_time__gte=since)
+            NewsEvent.objects.visible().filter(event_time__gte=since)
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)

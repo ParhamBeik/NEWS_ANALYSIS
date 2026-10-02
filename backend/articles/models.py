@@ -41,9 +41,17 @@ class ExtractionTier(models.TextChoices):
 
 
 class ArticleQuerySet(models.QuerySet):
-    def canonical(self):
-        """The stories. Duplicates point at their canonical copy and drop out here."""
-        return self.filter(duplicate_of__isnull=True)
+    def canonical(self, include_hidden: bool = False):
+        """The stories. Duplicates point at their canonical copy and drop out here.
+
+        Taken-down articles, and articles in a taken-down event, drop out too, so exports,
+        inference and review never see them. Dedup passes include_hidden=True: a new copy
+        of a hidden story must still attach to it rather than surface as a fresh event.
+        """
+        queryset = self.filter(duplicate_of__isnull=True)
+        if include_hidden:
+            return queryset
+        return queryset.filter(hidden=False).exclude(news_events__hidden=True)
 
     def eligible_for_inference(self):
         return self.canonical().filter(
@@ -107,6 +115,9 @@ class Article(models.Model):
     gone_at = models.DateTimeField(null=True, blank=True)
     gone_http_status = models.PositiveSmallIntegerField(null=True, blank=True)
     last_checked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Takedown (core.takedown): hidden from every public surface, kept for audit.
+    hidden = models.BooleanField(default=False)
+    hidden_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = ArticleQuerySet.as_manager()
@@ -123,6 +134,12 @@ class Article(models.Model):
 
     def __str__(self) -> str:
         return self.original_title[:80]
+
+
+class NewsEventQuerySet(models.QuerySet):
+    def visible(self):
+        """What readers may see: not taken down, and not led by a taken-down article."""
+        return self.filter(hidden=False, primary_article__hidden=False)
 
 
 class NewsEvent(models.Model):
@@ -162,7 +179,11 @@ class NewsEvent(models.Model):
     channels_en = models.TextField(blank=True)
     uncertainty_fa = models.TextField(blank=True)
     uncertainty_en = models.TextField(blank=True)
+    hidden = models.BooleanField(default=False)
+    hidden_reason = models.CharField(max_length=255, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = NewsEventQuerySet.as_manager()
 
     class Meta:
         indexes = [models.Index(fields=["-event_time", "-id"])]
@@ -199,6 +220,43 @@ class ArticleStance(models.Model):
 
     def __str__(self) -> str:
         return f"article {self.article_id} {self.stance} event {self.event_id}"
+
+
+class TakedownLog(models.Model):
+    """Append-only audit of every hide and unhide: who, when, why. Never edited or deleted."""
+
+    class Kind(models.TextChoices):
+        EVENT = "event", "Event"
+        ARTICLE = "article", "Article"
+
+    class Action(models.TextChoices):
+        HIDE = "hide", "Hide"
+        UNHIDE = "unhide", "Unhide"
+
+    kind = models.CharField(max_length=8, choices=Kind)
+    # A plain id, not a foreign key: the trail must outlive a merged-away event.
+    object_id = models.PositiveBigIntegerField(db_index=True)
+    action = models.CharField(max_length=8, choices=Action)
+    reason = models.CharField(max_length=255)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    actor_name = models.CharField(max_length=150, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.kind} {self.object_id}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("takedown log rows are append-only")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("takedown log rows are append-only")
 
 
 class EventAssessment(models.Model):
