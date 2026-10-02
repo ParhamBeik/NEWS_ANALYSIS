@@ -23,8 +23,10 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from articles.models import Article, NewsEvent
+from core import tiers
 from core.collection import coverage_summary
 from core.errors import ERROR_CLASSES, BudgetExceeded, Fatal, Permanent, Transient
+from core.watch import watched_events
 from inference import budget, circuit
 from inference.models import AIUsageRecord, CircuitState
 from sources.models import CrawlAttempt, Source
@@ -38,19 +40,8 @@ FAILURE_TTL = 60 * 60 * 24 * (FAILURE_DAYS + 1)
 
 DISCOVERY_TARGET = timedelta(minutes=5)
 BRIEF_TARGET = timedelta(minutes=10)
-# Reader tier 4 ("High") starts at an impact of 60; see impactTier in frontend/lib/reader.js.
-HIGH_TIER_IMPACT = 60
 PRIORITY_GAP_ALERT = timedelta(minutes=30)
 OPEN_CIRCUIT_STATES = (CircuitState.OPEN_BUDGET, CircuitState.OPEN_ERRORS, CircuitState.STOPPED)
-
-
-def impact_score(iran: int | None, global_: int | None) -> int | None:
-    """The reader's Iran/global weighting (core.events.ranked_events, lib/reader.js)."""
-    if iran is None and global_ is None:
-        return None
-    if iran is None or global_ is None:
-        return iran if global_ is None else global_
-    return round(0.6 * iran + 0.4 * global_)
 
 
 # ------------------------------------------------------------------ AI failure counters
@@ -215,10 +206,10 @@ def discovery_slo(now, since) -> dict:
 
 
 def brief_slo(now, since) -> dict:
-    """Tier >= 4 events: first seen to brief visible, target 10 minutes.
+    """Brief-eligible events: first seen to brief visible, target 10 minutes.
 
-    Only events that are eligible for a brief count (not `other`, top axis at or above
-    NEWS_BRIEF_MIN_SCORE); an event the pipeline will never brief is not a miss. The brief
+    Only events the pipeline briefs count (core.tiers.brief_eligible: impact tier >= 4,
+    or >= 3 when watched); an event it will never brief is not a miss. The brief
     time is its first `brief` AIUsageRecord, written just before the brief is saved.
     An event still inside its 10 minutes without a brief is `pending`, not failed.
     """
@@ -227,15 +218,17 @@ def brief_slo(now, since) -> dict:
         .exclude(category__in=["", "other"])
         .annotate(brief_at=Min("usage_records__created_at",
                                filter=Q(usage_records__stage="brief")))
-        .values("id", "title_fa", "first_seen_at", "iran_score", "global_score",
-                "brief_fa", "brief_at")
+        .values("id", "title_fa", "category", "first_seen_at", "iran_score",
+                "global_score", "brief_fa", "brief_at")
     )
     passed = failed = pending = 0
     misses = []
+    rows = list(rows)
+    watched = watched_events(row["id"] for row in rows)
+    cuts = tiers.cutoffs()
     for row in rows:
-        impact = impact_score(row["iran_score"], row["global_score"])
-        top = max(row["iran_score"] or 0, row["global_score"] or 0)
-        if impact is None or impact < HIGH_TIER_IMPACT or top < settings.NEWS_BRIEF_MIN_SCORE:
+        if not tiers.brief_eligible(row["category"], row["iran_score"], row["global_score"],
+                                    watched=row["id"] in watched, cuts=cuts):
             continue
         deadline = row["first_seen_at"] + BRIEF_TARGET
         visible_at = row["brief_at"] if row["brief_fa"] else None

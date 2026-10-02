@@ -50,3 +50,15 @@ def tag_event(event, slugs) -> None:
 
     for item in WatchItem.objects.filter(slug__in=list(slugs)[:MAX_TAGS]):
         EventWatchItem.objects.get_or_create(event=event, item=item)
+
+
+def watched_events(event_ids) -> set[int]:
+    """The events among `event_ids` tagged with an item on at least one reader's watchlist."""
+    from accounts.models import Watch
+    from articles.models import EventWatchItem
+
+    return set(
+        EventWatchItem.objects.filter(
+            event_id__in=list(event_ids), item__in=Watch.objects.values("item")
+        ).values_list("event_id", flat=True)
+    )

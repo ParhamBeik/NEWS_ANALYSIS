@@ -272,9 +272,8 @@ NEWS_DECISION_MAX_TOKENS = env_int("NEWS_DECISION_MAX_TOKENS", 600)
 # Briefs are prose, which Jev does not write.
 NEWS_BRIEF_MODEL = env("NEWS_BRIEF_MODEL", "gpt-6-luna")
 NEWS_BRIEF_MAX_TOKENS = env_int("NEWS_BRIEF_MAX_TOKENS", 1200)
-# Briefs cost ~20x a decision, so only events scored "Large" (75 of 100) or above get one;
-# the rest show their original headline. Keeps the ~$30/month AI plan.
-NEWS_BRIEF_MIN_SCORE = env_int("NEWS_BRIEF_MIN_SCORE", 75)
+# Briefs cost ~20x a decision, so only impact tier >= 4 events (or >= 3 on a reader's
+# watchlist) get one: core.tiers.brief_eligible. The rest get a translated headline.
 # Used only when GapGPT omits cost. Deliberately high so a missing figure overstates spend
 # instead of letting the monthly ceiling under-count a premium model.
 NEWS_BRIEF_INPUT_USD_PER_MILLION = env_float("NEWS_BRIEF_INPUT_USD_PER_MILLION", 2.50)

@@ -213,9 +213,13 @@ def assess_event(self, event_id: int) -> dict:
             event=event,
             defaults={"reason": "high_impact_uncertain" if confidence < 0.7 else "audit_sample"},
         )
+    from core.tiers import brief_eligible
+    from core.watch import watched_events
+
     if (
-        category != "other"
-        and max(iran_score, global_score) >= settings.NEWS_BRIEF_MIN_SCORE
+        brief_eligible(
+            category, iran_score, global_score, watched=bool(watched_events([event_id]))
+        )
         and len(evidence.strip()) >= 40
     ):
         summarize_event.delay(event_id)
