@@ -1,6 +1,6 @@
 import Link from "next/link";
 import EventImage from "@/components/EventImage";
-import { CategoryChip, Icon, StatusBadge, TierBadge, When } from "@/components/reader";
+import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { language, label } from "@/lib/language";
 import { loadEvent } from "./load";
 import { digits, groupSources, headline, sep } from "@/lib/reader";
@@ -53,6 +53,7 @@ export default async function EventDetail({ params }) {
           <Icon name="candles" />{tr("Market impact", "اثر بر بازار")}
         </Link>
       </div>
+      <WatchChips items={event.watch_items} lang={lang} />
     </header>
 
     {pick("brief") ? <Block title={tr("What happened", "چه اتفاقی افتاد")} icon="layers">

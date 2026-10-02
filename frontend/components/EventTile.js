@@ -1,6 +1,6 @@
 import Link from "next/link";
 import EventImage from "@/components/EventImage";
-import { CategoryChip, StatusBadge, TierBadge, When } from "@/components/reader";
+import { CategoryChip, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { digits, headline, impactScore, sourceCount, whyItMatters } from "@/lib/reader";
 
 function Meta({ event, lang }) {
@@ -43,6 +43,7 @@ export default function EventTile({ event, lang, variant = "card" }) {
       {why ? <p className={`text-sm leading-7 text-muted ${hero ? "line-clamp-3 md:text-base md:leading-8" : compact ? "hidden sm:line-clamp-1" : "line-clamp-1"}`} dir="auto">
         <span className="sr-only">{lang === "fa" ? "چرا مهم است: " : "Why it may matter: "}</span>{why}
       </p> : null}
+      <WatchChips items={event.watch_items} lang={lang} limit={compact ? 3 : 5} className={compact ? "hidden sm:flex" : ""} />
       <Meta event={event} lang={lang} />
     </div>
   </article>;

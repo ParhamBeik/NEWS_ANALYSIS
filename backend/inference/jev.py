@@ -55,6 +55,14 @@ IMPACT = [
     "Exceptional possible effect across markets or Iran.",
 ]
 
+# Three levels, not IMPACT's five: a tag only needs "central", "secondary" or "no".
+WATCH_LEVELS = [
+    "Not what this report is about.",
+    "A secondary subject of this report.",
+    "A main subject of this report.",
+]
+MAX_WATCH_TAGS = 5
+
 BRIEF_FIELDS = (
     "title_fa",
     "title_en",
@@ -99,7 +107,17 @@ def _record_usage(stage: str, run_id: str, usage: budget.Usage) -> None:
     )
 
 
-def _questions(candidates: dict[str, str] | None) -> dict:
+def _questions(
+    candidates: dict[str, str] | None,
+    watch: dict[str, str] | None = None,
+    multi: bool = False,
+) -> dict:
+    """The typed questions for one event.
+
+    `watch` is the alias shortlist from core.watch. TypeSafe has no multi-label type, so it
+    gets one three-level score question per shortlisted item (at most eight); the GapGPT
+    fallback gets them as a single pick-up-to-five question, which costs one answer.
+    """
     questions = {
         "category": {
             "type": "choice",
@@ -149,7 +167,40 @@ def _questions(candidates: dict[str, str] | None) -> dict:
             ),
             "criteria": IMPACT,
         }
+    if watch and multi:
+        questions["watch_items"] = {
+            "type": "multi",
+            "instructions": (
+                f"Pick at most {MAX_WATCH_TAGS} items this report is substantively about; "
+                "a passing mention does not count. Pick none if none fit."
+            ),
+            "criteria": watch,
+        }
+    elif watch:
+        for slug, name in watch.items():
+            questions[f"watch_{slug}"] = {
+                "type": "score",
+                "instructions": f"How central is {name} to this report?",
+                "criteria": WATCH_LEVELS,
+            }
     return questions
+
+
+def watch_tags(answers: dict) -> list[str]:
+    """Tagged watch-item slugs from either backend's answers, most central first."""
+    if "watch_items" in answers:
+        return list(answers["watch_items"].get("choices", []))[:MAX_WATCH_TAGS]
+    scored = []
+    for name, answer in answers.items():
+        if not name.startswith("watch_"):
+            continue
+        try:
+            level = float(answer["score"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if level >= 1:
+            scored.append((-level, name.removeprefix("watch_")))
+    return [slug for _, slug in sorted(scored)][:MAX_WATCH_TAGS]
 
 
 # ---------------------------------------------------------------------- TypeSafe
@@ -243,6 +294,9 @@ def _fallback_answers(raw: dict, questions: dict) -> dict:
     answers = {}
     for name, question in questions.items():
         item = raw.get(name)
+        if question["type"] == "multi" and item is None:
+            answers[name] = {"type": "multi", "choices": [], "confidence": 0.0}
+            continue
         if not isinstance(item, dict):
             raise Permanent(f"fallback answer missing {name}")
         try:
@@ -250,7 +304,20 @@ def _fallback_answers(raw: dict, questions: dict) -> dict:
         except (TypeError, ValueError) as exc:
             raise Permanent(f"fallback confidence for {name} is not a number") from exc
         confidence = min(max(confidence, 0.0), 1.0)
-        if question["type"] == "choice":
+        if question["type"] == "multi":
+            # Tags are optional extras: unknown keys are dropped rather than costing the
+            # whole decision, but the answer must still be a list.
+            picked = item.get("choices")
+            if not isinstance(picked, list):
+                raise Permanent(f"fallback choices for {name} are not a list")
+            answers[name] = {
+                "type": "multi",
+                "choices": [key for key in picked if key in question["criteria"]][
+                    :MAX_WATCH_TAGS
+                ],
+                "confidence": confidence,
+            }
+        elif question["type"] == "choice":
             choice = item.get("choice")
             if choice not in question["criteria"]:
                 raise Permanent(f"fallback choice for {name} is outside the criteria")
@@ -279,6 +346,11 @@ def _gapgpt_decide(state: dict, questions: dict, run_id: str) -> dict:
                 "question": question["instructions"],
                 "choose_one_key_from": question["criteria"],
             }
+        elif question["type"] == "multi":
+            spec[name] = {
+                "question": question["instructions"],
+                "choose_keys_from": question["criteria"],
+            }
         else:
             spec[name] = {
                 "question": question["instructions"],
@@ -291,7 +363,9 @@ def _gapgpt_decide(state: dict, questions: dict, run_id: str) -> dict:
                 "You classify one news report. Answer every question from the evidence only. "
                 "Return one JSON object keyed by question id. For a choice question return "
                 '{"choice": <one key>, "confidence": <0-1>}; for a levelled question return '
-                '{"score": <level integer>, "confidence": <0-1>}. No other text.'
+                '{"score": <level integer>, "confidence": <0-1>}; for a question with '
+                '"choose_keys_from" return {"choices": [<keys>], "confidence": <0-1>}. '
+                "No other text."
             ),
         },
         {
@@ -314,12 +388,16 @@ def _gapgpt_decide(state: dict, questions: dict, run_id: str) -> dict:
 # ---------------------------------------------------------------------- public API
 
 
-def decide(state: dict, run_id: str, candidates: dict[str, str] | None = None) -> dict:
-    questions = _questions(candidates)
+def decide(
+    state: dict,
+    run_id: str,
+    candidates: dict[str, str] | None = None,
+    watch: dict[str, str] | None = None,
+) -> dict:
     if settings.TYPESAFE_API_KEY:
-        return _typesafe(state, questions, run_id)
+        return _typesafe(state, _questions(candidates, watch), run_id)
     if settings.GAPGPT_API_KEY:
-        return _gapgpt_decide(state, questions, run_id)
+        return _gapgpt_decide(state, _questions(candidates, watch, multi=True), run_id)
     raise Fatal("no decision backend configured (TYPESAFE_API_KEY or GAPGPT_API_KEY)")
 
 

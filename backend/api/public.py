@@ -147,6 +147,15 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
         "global_score": event.global_score,
         "asset_scores": latest.asset_scores if latest else {},
         "assessment_confidence": event.assessment_confidence,
+        "watch_items": [
+            {
+                "slug": link.item.slug,
+                "kind": link.item.kind,
+                "name_fa": link.item.name_fa,
+                "name_en": link.item.name_en,
+            }
+            for link in sorted(event.watch_links.all(), key=lambda row: row.id)
+        ],
         "event_time": event.event_time,
         "first_seen_at": event.first_seen_at,
         "image_url": permitted_image,
@@ -201,7 +210,7 @@ class PublicEventsView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source", "primary_article__image")
-            .prefetch_related("articles__source", "assessments")
+            .prefetch_related("articles__source", "assessments", "watch_links__item")
             .order_by("-event_time", "-id")[:300]
         )
         events = list(queryset)
@@ -214,7 +223,9 @@ class PublicEventDetailView(ReaderView):
     def get(self, request, event_id: int):
         event = (
             NewsEvent.objects.select_related("primary_article__source", "primary_article__image")
-            .prefetch_related("articles__source", "articles__revisions", "assessments")
+            .prefetch_related(
+                "articles__source", "articles__revisions", "assessments", "watch_links__item"
+            )
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .filter(pk=event_id)
             .first()
@@ -374,7 +385,7 @@ class PublicTimelineView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source")
-            .prefetch_related("articles__source", "assessments")
+            .prefetch_related("articles__source", "assessments", "watch_links__item")
             .order_by("event_time")[:500]
         )
         asset_class = asset["class"]

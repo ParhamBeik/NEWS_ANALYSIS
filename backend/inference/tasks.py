@@ -31,7 +31,14 @@ from django.conf import settings
 from django.db.models import Max, Sum
 from django.utils import timezone
 
-from articles.models import Article, EventAssessment, EventReview, NewsEvent, UrlStatus
+from articles.models import (
+    Article,
+    EventAssessment,
+    EventReview,
+    NewsEvent,
+    UrlStatus,
+    WatchItem,
+)
 from core.actions import log_action
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from core.vocabulary import AXES, EVENT_CATEGORIES
@@ -68,7 +75,9 @@ RESULT_MODELS = {"classify": Classification, "evaluate": Evaluation, "summarize"
 )
 def assess_event(self, event_id: int) -> dict:
     """Fast event assessment, independent of the legacy 30-minute analyst pipeline."""
-    from .jev import decide
+    from core.watch import shortlist, tag_event
+
+    from .jev import decide, watch_tags
 
     event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
     if event is None:
@@ -102,6 +111,7 @@ def assess_event(self, event_id: int) -> dict:
             },
             run_id,
             candidates,
+            shortlist(evidence, WatchItem.objects.filter(enabled=True)),
         )
     except BudgetExceeded:
         return {"status": "unassessed", "reason": "budget_or_credits"}
@@ -172,6 +182,7 @@ def assess_event(self, event_id: int) -> dict:
         global_score=global_score,
         assessment_confidence=confidence,
     )
+    tag_event(event, watch_tags(answers))
     from core.events import refresh_event
 
     refresh_event(event)

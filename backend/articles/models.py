@@ -229,6 +229,45 @@ class EventReview(models.Model):
         return f"review for event {self.event_id}: {self.status}"
 
 
+class WatchItem(models.Model):
+    """Curated bilingual vocabulary an event can be tagged with: an asset, actor or theme.
+
+    Seeded from articles/fixtures/watch_items.yaml by `seed_watch_items`. Rows are disabled
+    rather than deleted so existing tags keep their meaning.
+    """
+
+    class Kind(models.TextChoices):
+        ASSET = "asset", "Asset"
+        ACTOR = "actor", "Actor"
+        THEME = "theme", "Theme"
+
+    slug = models.SlugField(max_length=64, unique=True)
+    kind = models.CharField(max_length=8, choices=Kind)
+    name_fa = models.CharField(max_length=128)
+    name_en = models.CharField(max_length=128)
+    aliases = models.JSONField(default=list, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    def __str__(self) -> str:
+        return self.slug
+
+
+class EventWatchItem(models.Model):
+    """One Jev tag: this event is substantively about this watch item."""
+
+    event = models.ForeignKey(NewsEvent, on_delete=models.CASCADE, related_name="watch_links")
+    item = models.ForeignKey(WatchItem, on_delete=models.CASCADE, related_name="event_links")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["event", "item"], name="one_tag_per_event_item")
+        ]
+
+    def __str__(self) -> str:
+        return f"event {self.event_id} tagged {self.item_id}"
+
+
 class AlertSubscription(models.Model):
     """An opted-in browser endpoint; credentials stay server-side."""
 

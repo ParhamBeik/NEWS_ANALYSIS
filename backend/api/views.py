@@ -378,7 +378,9 @@ def event_review_cards(queryset):
     """The swipe card reads the reader document plus every article id a split can name."""
     return queryset.select_related(
         "event__primary_article__source", "event__primary_article__image"
-    ).prefetch_related("event__articles__source", "event__assessments")
+    ).prefetch_related(
+        "event__articles__source", "event__assessments", "event__watch_links__item"
+    )
 
 
 def event_review_card(review: EventReview) -> dict:

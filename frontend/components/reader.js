@@ -31,6 +31,16 @@ export function CategoryChip({ category, lang, className = "" }) {
   </span>;
 }
 
+/** Jev's watch-item tags (assets, actors, themes) as quiet chips; not links yet. */
+export function WatchChips({ items, lang, limit = 5, className = "" }) {
+  if (!items?.length) return null;
+  return <ul aria-label={lang === "fa" ? "موضوع‌های مرتبط" : "Related watch items"} className={`flex flex-wrap gap-1.5 ${className}`}>
+    {items.slice(0, limit).map((item) => <li key={item.slug} className="rounded-full border border-line bg-card-2 px-2 py-0.5 text-xs text-muted">
+      {lang === "fa" ? item.name_fa : item.name_en}
+    </li>)}
+  </ul>;
+}
+
 function Meter({ level }) {
   return <span className="inline-flex items-end gap-[2px]" aria-hidden="true">
     {[1, 2, 3, 4, 5].map((step) => <span key={step} className="w-[3px] rounded-sm bg-current"

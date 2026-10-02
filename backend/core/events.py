@@ -14,6 +14,7 @@ from articles.models import (
     EventAlert,
     EventAssessment,
     EventRevision,
+    EventWatchItem,
     NewsEvent,
     UrlStatus,
 )
@@ -119,6 +120,8 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
             retained.sent_at = alert.sent_at
             retained.save(update_fields=["sent_at"])
     EventAssessment.objects.filter(event=incoming).update(event=target)
+    for item_id in EventWatchItem.objects.filter(event=incoming).values_list("item", flat=True):
+        EventWatchItem.objects.get_or_create(event=target, item_id=item_id)
     target.articles.add(*incoming.articles.all())
     incoming.delete()
     refresh_event(target)
