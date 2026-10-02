@@ -139,3 +139,57 @@ export async function signup(_previous, formData) {
   await storeToken(body.token);
   redirect(safeNext(next));
 }
+
+const OTP_MESSAGES = {
+  invalid_phone: ["Enter an Iranian mobile number, e.g. 0912 123 4567.", "شمارهٔ موبایل را درست وارد کنید؛ مثلاً ۰۹۱۲۱۲۳۴۵۶۷."],
+  invalid_code: ["That code is wrong or has expired.", "کد نادرست است یا منقضی شده است."],
+  too_soon: ["A code was just sent. Wait a minute before asking again.", "کد همین الان فرستاده شد؛ یک دقیقه صبر کنید."],
+  too_many: ["Too many codes for this number. Try again in an hour.", "برای این شماره کد زیادی درخواست شده؛ یک ساعت دیگر دوباره امتحان کنید."],
+  account_disabled: ["This account is disabled.", "این حساب غیرفعال است."],
+  sms_unavailable: ["SMS sign-in is not available yet.", "ورود با پیامک هنوز فعال نیست."],
+  throttled: ["Too many attempts. Please wait before trying again.", "تلاش‌ها زیاد بوده؛ کمی بعد دوباره امتحان کنید."],
+  unreachable: ["Cannot reach the server. Try again shortly.", "اتصال به سرور برقرار نشد؛ کمی بعد دوباره امتحان کنید."],
+};
+
+function otpMessage(code, lang) {
+  const [en, fa] = OTP_MESSAGES[code] || OTP_MESSAGES.unreachable;
+  return lang === "en" ? en : fa;
+}
+
+/**
+ * Phone sign-in, both steps in one action: without a code it asks the API to text one;
+ * with a code it verifies, stores the same httpOnly token cookie as password sign-in, and
+ * sends a new reader to onboarding.
+ */
+export async function phoneLogin(_previous, formData) {
+  const phone = String(formData.get("phone") || "").trim();
+  // "Send again" submits the same form; it must request, not verify the half-typed code.
+  const code = formData.get("resend") ? "" : String(formData.get("code") || "").trim();
+  const lang = formData.get("lang") === "en" ? "en" : "fa";
+  const next = formData.get("next") || "/";
+  if (!phone) return { step: "phone", error: otpMessage("invalid_phone", lang) };
+
+  let response;
+  try {
+    response = await fetch(`${API_ORIGIN}/api/auth/otp/${code ? "verify" : "request"}/`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(code ? { phone, code } : { phone }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return { step: code ? "code" : "phone", phone, error: otpMessage("unreachable", lang) };
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const reason = body?.error || (response.status === 429 ? "throttled" : "unreachable");
+    // A wrong code, or a code already on its way, keeps the reader on the code step.
+    const stay = reason === "too_soon" || (code && reason === "invalid_code");
+    return { step: stay ? "code" : "phone", phone, error: otpMessage(reason, lang) };
+  }
+  if (!code) return { step: "code", phone };
+  if (!body?.token) return { step: "phone", phone, error: otpMessage("unreachable", lang) };
+  await storeToken(body.token);
+  redirect(body.onboarded ? safeNext(next) : "/onboarding");
+}

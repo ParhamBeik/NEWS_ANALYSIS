@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 const NAV = [
   { href: "/", en: "News", fa: "خبرها" },
   { href: "/market", en: "Asset timeline", fa: "نمودار دارایی‌ها" },
+  { href: "/inbox", en: "Alerts", fa: "هشدارها", member: true },
+  { href: "/settings", en: "My watchlist", fa: "فهرست پیگیری", member: true },
   { href: "/collection", en: "Collection", fa: "گردآوری", staff: true },
   { href: "/classification", en: "Classification", fa: "دسته‌بندی", staff: true },
   { href: "/evaluation", en: "Evaluation", fa: "ارزیابی", staff: true },
@@ -14,12 +16,13 @@ const NAV = [
 ];
 
 const AUTH_PATHS = ["/login", "/signup"];
+const READER_PATHS = ["/events", "/onboarding", "/settings", "/inbox"];
 
 export default function AppShell({ children, user = null, lang = "en" }) {
   const pathname = usePathname();
   const isAuth = AUTH_PATHS.some((path) => pathname.startsWith(path));
   // Reader routes follow the system light/dark theme; staff pages stay dark-only.
-  const theme = pathname === "/" || pathname.startsWith("/events") ? "reader-theme" : "";
+  const theme = pathname === "/" || READER_PATHS.some((path) => pathname.startsWith(path)) ? "reader-theme" : "";
 
   if (isAuth) {
     return <div className="min-h-screen bg-paper">{children}</div>;
@@ -39,7 +42,7 @@ export default function AppShell({ children, user = null, lang = "en" }) {
             News<span className="text-accent">Intel</span>
           </Link>
           <nav aria-label={lang === "fa" ? "اصلی" : "Main"} className="order-3 flex min-w-0 basis-full flex-wrap gap-1 text-sm sm:order-none sm:basis-auto sm:flex-1">
-            {NAV.filter((item) => !item.staff || user?.isStaff).map((item) => {
+            {NAV.filter((item) => (!item.staff || user?.isStaff) && (!item.member || user)).map((item) => {
               const active =
                 item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
               return (
@@ -71,7 +74,7 @@ export default function AppShell({ children, user = null, lang = "en" }) {
             </form>
             {user ? (
               <span className="max-w-[12ch] truncate text-xs text-muted sm:max-w-none">
-                {user.username}
+                {user.displayName || user.username}
               </span>
             ) : null}
             {user?.isStaff ? (

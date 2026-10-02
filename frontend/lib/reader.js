@@ -170,3 +170,21 @@ export function chartGeometry(points, { start, end, width, height, pad = 0 }) {
   const path = rows.map(([time, price], index) => `${index ? "L" : "M"}${x(time).toFixed(1)},${y(price).toFixed(1)}`).join(" ");
   return { path, low, high, x, y, first: rows[0], last: rows.at(-1) };
 }
+
+/** How many places an event on the reader's watchlist moves up the ranked radar. */
+export const WATCH_BOOST = 5;
+
+/**
+ * Mark events that touch the reader's watchlist and lift each one WATCH_BOOST places.
+ * A bounded lift, not a sort to the top: a minor watched story must not bury a tier-5 one.
+ * With `boost: false` (latest-first order) events are only marked.
+ */
+export function boostWatched(events, slugs, { boost = true } = {}) {
+  const watched = new Set(slugs || []);
+  const marked = events.map((event, index) => ({
+    event: { ...event, watched: (event.watch_items || []).some((item) => watched.has(item.slug)) },
+    rank: index,
+  }));
+  if (boost) for (const row of marked) if (row.event.watched) row.rank -= WATCH_BOOST + 0.5;
+  return marked.sort((a, b) => a.rank - b.rank).map((row) => row.event);
+}

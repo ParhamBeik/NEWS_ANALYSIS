@@ -2,9 +2,9 @@ import Link from "next/link";
 import AlertOptIn from "@/components/AlertOptIn";
 import EventTile from "@/components/EventTile";
 import { Icon } from "@/components/reader";
-import { apiGet, currentUser } from "@/lib/api";
+import { apiGet, currentUser, myWatchlist } from "@/lib/api";
 import { language, label } from "@/lib/language";
-import { CATEGORIES, PENDING_CATEGORY, digits, groupByCategory, jalali } from "@/lib/reader";
+import { CATEGORIES, PENDING_CATEGORY, boostWatched, digits, groupByCategory, jalali } from "@/lib/reader";
 
 export const metadata = { title: "News radar · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -39,13 +39,14 @@ export default async function NewsHome({ searchParams }) {
   const order = params?.order === "latest" ? "latest" : "ranked";
   const lang = await language();
   const tr = (en, fa) => label(lang, en, fa);
-  const [data, alertConfig, user, sources] = await Promise.all([
+  const [data, alertConfig, user, sources, watching] = await Promise.all([
     apiGet(`/api/public/events/?period=${period}&mode=${order}`),
-    apiGet("/api/public/alert-config/"), currentUser(), coverage(),
+    apiGet("/api/public/alert-config/"), currentUser(), coverage(), myWatchlist(),
   ]);
   // An empty window still shows the newest reports rather than a blank page.
   const fallback = data.results.length ? null : await apiGet("/api/public/events/?period=latest&mode=latest");
-  const events = (fallback || data).results;
+  // Personal radar: watched events are marked, and lifted when ranked by importance.
+  const events = boostWatched((fallback || data).results, watching, { boost: order === "ranked" && !fallback });
   const [lead, ...rest] = events;
   const sections = groupByCategory(rest);
   const anyAssessed = events.some((event) => event.status !== "developing");
@@ -120,6 +121,11 @@ export default async function NewsHome({ searchParams }) {
         </section>;
       })}
     </div>
+
+    {user && !watching.length ? <p className="rounded-xl border border-line bg-card px-4 py-3 text-sm text-muted">
+      <Link href="/onboarding" className="font-semibold text-accent underline underline-offset-4">{tr("Pick what you follow", "انتخاب موضوع‌های مورد علاقه")}</Link>
+      {tr(" to get a personal radar and alerts.", " تا رادار شخصی و هشدار داشته باشید.")}
+    </p> : null}
 
     <AlertOptIn publicKey={alertConfig.public_key} signedIn={Boolean(user)} lang={lang} />
   </div>;
