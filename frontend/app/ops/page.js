@@ -1,6 +1,10 @@
-import { Card, CircuitBanner, Metric, QueryError, SectionTitle, TableScroll } from "@/components/primitives";
+import {
+  Card, CircuitBanner, Metric, QueryError, SectionTitle, StackedTable, TableScroll,
+} from "@/components/primitives";
 import { ApiError, apiGet } from "@/lib/api";
 import { money, number, percent, tehranTime } from "@/lib/display";
+import { label, language } from "@/lib/language";
+import { AiCostPanel, AiPausedBanner, CrawlErrorsPanel, FreshnessPanel } from "./StaffPanels";
 
 export const metadata = { title: "Ops · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -38,12 +42,14 @@ export default async function OpsPage({ searchParams }) {
   }
 
   // Staff only. A signed-in non-staff user still sees the rest of the page.
-  let coverage = null;
-  try {
-    coverage = await apiGet("/api/coverage/");
-  } catch (error) {
-    if (!(error instanceof ApiError && error.status === 403)) throw error;
-  }
+  const staffOnly = (path) => apiGet(path).catch((error) => {
+    if (error instanceof ApiError && error.status === 403) return null;
+    throw error;
+  });
+  const [coverage, staff, lang] = await Promise.all([
+    staffOnly("/api/coverage/"), staffOnly("/api/ops/staff/"), language(),
+  ]);
+  const tr = (english, persian) => label(lang, english, persian);
 
   const { funnel, budget } = ops;
   const maxCost = Math.max(...ops.cost_by_day.map((row) => row.cost), 0.0001);
@@ -80,7 +86,7 @@ export default async function OpsPage({ searchParams }) {
         </div>
       </div>
 
-      <CircuitBanner circuit={ops.provider_circuit} />
+      {staff ? <AiPausedBanner ai={staff.ai} tr={tr} /> : <CircuitBanner circuit={ops.provider_circuit} />}
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Metric
@@ -115,6 +121,14 @@ export default async function OpsPage({ searchParams }) {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
+        {staff && (
+          <>
+            <AiCostPanel ai={staff.ai} tr={tr} />
+            <CrawlErrorsPanel errors={staff.crawl_errors} tr={tr} />
+            <FreshnessPanel freshness={staff.freshness} gaps={staff.priority_gaps} tr={tr} />
+          </>
+        )}
+
         <Card className="p-4">
           <SectionTitle hint="each stage is a subset of the one above">Funnel</SectionTitle>
           <div className="space-y-2.5">
@@ -383,51 +397,43 @@ function CoverageTable({ coverage }) {
       <SectionTitle hint={`gap hours over the last ${coverage.window_days} days`}>
         Source coverage
       </SectionTitle>
-      <TableScroll>
-        <table className="w-full min-w-[640px] text-sm">
-          <thead>
-            <tr className="text-left text-[11px] uppercase tracking-wider text-slate-600">
-              <th className="pb-1">Source</th>
-              <th className="pb-1">Lang</th>
-              <th className="pb-1">Group</th>
-              <th className="pb-1">Health</th>
-              <th className="pb-1">Last success</th>
-              <th className="pb-1">Open gap</th>
-              <th className="pb-1 text-right">Gap h</th>
-              <th className="pb-1 text-right">Error</th>
-            </tr>
-          </thead>
-          <tbody>
-            {coverage.sources.map((row) => (
-              <tr
-                key={row.name}
-                className={`border-t border-slate-800 ${row.enabled ? "" : "opacity-50"}`}
-              >
-                <td className="py-1.5 text-slate-300">{row.display_name}</td>
-                <td className="py-1.5 text-xs text-slate-500">{row.language}</td>
-                <td className="py-1.5 font-mono text-xs text-slate-500">
-                  {row.independence_group || "—"}
-                </td>
-                <td className={`py-1.5 text-xs ${HEALTH_TONE[row.health] || "text-slate-500"}`}>
-                  {row.health}
-                </td>
-                <td className="whitespace-nowrap py-1.5 text-xs text-slate-500">
-                  {row.last_success_at ? tehranTime(row.last_success_at) : "never"}
-                </td>
-                <td className={`whitespace-nowrap py-1.5 text-xs ${GAP_TONE[row.open_gap?.state] || ""}`}>
-                  {row.open_gap
-                    ? `${row.open_gap.state}${row.open_gap.since ? ` since ${tehranTime(row.open_gap.since)}` : ""}`
-                    : "—"}
-                </td>
-                <td className="py-1.5 text-right tabular">{row.gap_hours_7d}</td>
-                <td className="py-1.5 text-right text-xs text-slate-400">
-                  {row.error_class || "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </TableScroll>
+      <StackedTable
+        rowKey={(row) => row.name}
+        rows={coverage.sources}
+        rowClassName={(row) => (row.enabled ? "" : "opacity-50")}
+        columns={[
+          { key: "display_name", label: "Source", className: "text-slate-300" },
+          { key: "language", label: "Lang", className: "text-xs text-slate-500" },
+          {
+            key: "independence_group", label: "Group", className: "font-mono text-xs text-slate-500",
+            render: (row) => row.independence_group || "—",
+          },
+          {
+            key: "health", label: "Health",
+            className: "text-xs",
+            render: (row) => <span className={HEALTH_TONE[row.health] || "text-slate-500"}>{row.health}</span>,
+          },
+          {
+            key: "last_success_at", label: "Last success", className: "whitespace-nowrap text-xs text-slate-500",
+            render: (row) => (row.last_success_at ? tehranTime(row.last_success_at) : "never"),
+          },
+          {
+            key: "open_gap", label: "Open gap", className: "text-xs",
+            render: (row) => (
+              <span className={GAP_TONE[row.open_gap?.state] || ""}>
+                {row.open_gap
+                  ? `${row.open_gap.state}${row.open_gap.since ? ` since ${tehranTime(row.open_gap.since)}` : ""}`
+                  : "—"}
+              </span>
+            ),
+          },
+          { key: "gap_hours_7d", label: "Gap h", end: true },
+          {
+            key: "error_class", label: "Error", end: true, className: "text-xs text-slate-400",
+            render: (row) => row.error_class || "—",
+          },
+        ]}
+      />
     </Card>
   );
 }

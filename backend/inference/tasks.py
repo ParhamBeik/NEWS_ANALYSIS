@@ -34,6 +34,7 @@ from django.utils import timezone
 from articles.models import Article, EventAssessment, EventReview, NewsEvent, UrlStatus
 from core.actions import log_action
 from core.errors import BudgetExceeded, Fatal, Permanent, Transient
+from core.ops import failure_kind, record_ai_failure
 from core.vocabulary import AXES, EVENT_CATEGORIES
 
 from . import budget, circuit, memory
@@ -104,8 +105,12 @@ def assess_event(self, event_id: int) -> dict:
             candidates,
         )
     except BudgetExceeded:
+        record_ai_failure("jev", "budget")
         return {"status": "unassessed", "reason": "budget_or_credits"}
-    except (Fatal, Permanent) as exc:
+    except (Fatal, Permanent, Transient) as exc:
+        record_ai_failure("jev", failure_kind(exc))
+        if isinstance(exc, Transient):
+            raise
         logger.warning("event assessment unavailable for %s: %s", event_id, exc)
         return {"status": "unassessed", "reason": type(exc).__name__}
     answers = response["answers"]
@@ -143,6 +148,7 @@ def assess_event(self, event_id: int) -> dict:
             raise ValueError("confidence outside 0-1 range")
     except (KeyError, TypeError, ValueError) as exc:
         logger.warning("invalid Jev answer for event %s: %s", event_id, exc)
+        record_ai_failure("jev", "invalid_answer")
         return {"status": "unassessed", "reason": "invalid_answer"}
     matched = answers.get("same_event", {})
     choice = matched.get("choice", "none")
@@ -229,8 +235,12 @@ def summarize_event(self, event_id: int) -> dict:
             f"event-{event_id}",
         )
     except BudgetExceeded:
+        record_ai_failure("brief", "budget")
         return {"status": "unassessed", "reason": "budget_or_credits"}
-    except (Fatal, Permanent) as exc:
+    except (Fatal, Permanent, Transient) as exc:
+        record_ai_failure("brief", failure_kind(exc))
+        if isinstance(exc, Transient):
+            raise
         logger.warning("event brief unavailable for %s: %s", event_id, exc)
         return {"status": "unassessed", "reason": type(exc).__name__}
     NewsEvent.objects.filter(pk=event_id).update(**result)

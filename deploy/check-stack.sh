@@ -28,14 +28,15 @@ client = APIClient(HTTP_HOST=settings.ALLOWED_HOSTS[0])
 client.force_authenticate(user=get_user_model()(is_staff=True, is_active=True))
 for path in (
     "/api/articles/", "/api/collection/", "/api/analysis-summary/?stage=classification",
-    "/api/analysis-summary/?stage=evaluation", "/api/ops/", "/api/kpi/",
+    "/api/analysis-summary/?stage=evaluation", "/api/ops/", "/api/ops/staff/", "/api/kpi/",
     "/api/market/", "/api/exports/", "/api/public/events/",
 ):
     response = client.get(path)
     assert response.status_code == 200, f"{path}: HTTP {response.status_code}"
 # The event pipeline replaced the per-article inference cycle, which setup_schedule now
 # keeps disabled; gate on the job that actually drives assessment.
-expected = ("crawl-all-sources", "drain-fetch-retries", "assess-pending-events", "weekly-circuit-probe")
+expected = ("crawl-all-sources", "drain-fetch-retries", "assess-pending-events", "weekly-circuit-probe",
+            "ops-staff-alerts")
 enabled = set(PeriodicTask.objects.filter(name__in=expected, enabled=True).values_list("name", flat=True))
 assert enabled == set(expected), f"schedules not enabled: {sorted(set(expected) - enabled)}"
 '

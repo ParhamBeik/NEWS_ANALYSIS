@@ -162,6 +162,44 @@ export function TableScroll({ children, className = "" }) {
   );
 }
 
+/**
+ * A table from 640px up; below that each row becomes a small card of label/value lines,
+ * so a phone never scrolls sideways. `columns`: {key, label, end?, className?, render?}.
+ */
+export function StackedTable({ columns, rows, rowKey, rowClassName = () => "" }) {
+  return (
+    <table className="w-full text-sm max-sm:block">
+      <thead className="max-sm:hidden">
+        <tr className="text-[11px] uppercase tracking-wider text-slate-600">
+          {columns.map((column) => (
+            <th key={column.key} scope="col" className={`pb-1 pe-2 ${column.end ? "text-end" : "text-start"}`}>
+              {column.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody className="max-sm:block max-sm:space-y-2">
+        {rows.map((row) => (
+          <tr
+            key={rowKey(row)}
+            className={`border-t border-slate-800 max-sm:block max-sm:rounded-lg max-sm:border max-sm:px-3 max-sm:py-2 ${rowClassName(row)}`}
+          >
+            {columns.map((column) => (
+              <td
+                key={column.key}
+                data-label={column.label}
+                className={`py-1.5 pe-2 ${column.end ? "text-end tabular" : ""} ${column.className || ""} max-sm:flex max-sm:justify-between max-sm:gap-3 max-sm:py-0.5 max-sm:pe-0 max-sm:text-end max-sm:before:text-start max-sm:before:text-slate-500 max-sm:before:content-[attr(data-label)]`}
+              >
+                {column.render ? column.render(row) : row[column.key]}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 const CIRCUIT_TONE = {
   closed: "",
   open_budget: "border-amber-900/60 bg-amber-950/20 text-amber-200/90",
