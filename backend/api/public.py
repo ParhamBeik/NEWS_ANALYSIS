@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 
 from articles.models import AlertSubscription, NewsEvent
 from core.events import ranked_events
+from market import portfolio
 from market.models import PriceSnapshot, Symbol
 from sources.models import Source
 
@@ -426,14 +427,9 @@ def _shared_series(symbol: str, days: int) -> dict:
     if cached is not None:
         return cached
     try:
-        response = requests.get(
-            settings.PORTFOLIO_MARKET_BASE_URL.rstrip("/") + "/api/marketdata/shared-series/",
-            params={"key": symbol, "days": days},
-            headers={"X-News-Service-Key": settings.PORTFOLIO_MARKET_SERVICE_KEY},
-            timeout=6,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        payload = portfolio.series(symbol, days=days)
+        if not payload["available"]:
+            return {"points": [], "caveats": payload["caveats"], "resolution": "unknown"}
         points = []
         for row in payload.get("points", []):
             if not row.get("observed_at") or row.get("price") is None:
