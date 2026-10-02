@@ -405,6 +405,7 @@ def brief(state: dict, run_id: str) -> dict:
     """Short attributed bilingual digest grounded in stored source evidence."""
     if not settings.GAPGPT_API_KEY:
         raise Fatal("GAPGPT_API_KEY is not configured")
+    budget.check_optional()
     result, _ = _gapgpt(
         settings.NEWS_BRIEF_MODEL,
         [

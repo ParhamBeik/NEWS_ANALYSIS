@@ -155,3 +155,21 @@ class TestAbort:
         budget.abort(RUN, "stop")
         budget.reset(RUN)
         assert budget.abort_reason(RUN) == ""
+
+
+@override_settings(NEWS_MONTHLY_BUDGET_USD=1, NEWS_RUN_BUDGET_USD=100,
+                   NEWS_DAILY_BUDGET_USD=100, GAPGPT_API_KEY="k", TYPESAFE_API_KEY="")
+def test_past_80_percent_briefs_stop_but_decisions_continue():
+    from unittest.mock import Mock, patch
+
+    from inference import jev
+
+    budget.charge(RUN, usage(0.85))
+    raw = {name: {"score": 1, "choice": "other", "confidence": 0.9}
+           for name in jev._questions(None)}
+    with patch("inference.jev._gapgpt", return_value=(raw, Mock(model="m"))) as call:
+        with pytest.raises(BudgetExceeded, match="optional calls stop"):
+            jev.brief({"title": "x"}, RUN)
+        assert not call.called
+        jev.decide({"title": "x"}, RUN)
+        assert call.called
