@@ -10,9 +10,13 @@ Persian analyst workbooks.
 
 - `backend/`: Django apps, tasks, management commands, migrations, and tests.
 - `frontend/`: Next.js server-rendered dashboard.
-- `deploy/`: Compose files, Caddy configuration, backup scripts, and deployment checks.
+- `deploy/`: Compose files, Caddy configuration, and deployment checks.
 - `.github/workflows/`: CI and deployment automation.
 - `backend/inference/prompt_texts/`: runtime prompt policy files. These are code inputs, not prose documentation.
+
+## Storage
+
+Before changing anything that stores data (images, fields, volumes, caches), read and follow [docs/STORAGE-POLICY.md](docs/STORAGE-POLICY.md). The VPS has no backups and a 100 GB disk shared by four apps.
 
 ## Working rules
 

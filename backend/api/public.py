@@ -122,9 +122,10 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
     primary = event.primary_article
     image = getattr(primary, "image", None)
     allowed = bool(image) and primary.source.public_image_allowed
-    permitted_image = image.thumbnail.url if allowed and image.thumbnail else None
-    # The 1200px display copy, for the hero and the event page; the 400px thumbnail
-    # blurs at that size. Same permission gate as the thumbnail.
+    # One stored copy serves card and hero (docs/STORAGE-POLICY.md); legacy rows may
+    # still have a separate thumbnail. Same permission gate for both.
+    card = (image.thumbnail or image.file) if allowed else None
+    permitted_image = card.url if card else None
     permitted_large = image.file.url if allowed and image.file else None
     latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
     document = {
