@@ -1,10 +1,17 @@
 from datetime import timedelta
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from articles.models import EventAssessment, EventReview, EventRevision, NewsEvent
-from core.events import attach_article, split_article_from_event
+from articles.models import (
+    EventAssessment,
+    EventReview,
+    EventRevision,
+    GroupingDecision,
+    NewsEvent,
+)
+from core.events import attach_article, kept_apart, merge_events, split_article_from_event
 from core.review import record_decision, review_queue, review_stats, score_tier
 
 pytestmark = pytest.mark.django_db
@@ -107,6 +114,26 @@ def test_split_moves_the_article_and_its_copies_to_a_new_event(make_article):
     assert split.primary_article_id == stray.pk
     assert set(split.articles.values_list("id", flat=True)) == {stray.pk, copy.pk}
     assert list(event.articles.values_list("id", flat=True)) == [first.pk]
+
+
+def test_staff_split_is_remembered_by_every_grouping_path(make_article):
+    user = get_user_model().objects.create_user("splitter", is_staff=True)
+    first = make_article()
+    event = attach_article(first)
+    stray = make_article()
+    event.articles.add(stray)
+    split = split_article_from_event(event.pk, stray.pk, user)
+
+    ruling = GroupingDecision.objects.get()
+    assert (ruling.article, ruling.event, ruling.decision, ruling.decided_by) == (
+        stray, event, "not_same", user,
+    )
+    assert kept_apart(split.pk) == {event.pk} and kept_apart(event.pk) == {split.pk}
+    # Re-ingest and a confident Jev merge, in either direction, both leave them apart.
+    assert attach_article(stray).pk == split.pk
+    assert merge_events(event.pk, split.pk).pk == split.pk
+    assert merge_events(split.pk, event.pk).pk == event.pk
+    assert set(split.articles.values_list("id", flat=True)) == {stray.pk}
 
 
 def test_split_of_the_primary_promotes_the_remaining_report(make_article):

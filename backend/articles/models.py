@@ -229,6 +229,39 @@ class EventReview(models.Model):
         return f"review for event {self.event_id}: {self.status}"
 
 
+class GroupingDecision(models.Model):
+    """A staff ruling on whether one article reports the same occurrence as one event.
+
+    `not_same` binds automatic grouping: neither dedup attachment nor a Jev merge puts the
+    article back into that event (core.events). The rows double as labelled grouping
+    examples for evaluation.
+    """
+
+    class Decision(models.TextChoices):
+        NOT_SAME = "not_same", "Not the same occurrence"
+        SAME = "same", "Same occurrence"
+
+    article = models.ForeignKey(
+        Article, on_delete=models.CASCADE, related_name="grouping_decisions"
+    )
+    event = models.ForeignKey(
+        NewsEvent, on_delete=models.CASCADE, related_name="grouping_decisions"
+    )
+    decision = models.CharField(max_length=16, choices=Decision)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    decided_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["article", "event"], name="one_grouping_decision")
+        ]
+
+    def __str__(self) -> str:
+        return f"article {self.article_id} {self.decision} event {self.event_id}"
+
+
 class WatchItem(models.Model):
     """Curated bilingual vocabulary an event can be tagged with: an asset, actor or theme.
 

@@ -91,12 +91,15 @@ def assess_event(self, event_id: int) -> dict:
         return {"status": "unassessed", "reason": "provider_not_configured"}
     run_id = f"event-{event_id}"
     event_time = event.event_time
+    from core.events import kept_apart
+
     candidates = {
         f"event_{row.id}": f"Same occurrence: {row.primary_article.original_title[:180]}"
         for row in NewsEvent.objects.filter(
             event_time__range=(event_time - timedelta(hours=36), event_time + timedelta(hours=36))
         )
         .exclude(pk=event_id)
+        .exclude(pk__in=kept_apart(event_id))
         .select_related("primary_article")
         .order_by("-event_time")[:10]
     }

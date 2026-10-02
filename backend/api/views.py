@@ -466,7 +466,7 @@ class EventSplitView(APIView):
             raise ValidationError({"article_id": "must be an integer"}) from exc
         get_object_or_404(NewsEvent, pk=event_id)
         try:
-            split = split_article_from_event(event_id, article_id)
+            split = split_article_from_event(event_id, article_id, request.user)
         except ValueError as exc:
             raise ValidationError({"detail": str(exc)}) from exc
         review = event_review_cards(EventReview.objects.filter(event_id=event_id)).first()
