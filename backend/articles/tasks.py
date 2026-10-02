@@ -161,14 +161,16 @@ def _remember_dead_image_host(host: str) -> None:
         logger.warning("could not record dead image host %s", host, exc_info=True)
 
 
-DISPLAY_MAX = (1200, 1200)
-THUMBNAIL_MAX = (400, 400)
+# Storage policy (docs/STORAGE-POLICY.md): ONE stored copy per article, used by both the
+# card and the hero. 800px WebP is ~35 KB; the old 1200px JPEG + 400px thumbnail pair was
+# ~115 KB and doubled the file count.
+IMAGE_MAX = (800, 800)
 MAX_BYTES = 8 * 1024 * 1024
-JPEG_QUALITY = 82
+WEBP_QUALITY = 75
 
 
 def _encode(image: Image.Image, size: tuple[int, int]) -> ContentFile:
-    """Downscale in place and re-encode as JPEG.
+    """Downscale in place and re-encode as WebP.
 
     Re-encoded rather than stored as fetched: these CDNs serve 1-2MB originals, and the
     feed shows a card thumbnail. Storing the original would spend ~20x the disk to display
@@ -179,7 +181,7 @@ def _encode(image: Image.Image, size: tuple[int, int]) -> ContentFile:
     if copy.mode not in ("RGB", "L"):
         copy = copy.convert("RGB")
     buffer = BytesIO()
-    copy.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    copy.save(buffer, format="WEBP", quality=WEBP_QUALITY, method=6)
     return ContentFile(buffer.getvalue())
 
 
@@ -231,7 +233,7 @@ class RecordImageFailure(Task):
     max_retries=2,
 )
 def download_image(article_id: int) -> dict:
-    """Fetch the headline image and store a display copy plus a thumbnail.
+    """Fetch the headline image and store one display copy.
 
     A missing or broken image is never fatal to an article: the story is the product, the
     picture is decoration. Failures are recorded on the row so /ops can show how often a
@@ -323,8 +325,7 @@ def download_image(article_id: int) -> dict:
         return {"article": article_id, "status": "undecodable"}
 
     stem = f"{article_id}"
-    record.file.save(f"{stem}.jpg", _encode(image, DISPLAY_MAX), save=False)
-    record.thumbnail.save(f"{stem}_thumb.jpg", _encode(image, THUMBNAIL_MAX), save=False)
+    record.file.save(f"{stem}.webp", _encode(image, IMAGE_MAX), save=False)
     record.width, record.height = image.size
     record.status, record.error = ImageStatus.STORED, ""
     record.fetched_at = timezone.now()

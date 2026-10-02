@@ -106,7 +106,9 @@ class ArticleImageSerializer(serializers.ModelSerializer):
         return self._url(obj.file)
 
     def get_thumbnail(self, obj):
-        return self._url(obj.thumbnail)
+        # One stored copy per article (docs/STORAGE-POLICY.md); legacy rows may still
+        # carry a separate thumbnail.
+        return self._url(obj.thumbnail or obj.file)
 
 
 class ClassificationSerializer(serializers.ModelSerializer):

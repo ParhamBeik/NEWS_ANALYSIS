@@ -182,3 +182,59 @@ def test_an_image_url_pointing_into_our_own_network_is_refused(image_row, monkey
     assert result["status"] == "blocked"
     assert stored.status == ImageStatus.FAILED
     assert "non-public" in stored.error
+
+
+@pytest.mark.django_db
+def test_one_webp_copy_is_stored_per_article(image_row, monkeypatch, settings, tmp_path):
+    """docs/STORAGE-POLICY.md: one stored copy serves card and hero; no thumbnail file."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from articles.models import ArticleImage, ImageStatus
+    from articles.tasks import IMAGE_MAX, download_image
+
+    settings.MEDIA_ROOT = tmp_path
+    buffer = BytesIO()
+    Image.new("RGB", (2000, 1000), "red").save(buffer, format="PNG")
+    monkeypatch.setattr("articles.tasks.open_checked", lambda *a, **k: FakeResponse(10))
+    monkeypatch.setattr("articles.tasks.read_capped", lambda *a, **k: buffer.getvalue())
+
+    assert download_image(image_row.article_id)["status"] == "stored"
+    stored = ArticleImage.objects.get(pk=image_row.pk)
+    assert stored.status == ImageStatus.STORED
+    assert stored.file.name.endswith(".webp") and not stored.thumbnail
+    with Image.open(stored.file.path) as saved:
+        assert saved.format == "WEBP" and max(saved.size) == IMAGE_MAX[0]
+
+
+@pytest.mark.django_db
+def test_compact_images_keeps_one_webp_and_requeues_missing(make_article, settings, tmp_path):
+    """compact_images: legacy pair -> one WebP; missing files -> PENDING; strays deleted."""
+    from django.core.management import call_command
+    from PIL import Image
+
+    from articles.models import ArticleImage, ImageStatus
+
+    settings.MEDIA_ROOT = tmp_path
+    folder = tmp_path / "articles/2026/09"
+    (folder / "thumbs").mkdir(parents=True)
+    Image.new("RGB", (1200, 600), "blue").save(folder / "1.jpg")
+    Image.new("RGB", (400, 200), "blue").save(folder / "thumbs/1_thumb.jpg")
+    (folder / "stray.jpg").write_bytes(b"x")
+    kept = ArticleImage.objects.create(
+        article=make_article(), source_url="https://cdn.example/a.jpg",
+        status=ImageStatus.STORED, file="articles/2026/09/1.jpg",
+        thumbnail="articles/2026/09/thumbs/1_thumb.jpg")
+    lost = ArticleImage.objects.create(
+        article=make_article(), source_url="https://cdn.example/b.jpg",
+        status=ImageStatus.STORED, file="articles/2026/09/gone.jpg")
+
+    call_command("compact_images")
+
+    kept.refresh_from_db()
+    lost.refresh_from_db()
+    assert kept.file.name.endswith(".webp") and not kept.thumbnail
+    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == [
+        kept.file.name.rsplit("/", 1)[1]]
+    assert (lost.status, lost.file.name) == (ImageStatus.PENDING, "")
