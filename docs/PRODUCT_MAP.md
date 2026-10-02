@@ -23,7 +23,7 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 
 | Part | Code | Status |
 |---|---|---|
-| Source catalog | `backend/sources/` (`fixtures/sources.yaml`, `strategies/`) | 44 catalog sources (Phase 1, 2026-10-02) with language, ownership group, license mode and role; prod loads them only after `seed_sources` |
+| Source catalog | `backend/sources/` (`fixtures/sources.yaml`, `strategies/`) | 44 catalog sources (Phase 1, 2026-10-02) with language, ownership group, license mode and role; loaded on every deploy by the `migrate` service |
 | Collection | `sources/tasks.py`, `articles/ingest.py` | Live (fixed 2026-10-01 after a 4.5 h outage) |
 | Article versions | `articles.ArticleRevision` | Live: prior text kept on edit/removal |
 | Events | `core/events.py`, `articles.NewsEvent` | Live: created per new article |
