@@ -15,7 +15,8 @@ Live at `https://news.parhambm.ir`, hosted on the shared Tehran server (45.139.1
 ```
 sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ event (same occurrence)
    ─▶ Jev decision: topic, Iran score, global score, asset relevance, same-event?
-   ─▶ brief (only if score ≥ 75) ─▶ reader radar / event page / market-impact chart
+   ─▶ brief (impact tier ≥ 4, or ≥ 3 if watched; else a translated headline)
+   ─▶ reader radar / event page / market-impact chart
    ─▶ staff swipe review (labels calibrate the model)        ─▶ alerts (off until gated)
 ```
 
@@ -32,8 +33,12 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Reader tiers | `core/tiers.py` | Built (Phase 2): 1-5 relative to the last 30 days; fixed bands under 200 scored events |
 | Grouping memory | `articles.GroupingDecision`, `core/events.py` | Built (Phase 2): staff splits are never re-merged |
 | Storylines | `core/storylines.py`, `inference.build_storylines` (02:30 nightly) | Built (Phase 2); names wait on AI |
-| Evidence level | `NewsEvent.evidence_level` | Placeholder: single/multi/official from source groups |
-| Briefs | `inference/jev.py` `brief`, `summarize_event` | Built; waits on AI decisions; stop at 80% of the monthly budget |
+| Evidence level | `NewsEvent.evidence_level`, `core/events.py` | Built (Phase 2b): single/multi/official from independence groups; disputed when another group contradicts |
+| Per-report stance | `articles.ArticleStance`, `inference/jev.py` `stance` | Built (Phase 2b): reports/supports/contradicts/updates asked with the same-event question; badges on the event page |
+| Translated headlines | `inference.translate_event_title`, `articles.TitleTranslation` | Built (Phase 2b): one cheap GapGPT call for unbriefed events, cached per article; waits on AI |
+| Takedown | `core/takedown.py`, `api/takedown.py`, `articles.TakedownLog` | Built (Phase 2b): staff hide/unhide events and reports with a reason; append-only audit log |
+| Gap backfill | `sources.backfill_gap` | Built (Phase 2b): queued when a gap closes on an archive-capable source; 3 days / 200 articles max |
+| Briefs | `inference/jev.py` `brief`, `summarize_event`, `core/tiers.py` `brief_eligible` | Built; impact tier ≥ 4, or ≥ 3 when on a watchlist; waits on AI decisions; stop at 80% of the monthly budget |
 | AI budget guard | `inference/budget.py`, `inference/circuit.py` | Live; caps run/day/month |
 | Reader radar | `frontend/app/page.js` | Live (image-led, categories, tiers) |
 | Event page | `frontend/app/events/[id]/` | Live |
