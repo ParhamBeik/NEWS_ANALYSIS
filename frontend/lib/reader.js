@@ -79,13 +79,16 @@ export function relative(iso, lang = "fa", now = Date.now()) {
   return lang === "fa" ? "همین حالا" : "just now";
 }
 
+/** The eight investor topics (core.vocabulary.EVENT_CATEGORIES); the API maps legacy slugs. */
 export const CATEGORIES = {
-  monetary: { en: "Monetary policy", fa: "سیاست پولی", icon: "bank" },
-  macro: { en: "Macroeconomy", fa: "اقتصاد کلان", icon: "chart" },
-  sanctions_trade: { en: "Trade & sanctions", fa: "تجارت و تحریم", icon: "ship" },
-  geopolitics: { en: "Geopolitics", fa: "ژئوپلیتیک", icon: "globe" },
-  energy: { en: "Energy", fa: "انرژی", icon: "flame" },
-  markets: { en: "Markets", fa: "بازارها", icon: "candles" },
+  conflict_security: { en: "Conflict & security", fa: "امنیت و درگیری", icon: "shield" },
+  sanctions_diplomacy: { en: "Sanctions & diplomacy", fa: "تحریم و دیپلماسی", icon: "globe" },
+  macro_monetary: { en: "Macro & monetary", fa: "اقتصاد کلان و پولی", icon: "bank" },
+  energy_commodities: { en: "Energy & commodities", fa: "انرژی و کالاها", icon: "flame" },
+  iran_economy_policy: { en: "Iran economic policy", fa: "سیاست اقتصادی ایران", icon: "chart" },
+  markets_companies: { en: "Markets & companies", fa: "بازارها و شرکت‌ها", icon: "candles" },
+  disasters: { en: "Disasters & accidents", fa: "حوادث و بلایا", icon: "wave" },
+  social_unrest: { en: "Protests & strikes", fa: "اعتراض و اعتصاب", icon: "people" },
 };
 export const PENDING_CATEGORY = { en: "Being assessed", fa: "در حال ارزیابی", icon: "radar" };
 

@@ -13,7 +13,7 @@ from django.db.models import Case, Exists, F, IntegerField, OuterRef, Value, Whe
 from django.utils import timezone
 
 from articles.models import EventReview, EventRevision
-from core.vocabulary import EVENT_CATEGORIES, LEVELS
+from core.vocabulary import EVENT_CATEGORIES, LEVELS, event_topic
 
 SESSION_SIZE = 25
 HIGH_IMPACT_UNCERTAIN = "high_impact_uncertain"
@@ -159,7 +159,9 @@ def review_stats(*, since=None, reviewer=None) -> dict:
     per_category = defaultdict(lambda: {"reviewed": 0, "agreed": 0, "category": 0, "tier": 0})
     for row in rows:
         category, iran, global_ = _model_judgment(row)
-        category_ok = category == row.reviewed_category
+        # Older rows hold the pre-investor-topic slugs; compare in today's vocabulary.
+        category = event_topic(category)
+        category_ok = category == event_topic(row.reviewed_category)
         tier_ok = score_tier(iran) == score_tier(row.reviewed_iran_score) and score_tier(
             global_
         ) == score_tier(row.reviewed_global_score)

@@ -23,14 +23,28 @@ from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from . import budget
 from .models import AIUsageRecord
 
+# The eight locked investor topics. One line each, written so two topics rarely both fit:
+# central-bank and data stories are macro_monetary, government economic rules are
+# iran_economy_policy, and price moves themselves are markets_companies.
 CATEGORIES = {
-    "monetary": "Central-bank rates, liquidity, or monetary policy.",
-    "macro": "Inflation, employment, growth, fiscal policy, or economic data.",
-    "sanctions_trade": "Sanctions, trade restrictions, tariffs, imports, or exports.",
-    "geopolitics": "Diplomacy, conflict, or political decisions with economic channels.",
-    "energy": "Oil, gas, electricity, or energy supply and policy.",
-    "markets": "Financial market structure, banking, or major corporate events.",
-    "other": "No material economic, financial, or geopolitical relevance.",
+    "conflict_security": "Military action, attacks, security incidents, or armed conflict.",
+    "sanctions_diplomacy": "Sanctions, nuclear talks, negotiations, or diplomatic relations.",
+    "macro_monetary": (
+        "Inflation, growth, employment, central-bank rates, liquidity, or economic data."
+    ),
+    "energy_commodities": (
+        "Oil, gas, electricity, fuel, metals, or other commodity supply, prices, and policy."
+    ),
+    "iran_economy_policy": (
+        "Iranian government economic decisions: budget, taxes, subsidies, price controls, "
+        "trade or currency rules."
+    ),
+    "markets_companies": (
+        "Moves in stock, currency, gold, or crypto markets; banks; or major company events."
+    ),
+    "disasters": "Earthquakes, floods, accidents, epidemics, or other disasters.",
+    "social_unrest": "Protests, strikes, labour unrest, or civil disorder.",
+    "other": "No material economic, financial, security, or geopolitical relevance.",
 }
 
 IMPACT = [

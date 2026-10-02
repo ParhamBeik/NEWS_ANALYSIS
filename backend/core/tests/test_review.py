@@ -10,7 +10,7 @@ from core.review import record_decision, review_queue, review_stats, score_tier
 pytestmark = pytest.mark.django_db
 
 
-def make_review(make_article, *, reason="audit_sample", confidence=0.8, category="macro",
+def make_review(make_article, *, reason="audit_sample", confidence=0.8, category="macro_monetary",
                 iran=75, global_=25):
     event = attach_article(make_article())
     NewsEvent.objects.filter(pk=event.pk).update(
@@ -56,13 +56,13 @@ def test_agree_fix_and_undo_write_the_review(make_article, user):
     record_decision(review, user, "agree")
     review.refresh_from_db()
     assert (review.status, review.reviewed_category, review.reviewed_iran_score,
-            review.reviewed_global_score, review.reviewer) == ("reviewed", "macro", 62, 25, user)
+            review.reviewed_global_score, review.reviewer) == ("reviewed", "macro_monetary", 62, 25, user)
     assert review.reviewed_at is not None
 
-    record_decision(review, user, "fix", category="energy", iran_tier=4, global_tier=0)
+    record_decision(review, user, "fix", category="energy_commodities", iran_tier=4, global_tier=0)
     review.refresh_from_db()
     assert (review.reviewed_category, review.reviewed_iran_score,
-            review.reviewed_global_score) == ("energy", 100, 0)
+            review.reviewed_global_score) == ("energy_commodities", 100, 0)
 
     record_decision(review, user, "undo")
     review.refresh_from_db()
@@ -71,26 +71,26 @@ def test_agree_fix_and_undo_write_the_review(make_article, user):
     with pytest.raises(ValueError):
         record_decision(review, user, "fix", category="sports", iran_tier=1, global_tier=1)
     with pytest.raises(ValueError):
-        record_decision(review, user, "fix", category="energy", iran_tier=5, global_tier=1)
+        record_decision(review, user, "fix", category="energy_commodities", iran_tier=5, global_tier=1)
 
 
 def test_stats_compare_against_the_judgment_shown_at_review_time(make_article, user):
-    agreed = make_review(make_article, category="macro", iran=75, global_=25)
+    agreed = make_review(make_article, category="macro_monetary", iran=75, global_=25)
     record_decision(agreed, user, "agree")
-    fixed = make_review(make_article, category="energy", iran=75, global_=25)
-    record_decision(fixed, user, "fix", category="energy", iran_tier=1, global_tier=1)
+    fixed = make_review(make_article, category="energy_commodities", iran=75, global_=25)
+    record_decision(fixed, user, "fix", category="energy_commodities", iran_tier=1, global_tier=1)
     # A later reassessment must not rewrite the recorded agreement.
     EventAssessment.objects.create(
-        event=agreed.event, model="jev", evidence_hash="y", category="energy", iran_score=0,
+        event=agreed.event, model="jev", evidence_hash="y", category="energy_commodities", iran_score=0,
         global_score=0, confidence=0.9,
     )
 
     stats = review_stats()
     assert (stats["reviewed"], stats["agreed"], stats["agreement_rate"]) == (2, 1, 0.5)
     by_category = {row["category"]: row for row in stats["categories"]}
-    assert by_category["macro"]["agreement_rate"] == 1.0
-    assert by_category["energy"]["category_match_rate"] == 1.0
-    assert by_category["energy"]["tier_match_rate"] == 0.0
+    assert by_category["macro_monetary"]["agreement_rate"] == 1.0
+    assert by_category["energy_commodities"]["category_match_rate"] == 1.0
+    assert by_category["energy_commodities"]["tier_match_rate"] == 0.0
     later = review_stats(since=timezone.now() + timedelta(minutes=1), reviewer=user)
     assert later["reviewed"] == 0 and later["agreement_rate"] is None
 

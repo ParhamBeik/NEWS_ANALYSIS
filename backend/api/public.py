@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 
 from articles.models import AlertSubscription, NewsEvent
 from core.events import ranked_events
+from core.vocabulary import event_topic
 from market.models import PriceSnapshot, Symbol
 from sources.models import Source
 
@@ -131,7 +132,7 @@ def event_document(event: NewsEvent, *, detail: bool = False) -> dict:
     document = {
         "id": event.id,
         "status": event.status,
-        "category": event.category or None,
+        "category": event_topic(event.category) or None,
         "title": event.title_fa or primary.original_title,
         "title_fa": event.title_fa or None,
         "title_en": event.title_en or None,
