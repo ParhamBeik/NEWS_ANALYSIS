@@ -36,3 +36,13 @@ def test_level_member_order_is_the_ordinal_scale():
     """`Level.values` order IS the score. Reordering members silently rescores the
     entire database, so the mapping is pinned here rather than implied."""
     assert list(Level.values) == list(LEVELS)
+
+
+def test_jev_topics_are_the_event_vocabulary_and_legacy_slugs_map_into_it():
+    from core.vocabulary import EVENT_CATEGORIES, LEGACY_EVENT_CATEGORIES, event_topic
+    from inference.jev import CATEGORIES as JEV_TOPICS
+
+    assert tuple(JEV_TOPICS) == EVENT_CATEGORIES
+    assert set(LEGACY_EVENT_CATEGORIES.values()) <= set(EVENT_CATEGORIES)
+    assert event_topic("geopolitics") == "sanctions_diplomacy"
+    assert event_topic("disasters") == "disasters"

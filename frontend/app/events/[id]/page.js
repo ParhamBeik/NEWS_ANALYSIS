@@ -1,9 +1,9 @@
 import Link from "next/link";
 import EventImage from "@/components/EventImage";
-import { CategoryChip, Icon, StatusBadge, TierBadge, When } from "@/components/reader";
+import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/components/reader";
 import { language, label } from "@/lib/language";
 import { loadEvent } from "./load";
-import { digits, groupSources, headline, sep } from "@/lib/reader";
+import { EVIDENCE, digits, groupSources, headline, sep } from "@/lib/reader";
 
 export const dynamic = "force-dynamic";
 
@@ -45,14 +45,16 @@ export default async function EventDetail({ params }) {
         {primaryName ? <span className="font-semibold text-ink">{primaryName}</span> : null}
         <When iso={event.event_time} lang={lang} time />
         <StatusBadge status={event.status} lang={lang} />
+        {EVIDENCE[event.evidence_level] ? <span className="rounded-full border border-line px-2.5 py-0.5 text-xs">{EVIDENCE[event.evidence_level][lang]}</span> : null}
       </div>
       <div className="grid gap-3 rounded-2xl border border-line bg-card p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-center">
-        <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge score={event.iran_score} lang={lang} prefix={false} /></div>
-        <div className="space-y-1"><p className="text-xs text-muted">{tr("Global significance", "اهمیت جهانی")}</p><TierBadge score={event.global_score} lang={lang} prefix={false} /></div>
+        <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge tier={event.iran_tier} lang={lang} prefix={false} /></div>
+        <div className="space-y-1"><p className="text-xs text-muted">{tr("Global significance", "اهمیت جهانی")}</p><TierBadge tier={event.global_tier} lang={lang} prefix={false} /></div>
         <Link href={`/events/${event.id}/market`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent-strong px-4 py-3 font-semibold text-white hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
           <Icon name="candles" />{tr("Market impact", "اثر بر بازار")}
         </Link>
       </div>
+      <WatchChips items={event.watch_items} lang={lang} />
     </header>
 
     {pick("brief") ? <Block title={tr("What happened", "چه اتفاقی افتاد")} icon="layers">
@@ -89,12 +91,23 @@ export default async function EventDetail({ params }) {
 
     <section aria-labelledby="story-title" className="space-y-3">
       <h2 id="story-title" className="text-xl font-bold">{tr("Storyline", "روند رویداد")}</h2>
-      {event.history?.length ? <ul className="space-y-2 text-sm">{event.history.map((change, index) =>
-        <li key={`${change.observed_at}-${index}`} className="rounded-xl border border-line bg-card p-3">
-          <p className="text-xs text-muted">{change.source}{sep(lang)}<When iso={change.observed_at} lang={lang} time showRelative={false} />{sep(lang)}{change.previous_status}</p>
-          <p className="mt-1" dir="auto">{change.previous_headline}</p>
-        </li>)}</ul>
-        : <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">{tr("Related events and earlier chapters of this story will appear here.", "رویدادهای مرتبط و مراحل پیشین این خبر به‌زودی اینجا نمایش داده می‌شوند.")}</p>}
+      {event.storyline ? <div className="rounded-2xl border border-line bg-card p-4">
+        <p className="mb-2 font-semibold" dir="auto">{(lang === "en" && event.storyline.name_en) || event.storyline.name_fa}</p>
+        <ol className="space-y-2 border-s border-line ps-4 text-sm">{event.storyline.events.map((item) => <li key={item.id}>
+          <p className="text-xs text-muted"><When iso={item.event_time} lang={lang} showRelative={false} /></p>
+          {item.id === event.id
+            ? <p className="font-semibold" dir="auto" aria-current="page">{(lang === "en" && item.title_en) || item.title_fa}</p>
+            : <Link href={`/events/${item.id}`} className="text-accent hover:underline" dir="auto">{(lang === "en" && item.title_en) || item.title_fa}</Link>}
+        </li>)}</ol>
+      </div> : <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">{tr("Related events will appear here once this story develops.", "رویدادهای مرتبط پس از ادامه‌یافتن این خبر اینجا نمایش داده می‌شوند.")}</p>}
+      {event.history?.length ? <>
+        <h3 className="pt-2 font-semibold">{tr("Earlier versions of these reports", "نسخه‌های پیشین این گزارش‌ها")}</h3>
+        <ul className="space-y-2 text-sm">{event.history.map((change, index) =>
+          <li key={`${change.observed_at}-${index}`} className="rounded-xl border border-line bg-card p-3">
+            <p className="text-xs text-muted">{change.source}{sep(lang)}<When iso={change.observed_at} lang={lang} time showRelative={false} />{sep(lang)}{change.previous_status}</p>
+            <p className="mt-1" dir="auto">{change.previous_headline}</p>
+          </li>)}</ul>
+      </> : null}
     </section>
   </article>;
 }

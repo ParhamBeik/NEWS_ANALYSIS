@@ -134,6 +134,14 @@ class NewsEvent(models.Model):
         CORRECTED = "corrected", "Corrected"
         WITHDRAWN = "withdrawn", "Withdrawn"
 
+    class Evidence(models.TextChoices):
+        """How independently the occurrence is reported; see core.events.evidence_level."""
+
+        SINGLE = "single", "One source group"
+        MULTI = "multi", "Several independent source groups"
+        OFFICIAL = "official", "Reported by an official source"
+        DISPUTED = "disputed", "Sources disagree"
+
     primary_article = models.OneToOneField(
         Article, on_delete=models.PROTECT, related_name="led_event"
     )
@@ -141,6 +149,7 @@ class NewsEvent(models.Model):
     event_time = models.DateTimeField(db_index=True)
     first_seen_at = models.DateTimeField(db_index=True)
     status = models.CharField(max_length=16, choices=Status, default=Status.DEVELOPING)
+    evidence_level = models.CharField(max_length=16, choices=Evidence, default=Evidence.SINGLE)
     category = models.CharField(max_length=32, blank=True, db_index=True)
     iran_score = models.PositiveSmallIntegerField(null=True, blank=True, db_index=True)
     global_score = models.PositiveSmallIntegerField(null=True, blank=True)
@@ -227,6 +236,109 @@ class EventReview(models.Model):
 
     def __str__(self) -> str:
         return f"review for event {self.event_id}: {self.status}"
+
+
+class GroupingDecision(models.Model):
+    """A staff ruling on whether one article reports the same occurrence as one event.
+
+    `not_same` binds automatic grouping: neither dedup attachment nor a Jev merge puts the
+    article back into that event (core.events). The rows double as labelled grouping
+    examples for evaluation.
+    """
+
+    class Decision(models.TextChoices):
+        NOT_SAME = "not_same", "Not the same occurrence"
+        SAME = "same", "Same occurrence"
+
+    article = models.ForeignKey(
+        Article, on_delete=models.CASCADE, related_name="grouping_decisions"
+    )
+    event = models.ForeignKey(
+        NewsEvent, on_delete=models.CASCADE, related_name="grouping_decisions"
+    )
+    decision = models.CharField(max_length=16, choices=Decision)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    decided_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["article", "event"], name="one_grouping_decision")
+        ]
+
+    def __str__(self) -> str:
+        return f"article {self.article_id} {self.decision} event {self.event_id}"
+
+
+class WatchItem(models.Model):
+    """Curated bilingual vocabulary an event can be tagged with: an asset, actor or theme.
+
+    Seeded from articles/fixtures/watch_items.yaml by `seed_watch_items`. Rows are disabled
+    rather than deleted so existing tags keep their meaning.
+    """
+
+    class Kind(models.TextChoices):
+        ASSET = "asset", "Asset"
+        ACTOR = "actor", "Actor"
+        THEME = "theme", "Theme"
+
+    slug = models.SlugField(max_length=64, unique=True)
+    kind = models.CharField(max_length=8, choices=Kind)
+    name_fa = models.CharField(max_length=128)
+    name_en = models.CharField(max_length=128)
+    aliases = models.JSONField(default=list, blank=True)
+    enabled = models.BooleanField(default=True)
+
+    def __str__(self) -> str:
+        return self.slug
+
+
+class EventWatchItem(models.Model):
+    """One Jev tag: this event is substantively about this watch item."""
+
+    event = models.ForeignKey(NewsEvent, on_delete=models.CASCADE, related_name="watch_links")
+    item = models.ForeignKey(WatchItem, on_delete=models.CASCADE, related_name="event_links")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["event", "item"], name="one_tag_per_event_item")
+        ]
+
+    def __str__(self) -> str:
+        return f"event {self.event_id} tagged {self.item_id}"
+
+
+class Storyline(models.Model):
+    """A developing situation followed across events, built nightly by core.storylines.
+
+    Named from its first events. The name may be regenerated until the storyline holds
+    NAME_FROZEN_AFTER events, then it is frozen so readers can follow it; every replaced
+    name is kept in `previous_names`.
+    """
+
+    name_fa = models.TextField(blank=True)
+    name_en = models.TextField(blank=True)
+    previous_names = models.JSONField(default=list, blank=True)
+    last_event_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"storyline {self.pk}: {self.name_en or self.name_fa}"[:80]
+
+
+class StorylineEvent(models.Model):
+    storyline = models.ForeignKey(Storyline, on_delete=models.CASCADE, related_name="links")
+    # One storyline per event: a reader follows one thread, not a graph.
+    event = models.OneToOneField(
+        NewsEvent, on_delete=models.CASCADE, related_name="storyline_link"
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"event {self.event_id} in storyline {self.storyline_id}"
 
 
 class AlertSubscription(models.Model):

@@ -23,14 +23,28 @@ from core.errors import BudgetExceeded, Fatal, Permanent, Transient
 from . import budget
 from .models import AIUsageRecord
 
+# The eight locked investor topics. One line each, written so two topics rarely both fit:
+# central-bank and data stories are macro_monetary, government economic rules are
+# iran_economy_policy, and price moves themselves are markets_companies.
 CATEGORIES = {
-    "monetary": "Central-bank rates, liquidity, or monetary policy.",
-    "macro": "Inflation, employment, growth, fiscal policy, or economic data.",
-    "sanctions_trade": "Sanctions, trade restrictions, tariffs, imports, or exports.",
-    "geopolitics": "Diplomacy, conflict, or political decisions with economic channels.",
-    "energy": "Oil, gas, electricity, or energy supply and policy.",
-    "markets": "Financial market structure, banking, or major corporate events.",
-    "other": "No material economic, financial, or geopolitical relevance.",
+    "conflict_security": "Military action, attacks, security incidents, or armed conflict.",
+    "sanctions_diplomacy": "Sanctions, nuclear talks, negotiations, or diplomatic relations.",
+    "macro_monetary": (
+        "Inflation, growth, employment, central-bank rates, liquidity, or economic data."
+    ),
+    "energy_commodities": (
+        "Oil, gas, electricity, fuel, metals, or other commodity supply, prices, and policy."
+    ),
+    "iran_economy_policy": (
+        "Iranian government economic decisions: budget, taxes, subsidies, price controls, "
+        "trade or currency rules."
+    ),
+    "markets_companies": (
+        "Moves in stock, currency, gold, or crypto markets; banks; or major company events."
+    ),
+    "disasters": "Earthquakes, floods, accidents, epidemics, or other disasters.",
+    "social_unrest": "Protests, strikes, labour unrest, or civil disorder.",
+    "other": "No material economic, financial, security, or geopolitical relevance.",
 }
 
 IMPACT = [
@@ -40,6 +54,14 @@ IMPACT = [
     "Large possible effect for a market or region.",
     "Exceptional possible effect across markets or Iran.",
 ]
+
+# Three levels, not IMPACT's five: a tag only needs "central", "secondary" or "no".
+WATCH_LEVELS = [
+    "Not what this report is about.",
+    "A secondary subject of this report.",
+    "A main subject of this report.",
+]
+MAX_WATCH_TAGS = 5
 
 BRIEF_FIELDS = (
     "title_fa",
@@ -85,7 +107,17 @@ def _record_usage(stage: str, run_id: str, usage: budget.Usage) -> None:
     )
 
 
-def _questions(candidates: dict[str, str] | None) -> dict:
+def _questions(
+    candidates: dict[str, str] | None,
+    watch: dict[str, str] | None = None,
+    multi: bool = False,
+) -> dict:
+    """The typed questions for one event.
+
+    `watch` is the alias shortlist from core.watch. TypeSafe has no multi-label type, so it
+    gets one three-level score question per shortlisted item (at most eight); the GapGPT
+    fallback gets them as a single pick-up-to-five question, which costs one answer.
+    """
     questions = {
         "category": {
             "type": "choice",
@@ -135,7 +167,40 @@ def _questions(candidates: dict[str, str] | None) -> dict:
             ),
             "criteria": IMPACT,
         }
+    if watch and multi:
+        questions["watch_items"] = {
+            "type": "multi",
+            "instructions": (
+                f"Pick at most {MAX_WATCH_TAGS} items this report is substantively about; "
+                "a passing mention does not count. Pick none if none fit."
+            ),
+            "criteria": watch,
+        }
+    elif watch:
+        for slug, name in watch.items():
+            questions[f"watch_{slug}"] = {
+                "type": "score",
+                "instructions": f"How central is {name} to this report?",
+                "criteria": WATCH_LEVELS,
+            }
     return questions
+
+
+def watch_tags(answers: dict) -> list[str]:
+    """Tagged watch-item slugs from either backend's answers, most central first."""
+    if "watch_items" in answers:
+        return list(answers["watch_items"].get("choices", []))[:MAX_WATCH_TAGS]
+    scored = []
+    for name, answer in answers.items():
+        if not name.startswith("watch_"):
+            continue
+        try:
+            level = float(answer["score"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if level >= 1:
+            scored.append((-level, name.removeprefix("watch_")))
+    return [slug for _, slug in sorted(scored)][:MAX_WATCH_TAGS]
 
 
 # ---------------------------------------------------------------------- TypeSafe
@@ -229,6 +294,9 @@ def _fallback_answers(raw: dict, questions: dict) -> dict:
     answers = {}
     for name, question in questions.items():
         item = raw.get(name)
+        if question["type"] == "multi" and item is None:
+            answers[name] = {"type": "multi", "choices": [], "confidence": 0.0}
+            continue
         if not isinstance(item, dict):
             raise Permanent(f"fallback answer missing {name}")
         try:
@@ -236,7 +304,20 @@ def _fallback_answers(raw: dict, questions: dict) -> dict:
         except (TypeError, ValueError) as exc:
             raise Permanent(f"fallback confidence for {name} is not a number") from exc
         confidence = min(max(confidence, 0.0), 1.0)
-        if question["type"] == "choice":
+        if question["type"] == "multi":
+            # Tags are optional extras: unknown keys are dropped rather than costing the
+            # whole decision, but the answer must still be a list.
+            picked = item.get("choices")
+            if not isinstance(picked, list):
+                raise Permanent(f"fallback choices for {name} are not a list")
+            answers[name] = {
+                "type": "multi",
+                "choices": [key for key in picked if key in question["criteria"]][
+                    :MAX_WATCH_TAGS
+                ],
+                "confidence": confidence,
+            }
+        elif question["type"] == "choice":
             choice = item.get("choice")
             if choice not in question["criteria"]:
                 raise Permanent(f"fallback choice for {name} is outside the criteria")
@@ -265,6 +346,11 @@ def _gapgpt_decide(state: dict, questions: dict, run_id: str) -> dict:
                 "question": question["instructions"],
                 "choose_one_key_from": question["criteria"],
             }
+        elif question["type"] == "multi":
+            spec[name] = {
+                "question": question["instructions"],
+                "choose_keys_from": question["criteria"],
+            }
         else:
             spec[name] = {
                 "question": question["instructions"],
@@ -277,7 +363,9 @@ def _gapgpt_decide(state: dict, questions: dict, run_id: str) -> dict:
                 "You classify one news report. Answer every question from the evidence only. "
                 "Return one JSON object keyed by question id. For a choice question return "
                 '{"choice": <one key>, "confidence": <0-1>}; for a levelled question return '
-                '{"score": <level integer>, "confidence": <0-1>}. No other text.'
+                '{"score": <level integer>, "confidence": <0-1>}; for a question with '
+                '"choose_keys_from" return {"choices": [<keys>], "confidence": <0-1>}. '
+                "No other text."
             ),
         },
         {
@@ -300,12 +388,16 @@ def _gapgpt_decide(state: dict, questions: dict, run_id: str) -> dict:
 # ---------------------------------------------------------------------- public API
 
 
-def decide(state: dict, run_id: str, candidates: dict[str, str] | None = None) -> dict:
-    questions = _questions(candidates)
+def decide(
+    state: dict,
+    run_id: str,
+    candidates: dict[str, str] | None = None,
+    watch: dict[str, str] | None = None,
+) -> dict:
     if settings.TYPESAFE_API_KEY:
-        return _typesafe(state, questions, run_id)
+        return _typesafe(state, _questions(candidates, watch), run_id)
     if settings.GAPGPT_API_KEY:
-        return _gapgpt_decide(state, questions, run_id)
+        return _gapgpt_decide(state, _questions(candidates, watch, multi=True), run_id)
     raise Fatal("no decision backend configured (TYPESAFE_API_KEY or GAPGPT_API_KEY)")
 
 
@@ -313,6 +405,7 @@ def brief(state: dict, run_id: str) -> dict:
     """Short attributed bilingual digest grounded in stored source evidence."""
     if not settings.GAPGPT_API_KEY:
         raise Fatal("GAPGPT_API_KEY is not configured")
+    budget.check_optional()
     result, _ = _gapgpt(
         settings.NEWS_BRIEF_MODEL,
         [
@@ -329,3 +422,33 @@ def brief(state: dict, run_id: str) -> dict:
     ):
         raise Transient("brief did not match the expected schema")
     return {name: result[name] for name in BRIEF_FIELDS}
+
+
+def storyline_name(titles: list[str], run_id: str) -> dict:
+    """A short neutral bilingual name for a storyline, from its first event headlines."""
+    if not settings.GAPGPT_API_KEY:
+        raise Fatal("GAPGPT_API_KEY is not configured")
+    budget.check_optional()
+    result, _ = _gapgpt(
+        settings.NEWS_DECISION_FALLBACK_MODEL or settings.GAPGPT_MODEL,
+        [
+            {
+                "role": "system",
+                "content": (
+                    "These headlines are consecutive reports of one developing situation. "
+                    "Name the situation neutrally in at most six words in Persian and in "
+                    "English, without dates, verdicts or forecasts. Return one JSON object "
+                    'with string fields "name_fa" and "name_en".'
+                ),
+            },
+            {"role": "user", "content": json.dumps(titles, ensure_ascii=False)},
+        ],
+        120,
+        run_id,
+        "storyline",
+    )
+    if not isinstance(result, dict) or not all(
+        isinstance(result.get(key), str) and result[key].strip() for key in ("name_fa", "name_en")
+    ):
+        raise Permanent("storyline name did not match the expected schema")
+    return {key: result[key].strip()[:120] for key in ("name_fa", "name_en")}

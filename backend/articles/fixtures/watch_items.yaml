@@ -1,0 +1,201 @@
+# Watch-item vocabulary: what an investor can follow, and what Jev may tag an event with.
+# Loaded by `python manage.py seed_watch_items` (upsert by slug; removed rows are disabled,
+# never deleted, because events keep their tags).
+#
+# slug: {kind: asset|actor|theme, en, fa, aliases}
+# Names are matched too, so aliases only add other spellings. Matching folds Persian
+# letters and digits and accepts a plural/ezafe suffix (s, ها, های, ی, ای), so list the bare
+# word. Avoid aliases that are also common unrelated words (ارز is in ارزش, strike is also
+# a military strike); a missed alias only costs a tag, a noisy one costs a paid question.
+
+# ------------------------------------------------------------------ assets: currencies
+usd_irr: {kind: asset, en: "US dollar", fa: "دلار آمریکا", aliases: ["dollar", "usd", "greenback", "دلار"]}
+eur_irr: {kind: asset, en: "Euro", fa: "یورو", aliases: ["euro", "eur"]}
+gbp_irr: {kind: asset, en: "British pound", fa: "پوند انگلیس", aliases: ["pound sterling", "gbp", "پوند"]}
+aed_irr: {kind: asset, en: "UAE dirham", fa: "درهم امارات", aliases: ["dirham", "aed", "درهم"]}
+try_irr: {kind: asset, en: "Turkish lira", fa: "لیر ترکیه", aliases: ["turkish lira", "لیر"]}
+cny_irr: {kind: asset, en: "Chinese yuan", fa: "یوان چین", aliases: ["yuan", "renminbi", "یوان"]}
+iqd_irr: {kind: asset, en: "Iraqi dinar", fa: "دینار عراق", aliases: ["iraqi dinar"]}
+rial: {kind: asset, en: "Iranian rial", fa: "ریال", aliases: ["rial", "toman", "تومان", "ارزش پول ملی"]}
+nima_rate: {kind: asset, en: "Official FX centre rate", fa: "نرخ مرکز مبادله", aliases: ["nima", "exchange center", "نیما", "مرکز مبادله", "بازار متشکل ارزی"]}
+dollar_index: {kind: asset, en: "US dollar index", fa: "شاخص دلار", aliases: ["dollar index", "dxy"]}
+
+# ------------------------------------------------------------------ assets: gold and metals
+coin_emami: {kind: asset, en: "Emami gold coin", fa: "سکه امامی", aliases: ["emami coin", "gold coin", "سکه بهار آزادی", "سکه طلا", "سکه"]}
+gold_18k: {kind: asset, en: "18k gold", fa: "طلای ۱۸ عیار", aliases: ["18k gold", "18-karat gold", "طلای ۱۸ عیار", "گرم طلا", "طلا", "بازار طلا"]}
+gold_ounce: {kind: asset, en: "Global gold price", fa: "انس طلا", aliases: ["gold", "bullion", "ounce of gold", "gold price", "اونس طلا", "طلای جهانی"]}
+silver: {kind: asset, en: "Silver", fa: "نقره", aliases: ["silver"]}
+copper: {kind: asset, en: "Copper", fa: "مس", aliases: ["copper"]}
+steel: {kind: asset, en: "Steel and iron ore", fa: "فولاد", aliases: ["steel", "iron ore", "سنگ آهن", "شمش فولاد"]}
+aluminium: {kind: asset, en: "Aluminium", fa: "آلومینیوم", aliases: ["aluminum", "aluminium"]}
+zinc: {kind: asset, en: "Zinc", fa: "فلز روی", aliases: ["zinc", "سرب و روی", "کنسانتره روی"]}
+
+# ------------------------------------------------------------------ assets: energy
+brent: {kind: asset, en: "Brent crude", fa: "نفت برنت", aliases: ["brent", "برنت"]}
+wti: {kind: asset, en: "WTI crude", fa: "نفت وست تگزاس", aliases: ["wti", "west texas intermediate", "وست تگزاس"]}
+opec_basket: {kind: asset, en: "OPEC basket", fa: "سبد نفتی اوپک", aliases: ["opec basket", "سبد اوپک"]}
+iran_heavy: {kind: asset, en: "Iran Heavy crude", fa: "نفت سنگین ایران", aliases: ["iran heavy", "iranian heavy", "نفت سبک ایران"]}
+crude_oil: {kind: asset, en: "Crude oil", fa: "نفت خام", aliases: ["crude", "oil price", "oil prices", "قیمت نفت", "نفت"]}
+natural_gas: {kind: asset, en: "Natural gas", fa: "گاز طبیعی", aliases: ["natural gas", "lng", "gas price", "ال ان جی", "گاز"]}
+gasoline: {kind: asset, en: "Gasoline", fa: "بنزین", aliases: ["gasoline", "petrol"]}
+diesel: {kind: asset, en: "Diesel", fa: "گازوئیل", aliases: ["diesel", "gasoil", "نفت گاز"]}
+electricity: {kind: asset, en: "Electricity", fa: "برق", aliases: ["electricity", "power grid", "power plant", "نیروگاه"]}
+petrochemicals: {kind: asset, en: "Petrochemicals", fa: "پتروشیمی", aliases: ["petrochemical", "methanol", "urea", "اوره", "متانول"]}
+
+# ------------------------------------------------------------------ assets: goods and property
+wheat: {kind: asset, en: "Wheat and grain", fa: "گندم", aliases: ["wheat", "grain", "غلات", "نهاده دامی", "نهاده"]}
+pistachio: {kind: asset, en: "Pistachio", fa: "پسته", aliases: ["pistachio"]}
+saffron: {kind: asset, en: "Saffron", fa: "زعفران", aliases: ["saffron"]}
+cement: {kind: asset, en: "Cement", fa: "سیمان", aliases: ["cement"]}
+cars: {kind: asset, en: "Cars and automakers", fa: "خودرو", aliases: ["automaker", "car prices", "iran khodro", "saipa", "ایران خودرو", "سایپا", "قیمت خودرو"]}
+housing: {kind: asset, en: "Housing and rent", fa: "مسکن", aliases: ["housing", "real estate", "property market", "rent", "اجاره بها", "اجاره", "بازار مسکن"]}
+medicine: {kind: asset, en: "Medicine and medical supplies", fa: "دارو", aliases: ["medicine", "pharmaceutical", "drug shortage", "تجهیزات پزشکی"]}
+
+# ------------------------------------------------------------------ assets: markets
+tse_index: {kind: asset, en: "Tehran Stock Exchange index", fa: "شاخص کل بورس تهران", aliases: ["tedpix", "tehran stock exchange", "tse", "شاخص کل", "بورس تهران", "بورس"]}
+fara_bourse: {kind: asset, en: "Iran Fara Bourse", fa: "فرابورس", aliases: ["fara bourse", "ifb"]}
+ime: {kind: asset, en: "Iran Mercantile Exchange", fa: "بورس کالا", aliases: ["mercantile exchange", "ime", "بورس انرژی"]}
+fixed_income_funds: {kind: asset, en: "Fixed-income funds", fa: "صندوق درآمد ثابت", aliases: ["fixed income fund", "صندوق های درآمد ثابت", "صندوق سرمایه گذاری"]}
+govt_bonds: {kind: asset, en: "Iranian government bonds", fa: "اوراق دولتی", aliases: ["akhza", "government bonds", "treasury bills", "اخزا", "اوراق بدهی", "اوراق مالی اسلامی"]}
+interbank_rate: {kind: asset, en: "Interbank rate", fa: "نرخ بهره بین بانکی", aliases: ["interbank", "بین بانکی", "عملیات بازار باز"]}
+bitcoin: {kind: asset, en: "Bitcoin", fa: "بیت‌کوین", aliases: ["bitcoin", "btc", "بیت کوین", "بیتکوین"]}
+usdt: {kind: asset, en: "Tether (USDT)", fa: "تتر", aliases: ["tether", "usdt", "stablecoin", "استیبل کوین"]}
+ethereum: {kind: asset, en: "Ethereum", fa: "اتریوم", aliases: ["ethereum", "ether"]}
+crypto_market: {kind: asset, en: "Crypto market", fa: "بازار رمزارز", aliases: ["crypto", "cryptocurrency", "رمزارز", "ارز دیجیتال", "نوبیتکس", "nobitex"]}
+sp500: {kind: asset, en: "S&P 500 and Wall Street", fa: "وال‌استریت", aliases: ["s&p 500", "sp500", "wall street", "nasdaq", "dow jones", "نزدک", "داوجونز"]}
+us_treasuries: {kind: asset, en: "US Treasury yields", fa: "بازده اوراق خزانه آمریکا", aliases: ["treasury yield", "bond yield", "اوراق خزانه آمریکا"]}
+shipping_freight: {kind: asset, en: "Shipping and freight rates", fa: "کرایه حمل دریایی", aliases: ["freight rate", "tanker rates", "shipping costs", "کشتیرانی", "irisl"]}
+
+# ------------------------------------------------------------------ actors: monetary and international bodies
+cbi: {kind: actor, en: "Central Bank of Iran", fa: "بانک مرکزی ایران", aliases: ["central bank of iran", "cbi", "بانک مرکزی", "رئیس کل بانک مرکزی"]}
+fed: {kind: actor, en: "US Federal Reserve", fa: "فدرال رزرو", aliases: ["federal reserve", "fed", "fomc", "powell", "فدرال", "پاول"]}
+ecb: {kind: actor, en: "European Central Bank", fa: "بانک مرکزی اروپا", aliases: ["ecb", "european central bank", "lagarde", "لاگارد"]}
+pboc: {kind: actor, en: "People's Bank of China", fa: "بانک مرکزی چین", aliases: ["pboc", "people's bank of china"]}
+opec: {kind: actor, en: "OPEC+", fa: "اوپک", aliases: ["opec", "opec+", "اوپک پلاس"]}
+iea: {kind: actor, en: "International Energy Agency", fa: "آژانس بین‌المللی انرژی", aliases: ["international energy agency", "iea"]}
+iaea: {kind: actor, en: "IAEA", fa: "آژانس بین‌المللی انرژی اتمی", aliases: ["iaea", "atomic energy agency", "grossi", "گروسی", "آژانس اتمی", "بازرسان آژانس"]}
+un_security_council: {kind: actor, en: "UN Security Council", fa: "شورای امنیت سازمان ملل", aliases: ["security council", "unsc", "شورای امنیت"]}
+united_nations: {kind: actor, en: "United Nations", fa: "سازمان ملل", aliases: ["united nations", "guterres", "گوترش"]}
+imf: {kind: actor, en: "IMF", fa: "صندوق بین‌المللی پول", aliases: ["imf", "international monetary fund", "صندوق بین المللی پول"]}
+world_bank: {kind: actor, en: "World Bank", fa: "بانک جهانی", aliases: ["world bank"]}
+fatf: {kind: actor, en: "FATF", fa: "FATF", aliases: ["fatf", "financial action task force", "گروه ویژه اقدام مالی", "پالرمو", "cft"]}
+ofac: {kind: actor, en: "US Treasury / OFAC", fa: "وزارت خزانه‌داری آمریکا", aliases: ["ofac", "us treasury", "treasury department", "treasury secretary", "خزانه داری آمریکا", "اوفک"]}
+eu: {kind: actor, en: "European Union", fa: "اتحادیه اروپا", aliases: ["european union", "eu", "brussels", "بروکسل", "اروپا"]}
+e3: {kind: actor, en: "E3 (UK, France, Germany)", fa: "تروئیکای اروپایی", aliases: ["e3", "european troika", "تروئیکا", "سه کشور اروپایی"]}
+brics_sco: {kind: actor, en: "BRICS and SCO", fa: "بریکس و شانگهای", aliases: ["brics", "sco", "shanghai cooperation", "بریکس", "سازمان همکاری شانگهای"]}
+
+# ------------------------------------------------------------------ actors: Iranian state
+iran_government: {kind: actor, en: "Iranian government", fa: "دولت ایران", aliases: ["iranian government", "iran's government", "cabinet", "هیئت دولت", "دولت", "سخنگوی دولت"]}
+president_iran: {kind: actor, en: "President of Iran", fa: "رئیس‌جمهور ایران", aliases: ["pezeshkian", "iranian president", "iran's president", "پزشکیان", "رئیس جمهور"]}
+supreme_leader: {kind: actor, en: "Supreme Leader", fa: "رهبر انقلاب", aliases: ["supreme leader", "khamenei", "خامنه ای", "رهبری", "رهبر معظم انقلاب"]}
+majlis: {kind: actor, en: "Iranian parliament", fa: "مجلس شورای اسلامی", aliases: ["majlis", "iranian parliament", "iran's parliament", "parliament", "مجلس", "نمایندگان مجلس", "قالیباف"]}
+judiciary: {kind: actor, en: "Judiciary", fa: "قوه قضاییه", aliases: ["judiciary", "قوه قضائیه", "دادستان", "اژه ای"]}
+snsc: {kind: actor, en: "Supreme National Security Council", fa: "شورای عالی امنیت ملی", aliases: ["supreme national security council", "snsc", "لاریجانی"]}
+expediency_council: {kind: actor, en: "Expediency Council", fa: "مجمع تشخیص مصلحت نظام", aliases: ["expediency council", "مجمع تشخیص"]}
+foreign_ministry: {kind: actor, en: "Iranian Foreign Ministry", fa: "وزارت امور خارجه", aliases: ["foreign ministry", "araghchi", "foreign minister", "وزارت خارجه", "عراقچی", "وزیر خارجه", "بقائی", "baghaei"]}
+economy_ministry: {kind: actor, en: "Ministry of Economy", fa: "وزارت اقتصاد", aliases: ["ministry of economy", "economy minister", "وزیر اقتصاد", "وزارت امور اقتصادی و دارایی"]}
+oil_ministry: {kind: actor, en: "Oil Ministry", fa: "وزارت نفت", aliases: ["oil ministry", "oil minister", "وزیر نفت", "paknejad", "پاک نژاد"]}
+energy_ministry: {kind: actor, en: "Energy Ministry", fa: "وزارت نیرو", aliases: ["energy ministry", "energy minister", "وزیر نیرو", "توانیر", "tavanir"]}
+industry_ministry: {kind: actor, en: "Ministry of Industry, Mine and Trade", fa: "وزارت صمت", aliases: ["industry ministry", "ministry of industry", "وزارت صنعت", "وزیر صمت", "صمت"]}
+agriculture_ministry: {kind: actor, en: "Agriculture Ministry", fa: "وزارت جهاد کشاورزی", aliases: ["agriculture ministry", "وزیر جهاد کشاورزی", "جهاد کشاورزی"]}
+labour_ministry: {kind: actor, en: "Ministry of Labour and Welfare", fa: "وزارت کار", aliases: ["labour ministry", "labor ministry", "وزارت تعاون کار و رفاه اجتماعی", "وزیر کار"]}
+roads_ministry: {kind: actor, en: "Ministry of Roads and Urban Development", fa: "وزارت راه و شهرسازی", aliases: ["roads ministry", "وزیر راه"]}
+plan_budget_org: {kind: actor, en: "Plan and Budget Organization", fa: "سازمان برنامه و بودجه", aliases: ["plan and budget organization", "budget organization", "سازمان برنامه"]}
+customs: {kind: actor, en: "Iran Customs", fa: "گمرک ایران", aliases: ["customs", "irica", "گمرک"]}
+tax_org: {kind: actor, en: "Tax Affairs Organization", fa: "سازمان امور مالیاتی", aliases: ["tax organization", "tax affairs organization"]}
+seo: {kind: actor, en: "Securities and Exchange Organization", fa: "سازمان بورس", aliases: ["securities and exchange organization", "seo", "سازمان بورس و اوراق بهادار"]}
+nioc: {kind: actor, en: "National Iranian Oil Company", fa: "شرکت ملی نفت ایران", aliases: ["nioc", "national iranian oil company", "شرکت ملی نفت"]}
+aeoi: {kind: actor, en: "Atomic Energy Organization of Iran", fa: "سازمان انرژی اتمی ایران", aliases: ["aeoi", "atomic energy organization of iran", "سازمان انرژی اتمی"]}
+irgc: {kind: actor, en: "IRGC", fa: "سپاه پاسداران", aliases: ["irgc", "revolutionary guards", "revolutionary guard", "سپاه", "سپاه پاسداران انقلاب اسلامی"]}
+armed_forces: {kind: actor, en: "Iranian armed forces", fa: "نیروهای مسلح ایران", aliases: ["armed forces", "iranian army", "artesh", "ارتش", "ستاد کل نیروهای مسلح"]}
+iran_banks: {kind: actor, en: "Iranian banks", fa: "بانک‌های ایران", aliases: ["iranian banks", "bank melli", "bank sepah", "ayandeh bank", "بانک ملی", "بانک سپه", "بانک آینده", "بانک ملت", "بانک صادرات"]}
+
+# ------------------------------------------------------------------ actors: countries and groups
+united_states: {kind: actor, en: "United States", fa: "آمریکا", aliases: ["united states", "america", "usa", "u.s.", "washington", "white house", "trump", "امریکا", "واشنگتن", "کاخ سفید", "ترامپ"]}
+us_congress: {kind: actor, en: "US Congress", fa: "کنگره آمریکا", aliases: ["congress", "us senate", "کنگره", "سنای آمریکا"]}
+israel: {kind: actor, en: "Israel", fa: "اسرائیل", aliases: ["israel", "israeli", "netanyahu", "idf", "tel aviv", "رژیم صهیونیستی", "نتانیاهو", "تل آویو", "صهیونیست"]}
+china: {kind: actor, en: "China", fa: "چین", aliases: ["china", "chinese", "beijing", "xi jinping", "پکن", "شی جین پینگ"]}
+russia: {kind: actor, en: "Russia", fa: "روسیه", aliases: ["russia", "russian", "moscow", "kremlin", "putin", "مسکو", "کرملین", "پوتین"]}
+saudi_arabia: {kind: actor, en: "Saudi Arabia", fa: "عربستان سعودی", aliases: ["saudi", "riyadh", "aramco", "عربستان", "ریاض", "آرامکو"]}
+uae: {kind: actor, en: "United Arab Emirates", fa: "امارات", aliases: ["uae", "emirates", "dubai", "abu dhabi", "دبی", "ابوظبی"]}
+iraq: {kind: actor, en: "Iraq", fa: "عراق", aliases: ["iraq", "iraqi", "baghdad", "بغداد", "اقلیم کردستان"]}
+turkey: {kind: actor, en: "Turkey", fa: "ترکیه", aliases: ["turkey", "türkiye", "ankara", "erdogan", "آنکارا", "اردوغان"]}
+qatar: {kind: actor, en: "Qatar", fa: "قطر", aliases: ["qatar", "doha", "دوحه"]}
+oman: {kind: actor, en: "Oman", fa: "عمان", aliases: ["oman", "muscat", "مسقط"]}
+pakistan: {kind: actor, en: "Pakistan", fa: "پاکستان", aliases: ["pakistan", "islamabad", "اسلام آباد"]}
+afghanistan: {kind: actor, en: "Afghanistan", fa: "افغانستان", aliases: ["afghanistan", "taliban", "kabul", "طالبان", "کابل"]}
+india: {kind: actor, en: "India", fa: "هند", aliases: ["india", "indian", "new delhi", "دهلی نو"]}
+azerbaijan: {kind: actor, en: "Azerbaijan", fa: "جمهوری آذربایجان", aliases: ["azerbaijan", "baku", "باکو"]}
+armenia: {kind: actor, en: "Armenia", fa: "ارمنستان", aliases: ["armenia", "yerevan", "ایروان"]}
+united_kingdom: {kind: actor, en: "United Kingdom", fa: "بریتانیا", aliases: ["britain", "british", "united kingdom", "london", "انگلیس", "لندن"]}
+france: {kind: actor, en: "France", fa: "فرانسه", aliases: ["france", "french", "paris", "macron", "پاریس", "مکرون"]}
+germany: {kind: actor, en: "Germany", fa: "آلمان", aliases: ["germany", "german", "berlin", "برلین"]}
+japan: {kind: actor, en: "Japan", fa: "ژاپن", aliases: ["japan", "tokyo", "توکیو"]}
+south_korea: {kind: actor, en: "South Korea", fa: "کره جنوبی", aliases: ["south korea", "seoul", "سئول"]}
+syria: {kind: actor, en: "Syria", fa: "سوریه", aliases: ["syria", "damascus", "دمشق"]}
+lebanon: {kind: actor, en: "Lebanon", fa: "لبنان", aliases: ["lebanon", "beirut", "بیروت"]}
+hezbollah: {kind: actor, en: "Hezbollah", fa: "حزب‌الله", aliases: ["hezbollah", "hizbollah", "حزب الله"]}
+hamas_gaza: {kind: actor, en: "Hamas and Gaza", fa: "حماس و غزه", aliases: ["hamas", "gaza", "حماس", "غزه"]}
+houthis: {kind: actor, en: "Houthis (Yemen)", fa: "انصارالله یمن", aliases: ["houthi", "houthis", "yemen", "ansarallah", "حوثی", "یمن", "انصارالله"]}
+
+# ------------------------------------------------------------------ themes: nuclear and sanctions
+nuclear_talks: {kind: theme, en: "Nuclear talks", fa: "مذاکرات هسته‌ای", aliases: ["nuclear talks", "nuclear deal", "nuclear negotiations", "jcpoa", "مذاکرات هسته ای", "برجام", "توافق هسته ای", "مذاکره با آمریکا"]}
+snapback: {kind: theme, en: "Snapback of UN sanctions", fa: "مکانیسم ماشه", aliases: ["snapback", "snap-back", "trigger mechanism", "اسنپ بک", "مکانیزم ماشه", "قطعنامه های شورای امنیت"]}
+uranium_enrichment: {kind: theme, en: "Uranium enrichment", fa: "غنی‌سازی اورانیوم", aliases: ["enrichment", "enriched uranium", "uranium", "غنی سازی", "اورانیوم", "ذخایر اورانیوم"]}
+nuclear_sites: {kind: theme, en: "Nuclear sites", fa: "تأسیسات هسته‌ای", aliases: ["fordow", "natanz", "isfahan nuclear", "nuclear facility", "nuclear facilities", "فردو", "نطنز", "تاسیسات هسته ای"]}
+sanctions: {kind: theme, en: "Sanctions", fa: "تحریم", aliases: ["sanction", "sanctions", "sanctioned", "تحریم", "تحریم ها"]}
+sanctions_relief: {kind: theme, en: "Sanctions relief and waivers", fa: "لغو تحریم", aliases: ["sanctions relief", "waiver", "lifting sanctions", "لغو تحریم", "رفع تحریم", "معافیت تحریمی"]}
+frozen_assets: {kind: theme, en: "Frozen Iranian assets", fa: "دارایی‌های بلوکه‌شده", aliases: ["frozen funds", "frozen assets", "blocked funds", "منابع بلوکه", "پول های بلوکه", "دارایی های مسدود", "منابع ارزی بلوکه"]}
+oil_exports: {kind: theme, en: "Iranian oil exports", fa: "صادرات نفت ایران", aliases: ["oil exports", "crude exports", "oil sales", "teapot refineries", "صادرات نفت", "فروش نفت", "مشتریان نفت ایران"]}
+gas_trade: {kind: theme, en: "Gas exports and swaps", fa: "صادرات گاز", aliases: ["gas exports", "gas swap", "gas pipeline", "سوآپ گاز", "خط لوله گاز", "صادرات گاز"]}
+oil_production: {kind: theme, en: "Oil output and quotas", fa: "تولید نفت", aliases: ["oil output", "oil production", "production cut", "output cut", "تولید نفت", "کاهش تولید", "سهمیه تولید"]}
+
+# ------------------------------------------------------------------ themes: economy and policy
+inflation: {kind: theme, en: "Inflation", fa: "تورم", aliases: ["inflation", "cpi", "consumer prices", "نرخ تورم", "گرانی"]}
+interest_rates: {kind: theme, en: "Interest rates", fa: "نرخ بهره", aliases: ["interest rate", "rate hike", "rate cut", "نرخ سود", "نرخ سود بانکی", "سود بانکی"]}
+liquidity: {kind: theme, en: "Liquidity and money supply", fa: "نقدینگی", aliases: ["liquidity", "money supply", "پایه پولی", "رشد نقدینگی", "خلق پول"]}
+budget_deficit: {kind: theme, en: "Budget and deficit", fa: "بودجه و کسری", aliases: ["budget", "budget deficit", "deficit", "بودجه", "کسری بودجه", "لایحه بودجه"]}
+subsidies: {kind: theme, en: "Subsidies and cash transfers", fa: "یارانه", aliases: ["subsidy", "subsidies", "cash transfer", "یارانه", "کالابرگ", "یارانه نقدی"]}
+fuel_prices: {kind: theme, en: "Fuel prices and quotas", fa: "قیمت سوخت", aliases: ["fuel price", "gasoline price", "fuel subsidy", "قیمت بنزین", "سهمیه بنزین", "بنزین سوم", "کارت سوخت"]}
+price_controls: {kind: theme, en: "Price controls", fa: "قیمت‌گذاری دستوری", aliases: ["price controls", "price cap", "قیمت گذاری دستوری", "تعزیرات", "سقف قیمت"]}
+fx_policy: {kind: theme, en: "Currency policy", fa: "سیاست ارزی", aliases: ["exchange rate policy", "currency policy", "preferential exchange rate", "ارز ترجیحی", "یکسان سازی نرخ ارز", "ارز ۲۸۵۰۰", "نرخ ارز"]}
+redenomination: {kind: theme, en: "Rial redenomination", fa: "حذف صفر از پول ملی", aliases: ["redenomination", "remove zeros", "حذف چهار صفر", "حذف صفر"]}
+taxes: {kind: theme, en: "Taxes", fa: "مالیات", aliases: ["tax", "taxes", "taxation", "مالیات", "مالیات بر ارزش افزوده"]}
+privatization: {kind: theme, en: "Privatization", fa: "خصوصی‌سازی", aliases: ["privatization", "privatisation", "خصوصی سازی", "واگذاری"]}
+trade_balance: {kind: theme, en: "Trade and non-oil exports", fa: "تجارت خارجی", aliases: ["non-oil exports", "trade balance", "imports", "exports", "صادرات غیرنفتی", "تراز تجاری", "واردات", "صادرات"]}
+fx_repatriation: {kind: theme, en: "Export FX repatriation", fa: "بازگشت ارز صادراتی", aliases: ["fx repatriation", "currency repatriation", "رفع تعهد ارزی", "بازگشت ارز"]}
+tariffs: {kind: theme, en: "Tariffs and trade wars", fa: "تعرفه و جنگ تجاری", aliases: ["tariff", "tariffs", "trade war", "تعرفه", "جنگ تجاری"]}
+banking_health: {kind: theme, en: "Banking sector health", fa: "ناترازی بانک‌ها", aliases: ["bank failure", "bank imbalance", "bank run", "ناترازی بانک", "انحلال بانک", "اضافه برداشت بانک"]}
+unemployment: {kind: theme, en: "Jobs and unemployment", fa: "اشتغال و بیکاری", aliases: ["unemployment", "jobless", "jobs report", "nonfarm payrolls", "بیکاری", "اشتغال", "نرخ بیکاری"]}
+wages: {kind: theme, en: "Wages and minimum wage", fa: "دستمزد", aliases: ["minimum wage", "wages", "salaries", "حداقل دستمزد", "حقوق کارمندان", "افزایش حقوق"]}
+pensions: {kind: theme, en: "Pensions and retirees", fa: "بازنشستگان", aliases: ["pension", "pensions", "retirees", "بازنشستگی", "صندوق بازنشستگی", "متناسب سازی"]}
+growth_recession: {kind: theme, en: "Growth and recession", fa: "رشد اقتصادی و رکود", aliases: ["gdp", "economic growth", "recession", "رشد اقتصادی", "رکود", "تولید ناخالص داخلی"]}
+capital_flight: {kind: theme, en: "Capital flight and emigration", fa: "خروج سرمایه", aliases: ["capital flight", "brain drain", "خروج سرمایه", "مهاجرت نخبگان"]}
+crypto_regulation: {kind: theme, en: "Crypto mining and regulation", fa: "استخراج و مقررات رمزارز", aliases: ["crypto mining", "mining farm", "crypto regulation", "ماینر", "ماینینگ", "استخراج رمزارز"]}
+car_imports: {kind: theme, en: "Car imports", fa: "واردات خودرو", aliases: ["car imports", "vehicle imports", "واردات خودرو", "خودروهای وارداتی"]}
+transit_corridors: {kind: theme, en: "Transit corridors and ports", fa: "کریدورهای ترانزیتی", aliases: ["chabahar", "north-south corridor", "instc", "bandar abbas", "transit", "چابهار", "کریدور شمال جنوب", "ترانزیت", "بندرعباس", "بندر شهید رجایی"]}
+
+# ------------------------------------------------------------------ themes: security and geopolitics
+strait_of_hormuz: {kind: theme, en: "Strait of Hormuz", fa: "تنگه هرمز", aliases: ["hormuz", "strait of hormuz", "هرمز"]}
+gulf_shipping: {kind: theme, en: "Gulf shipping and tankers", fa: "کشتیرانی خلیج فارس", aliases: ["tanker", "tankers", "tanker seizure", "persian gulf", "نفتکش", "توقیف نفتکش", "خلیج فارس"]}
+red_sea: {kind: theme, en: "Red Sea and Bab el-Mandeb", fa: "دریای سرخ", aliases: ["red sea", "bab el-mandeb", "باب المندب"]}
+military_strikes: {kind: theme, en: "Military strikes", fa: "حمله نظامی", aliases: ["airstrike", "air strike", "missile attack", "drone attack", "military strike", "bombing", "حمله نظامی", "حمله موشکی", "حمله پهپادی", "پهپاد", "موشک"]}
+war: {kind: theme, en: "War and escalation", fa: "جنگ و تنش", aliases: ["war", "escalation", "retaliation", "جنگ", "تنش نظامی", "انتقام", "تشدید تنش"]}
+ceasefire: {kind: theme, en: "Ceasefire", fa: "آتش‌بس", aliases: ["ceasefire", "truce", "آتش بس"]}
+terrorism: {kind: theme, en: "Terror attacks", fa: "حمله تروریستی", aliases: ["terror attack", "terrorist", "تروریستی", "تروریست"]}
+assassination: {kind: theme, en: "Assassinations", fa: "ترور", aliases: ["assassination", "assassinated", "ترور"]}
+cyberattacks: {kind: theme, en: "Cyberattacks", fa: "حمله سایبری", aliases: ["cyberattack", "cyber attack", "hackers", "حمله سایبری", "هکرها"]}
+internet_restrictions: {kind: theme, en: "Internet restrictions", fa: "محدودیت اینترنت", aliases: ["internet shutdown", "internet restrictions", "filtering", "فیلترینگ", "قطعی اینترنت", "محدودیت اینترنت"]}
+espionage_arrests: {kind: theme, en: "Espionage and security arrests", fa: "جاسوسی و بازداشت امنیتی", aliases: ["espionage", "spy", "spying", "جاسوس", "جاسوسی"]}
+elections: {kind: theme, en: "Elections", fa: "انتخابات", aliases: ["election", "elections", "انتخابات"]}
+
+# ------------------------------------------------------------------ themes: society and disasters
+labour_strikes: {kind: theme, en: "Labour strikes", fa: "اعتصاب", aliases: ["walkout", "labor strike", "labour strike", "workers strike", "truckers strike", "اعتصاب", "تجمع کارگران"]}
+protests: {kind: theme, en: "Protests", fa: "اعتراضات", aliases: ["protest", "protests", "protesters", "demonstration", "اعتراض", "اعتراضات", "تجمع اعتراضی", "اغتشاش"]}
+earthquakes: {kind: theme, en: "Earthquakes", fa: "زلزله", aliases: ["earthquake", "quake", "زمین لرزه"]}
+floods: {kind: theme, en: "Floods", fa: "سیل", aliases: ["flood", "floods", "flooding", "سیلاب"]}
+drought_water: {kind: theme, en: "Drought and water crisis", fa: "بحران آب", aliases: ["drought", "water shortage", "water crisis", "خشکسالی", "کم آبی", "بحران آب", "سد"]}
+energy_shortages: {kind: theme, en: "Power and gas shortages", fa: "ناترازی انرژی", aliases: ["power outage", "blackout", "gas shortage", "power cuts", "ناترازی انرژی", "ناترازی گاز", "قطعی برق", "خاموشی", "جیره بندی برق"]}
+air_pollution: {kind: theme, en: "Air pollution and closures", fa: "آلودگی هوا", aliases: ["air pollution", "smog", "آلودگی هوا", "تعطیلی ادارات"]}
+industrial_accidents: {kind: theme, en: "Explosions and industrial accidents", fa: "انفجار و حوادث صنعتی", aliases: ["explosion", "blast", "refinery fire", "انفجار", "آتش سوزی", "حادثه معدن"]}
+epidemics: {kind: theme, en: "Epidemics", fa: "بیماری‌های همه‌گیر", aliases: ["epidemic", "outbreak", "pandemic", "covid", "cholera", "کرونا", "وبا", "همه گیری"]}

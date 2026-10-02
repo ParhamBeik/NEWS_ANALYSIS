@@ -12,7 +12,7 @@ def review(make_article):
     event = attach_article(make_article())
     event.articles.add(make_article())
     NewsEvent.objects.filter(pk=event.pk).update(
-        category="markets", iran_score=50, global_score=75, assessment_confidence=0.5
+        category="markets_companies", iran_score=50, global_score=75, assessment_confidence=0.5
     )
     return EventReview.objects.create(event=event, reason="high_impact_uncertain")
 
@@ -41,8 +41,8 @@ def test_queue_agree_split_and_session_stats(user, review, django_assert_max_num
         queue = api.get("/api/review/queue/?limit=25").json()
     card = queue["results"][0]
     assert queue["pending"] == 1
-    assert (card["id"], card["iran_tier"], card["global_tier"], card["category"]) == (
-        review.event_id, 2, 3, "markets",
+    assert (card["id"], card["iran_level"], card["global_level"], card["category"]) == (
+        review.event_id, 2, 3, "markets_companies",
     )
     assert len(card["articles"]) == 2
 

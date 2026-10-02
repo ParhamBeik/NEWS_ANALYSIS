@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 RUN_KEY_TTL = 60 * 60 * 24
 DAY_KEY_TTL = 60 * 60 * 48
 MONTH_KEY_TTL = 60 * 60 * 24 * 35
+# Degradation order: briefs and storyline names are optional prose, decisions are the
+# product. Past this share of the monthly ceiling optional calls stop, so the rest of the
+# month's money goes to decisions until the hard cap.
+OPTIONAL_SHARE = 0.8
 # Maximum charge of one reader/legacy call is far below $1 at the configured
 # input/output bounds. Reserving $1 makes the month guard safe across workers.
 MONTH_CALL_RESERVE_USD = 1.0
@@ -181,6 +185,15 @@ def check(run_id: str) -> None:
         )
     if month_spend() >= settings.NEWS_MONTHLY_BUDGET_USD:
         raise BudgetExceeded("monthly AI budget exhausted")
+
+
+def check_optional() -> None:
+    """Refuse an optional call (brief, storyline name) past OPTIONAL_SHARE of the month."""
+    limit = OPTIONAL_SHARE * settings.NEWS_MONTHLY_BUDGET_USD
+    if month_spend() >= limit:
+        raise BudgetExceeded(
+            f"monthly spend past ${limit:.2f}: optional calls stop, decisions continue"
+        )
 
 
 def charge(run_id: str, usage: Usage) -> Spend:

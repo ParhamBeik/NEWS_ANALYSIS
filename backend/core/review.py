@@ -1,7 +1,7 @@
 """Swipe review of Jev's event judgments: queue order, decisions, and agreement.
 
 Scores are 0-100 but Jev answers on a 0-4 scale (stored as x25), so a reviewer judges the
-same five tiers the model chose between. Agreement is measured on tiers, not raw scores.
+same five levels the model chose between. Agreement is measured on levels, not raw scores.
 """
 
 from __future__ import annotations
@@ -13,7 +13,8 @@ from django.db.models import Case, Exists, F, IntegerField, OuterRef, Value, Whe
 from django.utils import timezone
 
 from articles.models import EventReview, EventRevision
-from core.vocabulary import EVENT_CATEGORIES, LEVELS
+from core.tiers import band
+from core.vocabulary import EVENT_CATEGORIES, LEVELS, event_topic
 
 SESSION_SIZE = 25
 HIGH_IMPACT_UNCERTAIN = "high_impact_uncertain"
@@ -24,10 +25,13 @@ ACTIONS = ("agree", "fix", "skip", "undo")
 
 
 def score_tier(score: int | None) -> int | None:
-    """0-100 score to tier index 0-4 (LEVELS order); None stays None."""
-    if score is None:
-        return None
-    return min(len(LEVELS) - 1, max(0, (score + 12) // 25))
+    """0-100 score to the reviewer's level index 0-4 (LEVELS order); None stays None.
+
+    The fixed band from core.tiers, minus one. Agreement must not use the relative reader
+    tier: its cut-offs move with the month, which would rewrite past agreement rates.
+    """
+    tier = band(score)
+    return None if tier is None else tier - 1
 
 
 def tier_score(tier: int) -> int:
@@ -159,7 +163,9 @@ def review_stats(*, since=None, reviewer=None) -> dict:
     per_category = defaultdict(lambda: {"reviewed": 0, "agreed": 0, "category": 0, "tier": 0})
     for row in rows:
         category, iran, global_ = _model_judgment(row)
-        category_ok = category == row.reviewed_category
+        # Older rows hold the pre-investor-topic slugs; compare in today's vocabulary.
+        category = event_topic(category)
+        category_ok = category == event_topic(row.reviewed_category)
         tier_ok = score_tier(iran) == score_tier(row.reviewed_iran_score) and score_tier(
             global_
         ) == score_tier(row.reviewed_global_score)

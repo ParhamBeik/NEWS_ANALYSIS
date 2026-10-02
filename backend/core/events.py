@@ -14,11 +14,14 @@ from articles.models import (
     EventAlert,
     EventAssessment,
     EventRevision,
+    EventWatchItem,
+    GroupingDecision,
     NewsEvent,
     UrlStatus,
 )
 from core.actions import log_action
 
+NOT_SAME = GroupingDecision.Decision.NOT_SAME
 PRESENTATION_FIELDS = (
     "title_fa", "title_en", "brief_fa", "brief_en", "channels_fa", "channels_en",
     "uncertainty_fa", "uncertainty_en",
@@ -41,13 +44,16 @@ def invalidate_presentation(event: NewsEvent, reason: str) -> None:
 def attach_article(article: Article) -> NewsEvent:
     """Attach copies to the canonical story without discarding article provenance."""
     canonical_id = article.duplicate_of_id or article.id
-    event = (
+    candidates = (
         NewsEvent.objects.filter(
             Q(articles__id=canonical_id) | Q(articles__duplicate_of_id=canonical_id)
         )
+        .exclude(pk__in=GroupingDecision.objects.filter(article=article, decision=NOT_SAME)
+                 .values("event"))
         .distinct()
-        .first()
     )
+    # A copy staff split out keeps its own event rather than following its canonical.
+    event = candidates.filter(articles=article).first() or candidates.first()
     if event is None:
         canonical = Article.objects.get(pk=canonical_id)
         event, _ = NewsEvent.objects.get_or_create(
@@ -72,11 +78,36 @@ def attach_article(article: Article) -> NewsEvent:
     return event
 
 
+def kept_apart(event_id: int) -> set[int]:
+    """Events staff ruled are a different occurrence from this one, in either direction."""
+    rulings = GroupingDecision.objects.filter(decision=NOT_SAME)
+    against_ours = rulings.filter(article__news_events=event_id).values_list("event", flat=True)
+    ours_against = NewsEvent.objects.filter(
+        articles__grouping_decisions__in=rulings.filter(event_id=event_id)
+    ).values_list("id", flat=True)
+    return set(against_ours) | set(ours_against)
+
+
+def evidence_level(articles, current: str = "") -> str:
+    """single / multi / official from distinct source groups; `disputed` is staff-set.
+
+    Outlets in one independence group (e.g. state agencies that copy each other) count
+    once. Until sources carry `independence_group`, each source is its own group.
+    """
+    if current == NewsEvent.Evidence.DISPUTED:
+        return current
+    groups = {getattr(a.source, "independence_group", "") or a.source.name for a in articles}
+    if any(group.startswith("official") for group in groups):
+        return NewsEvent.Evidence.OFFICIAL
+    return NewsEvent.Evidence.MULTI if len(groups) > 1 else NewsEvent.Evidence.SINGLE
+
+
 def refresh_event(event: NewsEvent) -> None:
-    """Keep the timeline and correction state in sync with source observations."""
-    articles = list(event.articles.all())
+    """Keep the timeline, correction state and evidence level in sync with the sources."""
+    articles = list(event.articles.select_related("source"))
     if not articles:
         return
+    event.evidence_level = evidence_level(articles, event.evidence_level)
     event.event_time = min(a.published_at or a.fetched_at for a in articles)
     event.first_seen_at = min(a.created_at or a.fetched_at for a in articles)
     if all(a.url_status == UrlStatus.GONE for a in articles):
@@ -85,7 +116,9 @@ def refresh_event(event: NewsEvent) -> None:
         event.status = NewsEvent.Status.CORRECTED
     elif event.assessments.exists():
         event.status = NewsEvent.Status.ASSESSED
-    event.save(update_fields=["event_time", "first_seen_at", "status", "updated_at"])
+    event.save(
+        update_fields=["event_time", "first_seen_at", "status", "evidence_level", "updated_at"]
+    )
 
 
 @transaction.atomic
@@ -102,6 +135,9 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
     target, incoming = rows.get(target_id), rows.get(incoming_id)
     if target is None or incoming is None:
         return target or incoming
+    if target_id in kept_apart(incoming_id):
+        log_action("event.merge", "refused_by_staff_split", event=target_id, incoming=incoming_id)
+        return incoming
     had_presentation = bool(target.brief_fa)
     if had_presentation:
         invalidate_presentation(target, "event_merge")
@@ -119,6 +155,14 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
             retained.sent_at = alert.sent_at
             retained.save(update_fields=["sent_at"])
     EventAssessment.objects.filter(event=incoming).update(event=target)
+    for item_id in EventWatchItem.objects.filter(event=incoming).values_list("item", flat=True):
+        EventWatchItem.objects.get_or_create(event=target, item_id=item_id)
+    # A ruling against the absorbed event now holds against the event that absorbed it.
+    for ruling in GroupingDecision.objects.filter(event=incoming):
+        GroupingDecision.objects.get_or_create(
+            article_id=ruling.article_id, event=target,
+            defaults={"decision": ruling.decision, "decided_by_id": ruling.decided_by_id},
+        )
     target.articles.add(*incoming.articles.all())
     incoming.delete()
     refresh_event(target)
@@ -130,11 +174,12 @@ def merge_events(target_id: int, incoming_id: int) -> NewsEvent:
 
 
 @transaction.atomic
-def split_article_from_event(event_id: int, article_id: int) -> NewsEvent:
+def split_article_from_event(event_id: int, article_id: int, user=None) -> NewsEvent:
     """Undo a wrong grouping: move one report, with its own copies, into a new event.
 
     The remaining event keeps its assessments and review; the new one is unassessed and
-    queued for Jev like any fresh story.
+    queued for Jev like any fresh story. The ruling is stored so grouping never re-merges
+    the two.
     """
     event = NewsEvent.objects.select_for_update().get(pk=event_id)
     members = list(event.articles.all())
@@ -159,6 +204,10 @@ def split_article_from_event(event_id: int, article_id: int) -> NewsEvent:
         first_seen_at=article.created_at or timezone.now(),
     )
     split.articles.add(*moving)
+    GroupingDecision.objects.update_or_create(
+        article=article, event=event,
+        defaults={"decision": NOT_SAME, "decided_by": user},
+    )
     refresh_event(split)
     refresh_event(event)
     had_presentation = bool(event.brief_fa)
