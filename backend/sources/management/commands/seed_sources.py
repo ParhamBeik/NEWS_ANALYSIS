@@ -11,7 +11,14 @@ from pathlib import Path
 import yaml
 from django.core.management.base import BaseCommand, CommandError
 
-from sources.models import Source, Strategy
+from sources.models import (
+    AGGREGATOR_GROUP,
+    Language,
+    LicenseMode,
+    Source,
+    SourceRole,
+    Strategy,
+)
 
 DEFAULT_FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "sources.yaml"
 
@@ -45,6 +52,24 @@ class Command(BaseCommand):
                 raise CommandError(
                     f"{name}: unknown strategy {strategy!r}; choose from {sorted(valid)}"
                 )
+            language = entry.get("language", Language.FA)
+            license_mode = entry.get("license_mode", LicenseMode.FULL)
+            role = entry.get("role", SourceRole.PRIMARY)
+            group = entry.get("independence_group", "")
+            for field, value, choices in (
+                ("language", language, Language),
+                ("license_mode", license_mode, LicenseMode),
+                ("role", role, SourceRole),
+            ):
+                if value not in choices.values:
+                    raise CommandError(
+                        f"{name}: unknown {field} {value!r}; choose from {choices.values}"
+                    )
+            if (role == SourceRole.AGGREGATOR) != (group == AGGREGATOR_GROUP):
+                # Half-labelled aggregators would count as independent confirmation.
+                raise CommandError(
+                    f"{name}: role aggregator and group {AGGREGATOR_GROUP!r} go together"
+                )
             _, created = Source.objects.update_or_create(
                 name=name,
                 defaults={
@@ -56,6 +81,10 @@ class Command(BaseCommand):
                     "priority": entry.get("priority", 50),
                     "enabled": entry.get("enabled", True),
                     "public_image_allowed": entry.get("public_image_allowed", False),
+                    "language": language,
+                    "independence_group": group,
+                    "license_mode": license_mode,
+                    "role": role,
                 },
             )
             created_count += created

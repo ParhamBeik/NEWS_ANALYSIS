@@ -13,6 +13,7 @@ point of the health field.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -21,11 +22,11 @@ from django.utils import timezone
 
 from articles.ingest import upsert
 from articles.models import ImageStatus
-from core.errors import Permanent, Transient
+from core.errors import Permanent, Transient, error_class
 
 from . import strategies
 from .extraction import build_session
-from .models import CrawlAttempt, Source
+from .models import CoverageInterval, CrawlAttempt, FetchRetry, Source
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +96,19 @@ def crawl_source(self, source_name: str, limit: int | None = None, run_id: str =
         # Store the class, not arbitrary HTTP exception text that can contain credentials.
         attempt.status = "failed"
         attempt.error = type(exc).__name__
+        attempt.error_class = error_class(exc)
         source.mark_degraded(attempt.error)
         raise
     finally:
         attempt.finished_at = timezone.now()
-        attempt.save(update_fields=["status", "error", "finished_at"])
+        attempt.save(update_fields=["status", "error", "error_class", "finished_at"])
+        covered = attempt.status in {"success", "partial"}
+        CoverageInterval.record(
+            source,
+            CoverageInterval.COVERED if covered else CoverageInterval.GAP,
+            "" if covered else attempt.error_class,
+            now=attempt.finished_at,
+        )
     return stats
 
 
@@ -165,9 +174,46 @@ def _crawl(source, limit, run_id, attempt):
         attempt.error = (
             "Some articles could not be stored" if stats["failed"] else "No articles found"
         )
+        if not stats["fetched"]:
+            # The page answered but nothing parsed: a redesign, not an outage.
+            attempt.error_class = "parse"
         source.mark_degraded(attempt.error)
     logger.info("crawl %s: %s", source.name, stats)
     return stats
+
+
+GAVE_UP_KEPT_FOR = timedelta(days=30)
+
+
+@shared_task(name="sources.drain_fetch_retries")
+def drain_fetch_retries(limit: int = 50) -> dict:
+    """Fetch article pages whose first attempt failed transiently, once they are due.
+
+    No Celery retry here: each row carries its own backoff, so a task retry would only
+    refetch rows that already failed this pass. Gave-up rows stay a month for /ops, then go.
+    """
+    now = timezone.now()
+    due = list(
+        FetchRetry.objects.filter(gave_up=False, next_at__lte=now, source__enabled=True)
+        .select_related("source")[:limit]
+    )
+    counts = {"stored": 0, "rescheduled": 0, "gave_up": 0}
+    with build_session() as session:
+        for retry in due:
+            try:
+                raw = strategies.fetch_one(retry.source, session, retry.url)
+                with transaction.atomic():
+                    article, created = upsert(raw, retry.source, f"retry-{retry.pk}")
+            except Exception as exc:
+                counts[retry.failed(exc, now)] += 1
+                continue
+            retry.delete()
+            counts["stored"] += 1
+            if created:
+                _queue_image(article)
+    FetchRetry.objects.filter(gave_up=True, updated_at__lt=now - GAVE_UP_KEPT_FOR).delete()
+    logger.info("fetch retries: %s", counts)
+    return counts
 
 
 @shared_task(name="sources.crawl_all")

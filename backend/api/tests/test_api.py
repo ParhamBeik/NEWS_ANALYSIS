@@ -766,3 +766,13 @@ def test_token_auth_works_for_a_server_side_fetch():
     assert "token" in token
     api.credentials(HTTP_AUTHORIZATION=f"Token {token['token']}")
     assert api.get("/api/auth/me/").json()["username"] == user.username
+
+
+@pytest.mark.django_db
+def test_coverage_is_staff_only(client, source):
+    assert client.get("/api/coverage/").status_code == 403
+    staff = APIClient()
+    staff.force_authenticate(user=get_user_model()(is_staff=True, is_active=True))
+    response = staff.get("/api/coverage/")
+    assert response.status_code == 200
+    assert response.json()["sources"][0]["name"] == source.name

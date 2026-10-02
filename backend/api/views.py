@@ -40,7 +40,7 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from articles.models import Article, EventReview, NewsEvent, UrlStatus
-from core.collection import analysis_summary, collection_summary
+from core.collection import analysis_summary, collection_summary, coverage_summary
 from core.events import priority_visibility, split_article_from_event
 from core.review import SESSION_SIZE, record_decision, review_queue, review_stats, score_tier
 from core.vocabulary import AXES
@@ -140,6 +140,15 @@ class CollectionView(APIView):
         if days not in (1, 7, 14, 30):
             raise ValidationError({"days": "choose 1, 7, 14, or 30"})
         return Response(collection_summary(days))
+
+
+class CoverageView(APIView):
+    """Staff only: ownership groups and failure classes are operational detail."""
+
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        return Response(coverage_summary())
 
 
 class AnalysisSummaryView(APIView):

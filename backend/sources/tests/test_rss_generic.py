@@ -20,3 +20,16 @@ def test_generic_feed_extracts_provenance(xml):
     assert rows[0].url == "https://example.org/a"
     assert rows[0].title == "Rate decision today"
     assert rows[0].extraction_tier == "feed"
+
+
+def test_a_bom_outranks_a_header_without_charset():
+    """federalreserve.gov sends a UTF-8 BOM under a bare `text/xml` header."""
+    from sources import extraction
+
+    response = type("Response", (), {"status_code": 200, "encoding": "ISO-8859-1",
+                                     "raise_for_status": lambda self: None,
+                                     "close": lambda self: None})()
+    body = b"\xef\xbb\xbf<?xml version='1.0'?><rss><channel/></rss>"
+    with patch.object(extraction, "open_checked", return_value=response), \
+            patch.object(extraction, "read_capped", return_value=body):
+        assert extraction.fetch_text(None, "https://example.org/rss").startswith("<?xml")
