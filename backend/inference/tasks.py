@@ -84,9 +84,10 @@ ASSESS_FAILURE_TTL = 7 * 24 * 3600
 def assess_event(self, event_id: int) -> dict:
     """Fast event assessment, independent of the legacy 30-minute analyst pipeline.
 
-    A failed answer is still billed, and the sweep retries every unassessed event every
-    5 minutes, so the same evidence gets ASSESS_ATTEMPTS provider calls and then waits
-    for new evidence (a correction changes the digest) or for the counter to expire.
+    A bad answer is still billed, and the sweep retries every unassessed event every
+    5 minutes, so the same evidence gets ASSESS_ATTEMPTS answered-but-unusable calls and
+    then waits for new evidence (a correction changes the digest) or for the counter to
+    expire. Outages (Transient, Fatal) do not count.
     """
     event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
     if event is None:
@@ -152,7 +153,11 @@ def _assess(event, article, evidence: str, digest: str, failures: str) -> dict:
         return {"status": "unassessed", "reason": "budget_or_credits"}
     except (Fatal, Permanent, Transient) as exc:
         record_ai_failure("jev", failure_kind(exc))
-        _count_failure(failures)
+        # Transient (network, 429, 5xx) and Fatal (auth) release their reservation and are
+        # not billed: an outage must not use up an event's attempts. Permanent is billed or
+        # a deterministic rejection that a retry would only repeat.
+        if isinstance(exc, Permanent):
+            _count_failure(failures)
         if isinstance(exc, Transient):
             raise
         logger.warning("event assessment unavailable for %s: %s", event_id, exc)

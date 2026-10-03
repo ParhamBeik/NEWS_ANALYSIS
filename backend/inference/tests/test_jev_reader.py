@@ -262,3 +262,19 @@ def test_a_failing_event_stops_buying_answers_until_its_evidence_changes(make_ar
         cache.add(f"jev-running:{event.id}", 1)
         assert assess_event.run(event.id)["status"] == "in_progress"
         assert call.call_count == ASSESS_ATTEMPTS + 1
+
+
+def test_an_outage_does_not_use_up_an_events_attempts(make_article):
+    from core.errors import Transient
+    from inference.tasks import ASSESS_ATTEMPTS
+
+    event = attach_article(make_article())
+    with override_settings(TYPESAFE_API_KEY="test-key"), \
+            patch("inference.jev.decide", side_effect=Transient("429")):
+        for _ in range(ASSESS_ATTEMPTS + 1):
+            with pytest.raises(Transient):
+                assess_event.run(event.id)
+    with override_settings(TYPESAFE_API_KEY="test-key"), \
+            patch("inference.jev.decide", side_effect=Permanent("400")) as call:
+        assess_event.run(event.id)
+        assert call.call_count == 1

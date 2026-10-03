@@ -77,7 +77,9 @@ def attach_article(article: Article) -> NewsEvent:
     elif (
         event.primary_article_id != canonical_id
         # A split-out copy's canonical leads another event; primary_article is one-to-one.
-        and event.articles.filter(pk=canonical_id).exists()
+        and not NewsEvent.objects.filter(primary_article_id=canonical_id)
+        .exclude(pk=event.pk)
+        .exists()
     ):
         event.primary_article_id = canonical_id
         event.save(update_fields=["primary_article", "updated_at"])

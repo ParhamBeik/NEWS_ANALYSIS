@@ -164,3 +164,17 @@ def test_split_of_the_primary_promotes_the_remaining_report(make_article):
         split_article_from_event(event.pk, other.pk)
     with pytest.raises(ValueError):
         split_article_from_event(event.pk, first.pk)
+
+
+
+def test_a_better_new_copy_still_becomes_the_events_primary(make_article):
+    from articles.dedupe import Match, link
+
+    incumbent = make_article(content="short")
+    event = attach_article(incumbent)
+    better = make_article(content="much longer body " * 20)
+    link(better, Match(article_id=incumbent.id, score=0.95, reason="title"))
+    better.refresh_from_db()
+    assert attach_article(better).pk == event.pk
+    event.refresh_from_db()
+    assert event.primary_article_id == better.id

@@ -191,4 +191,8 @@ class TestUpsert:
                 django_capture_on_commit_callbacks(execute=True):
             upsert(raw(title="کوتاه"), source)
             upsert(raw(title="کوتاه", extraction_tier=ExtractionTier.CSS, content="متن تازه."), source)
-        queued.assert_not_called()
+            queued.assert_not_called()
+            # A correction that fixes the text clears the flag and is assessed.
+            fixed, _ = upsert(raw(extraction_tier=ExtractionTier.CSS, content="متن کامل."), source)
+        assert fixed.quality_flag == ""
+        queued.assert_called_once()

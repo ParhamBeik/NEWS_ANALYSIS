@@ -112,6 +112,8 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
                 lead=clean(raw.lead),
                 content=raw.content,
                 content_hash=raw.content_hash,
+                # The flag describes the text; a fuller correction can clear it.
+                quality_flag=quality_reason(raw),
                 url_status=UrlStatus.LIVE,
                 gone_at=None,
                 gone_http_status=None,
