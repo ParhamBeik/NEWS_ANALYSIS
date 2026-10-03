@@ -10,6 +10,7 @@ import {
 } from "@/components/primitives";
 import { ApiError, apiGet } from "@/lib/api";
 import { AXIS_LABEL, tehranTime } from "@/lib/display";
+import { staffDenied } from "@/components/StaffGate";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,8 @@ function Provenance({ row }) {
 }
 
 export default async function ArticlePage({ params }) {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const { id } = await params;
   if (!/^[1-9]\d*$/.test(id)) notFound();
 

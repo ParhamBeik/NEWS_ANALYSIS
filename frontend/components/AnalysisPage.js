@@ -4,8 +4,11 @@ import { apiGet } from "@/lib/api";
 import { number, tehranTime } from "@/lib/display";
 import { language, label } from "@/lib/language";
 import { Card, CircuitBanner, Metric, SectionTitle } from "@/components/primitives";
+import { staffDenied } from "@/components/StaffGate";
 
 export default async function AnalysisPage({ stage }) {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const classified = stage === "classification";
   const [summary, articles, lang] = await Promise.all([
     apiGet(`/api/analysis-summary/?stage=${stage}`),

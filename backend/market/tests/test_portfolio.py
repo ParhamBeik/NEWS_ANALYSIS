@@ -108,6 +108,7 @@ def test_macro_endpoint_groups_tiles_with_quotes_and_sparklines():
 def test_market_source_portfolio_routes_tgju_symbols_through_portfolio(user):
     series = {"provider": "Portfolio", "caveats": [], "points": [
         {"observed_at": "2026-10-01T00:00:00+03:30", "price": "98"}]}
+    user.is_staff = True  # /api/market/ is a staff dashboard; the public timeline is not.
     client = APIClient()
     client.force_authenticate(user)
     with patch("market.portfolio.requests.get", return_value=_response(series)) as get:

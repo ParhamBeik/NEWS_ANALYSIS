@@ -19,9 +19,11 @@ export async function GET(request, { params }) {
   const segments = Array.isArray(name) ? name : [name];
   const path = segments.map(encodeURIComponent).join("/");
   const upstream = await apiFetch(`/api/exports/${path}/`);
-  if (upstream.status === 401 || upstream.status === 403) {
+  if (upstream.status === 401) {
     redirect("/login?next=" + encodeURIComponent("/exports"));
   }
+  // Signed in but not staff: sending them to /login would loop straight back here.
+  if (upstream.status === 403) return new Response("Forbidden", { status: 403 });
   if (!upstream.ok) {
     return new Response("Not found", { status: upstream.status });
   }

@@ -1,11 +1,14 @@
 import { Card, Metric, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { AXIS_LABEL, number, percent } from "@/lib/display";
+import { staffDenied } from "@/components/StaffGate";
 
 export const metadata = { title: "Quality · News Intelligence" };
 export const dynamic = "force-dynamic";
 
 export default async function KPIPage() {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const kpi = await apiGet("/api/kpi/");
   const confusion = kpi.notify_confusion;
   const missed = confusion.fn;

@@ -34,7 +34,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
@@ -163,6 +163,8 @@ class AnalysisSummaryView(APIView):
 
 
 class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
         account = Account.objects.filter(user=request.user).first()
         phone = account.phone if account else None
@@ -229,6 +231,8 @@ class LogoutView(APIView):
 
     Idempotent: signing out twice is a normal thing to do, not an error.
     """
+
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         Token.objects.filter(key=getattr(request.auth, "key", None)).delete()

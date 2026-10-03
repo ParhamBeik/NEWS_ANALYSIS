@@ -173,9 +173,11 @@ MEDIA_ROOT = Path(env("MEDIA_ROOT", str(BASE_DIR / "media")))
 # ----------------------------------------------------------------------------- rest api
 
 REST_FRAMEWORK = {
-    # The whole product is behind one login; an endpoint that forgets to declare a
-    # permission class must fail closed, not serve the corpus to the internet.
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # Fail closed to STAFF. Phone OTP made "signed in" mean "any reader", so an endpoint
+    # that forgets to declare a permission class must not hand the corpus, the exports or
+    # the ops numbers to whoever signs up. Reader endpoints opt in explicitly: AllowAny
+    # (api.public.ReaderView) or IsAuthenticated (api.accounts.MemberView, auth/me, logout).
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAdminUser"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",

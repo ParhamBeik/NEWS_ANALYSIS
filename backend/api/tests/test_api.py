@@ -289,6 +289,12 @@ class TestAuthentication:
 
 
 class TestFeed:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_card_carries_the_persian_value_and_an_english_label(self, client, article, variant):
         """The stored value must survive the round trip unchanged - it is the only string
         the team's Excel dropdown accepts. The English gloss rides alongside, never
@@ -342,6 +348,12 @@ class TestFeed:
 
 
 class TestMarket:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_outcomes_follow_the_selected_price_symbol(self, client, article, variant):
         from market.models import PredictionOutcome, Symbol
 
@@ -362,6 +374,12 @@ class TestMarket:
 
 
 class TestNoNPlusOne:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_feed_query_count_does_not_grow_with_the_page(
         self, client, django_assert_max_num_queries, make_article, variant
     ):
@@ -422,6 +440,12 @@ class TestNoNPlusOne:
 
 
 class TestNotifyFilterMatchesTheRule:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_dashboard_counts_all_states_with_one_evaluation_query(
         self, make_article, variant, django_assert_num_queries
     ):
@@ -628,6 +652,12 @@ class TestReview:
 
 
 class TestKPI:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_agreement_ignores_axes_the_human_left_blank(self, client, article, variant):
         """Counting a blank human field as a disagreement would punish the model for the
         reviewer's omission and make the metric drift with reviewer fatigue."""
@@ -676,6 +706,12 @@ class TestKPI:
 
 
 class TestExports:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_a_traversing_filename_cannot_escape_the_export_directory(
         self, client, settings, tmp_path
     ):
@@ -718,6 +754,12 @@ class TestExports:
 
 
 class TestOps:
+    @pytest.fixture
+    def client(self, staff_client):
+        """A staff dashboard endpoint. Readers get 403 here; see
+        test_staff_dashboards_are_closed_to_signed_in_readers."""
+        return staff_client
+
     def test_the_funnel_and_the_budget_are_reported_together(self, client, make_article):
         """Throughput without spend is the number that lets a runaway run look healthy."""
         canonical = make_article()
@@ -776,3 +818,23 @@ def test_coverage_is_staff_only(client, source):
     response = staff.get("/api/coverage/")
     assert response.status_code == 200
     assert response.json()["sources"][0]["name"] == source.name
+
+
+STAFF_DASHBOARDS = (
+    "/api/articles/", "/api/sources/", "/api/runs/", "/api/variants/", "/api/collection/",
+    "/api/analysis-summary/", "/api/feed-stats/", "/api/ops/", "/api/kpi/", "/api/market/",
+    "/api/exports/", "/api/exports/anything.xlsx/",
+)
+READER_ACCOUNT = (
+    "/api/auth/me/", "/api/account/", "/api/account/watchlist/", "/api/account/inbox/",
+)
+
+
+@pytest.mark.django_db
+def test_staff_dashboards_are_closed_to_signed_in_readers(client):
+    """Phone OTP lets anyone become a signed-in user. The corpus, the exports, the run
+    costs and the prompt variants (which would unblind A/B judging) stay staff-only."""
+    for path in STAFF_DASHBOARDS:
+        assert client.get(path).status_code == 403, path
+    for path in READER_ACCOUNT:
+        assert client.get(path).status_code == 200, path

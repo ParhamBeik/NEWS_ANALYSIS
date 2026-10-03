@@ -1,6 +1,7 @@
 import { Card, EmptyState, SectionTitle, TableScroll } from "@/components/primitives";
 import { apiGet } from "@/lib/api";
 import { tehranTime } from "@/lib/display";
+import { staffDenied } from "@/components/StaffGate";
 
 export const metadata = { title: "Exports · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -12,6 +13,8 @@ function size(bytes) {
 }
 
 export default async function ExportsPage() {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const files = await apiGet("/api/exports/");
 
   return (

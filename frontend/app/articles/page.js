@@ -6,6 +6,7 @@ import { EmptyState, QueryError } from "@/components/primitives";
 import { ApiError, apiGet, query } from "@/lib/api";
 import { number } from "@/lib/display";
 import { language, label } from "@/lib/language";
+import { staffDenied } from "@/components/StaffGate";
 
 export const metadata = { title: "Articles · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -141,6 +142,8 @@ async function FeedList({ params, offset, lang }) {
 }
 
 export default async function FeedPage({ searchParams }) {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const params = (await searchParams) || {};
   const offset = Number(params.offset || 0);
   const lang = await language();

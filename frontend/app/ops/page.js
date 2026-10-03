@@ -7,6 +7,7 @@ import { label, language } from "@/lib/language";
 import { AiCostPanel, AiPausedBanner, CrawlErrorsPanel, FreshnessPanel } from "./StaffPanels";
 import CalibrationPanel from "./CalibrationPanel";
 import EvalPanel from "./EvalPanel";
+import { staffDenied } from "@/components/StaffGate";
 
 export const metadata = { title: "Ops · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -27,6 +28,8 @@ function Bar({ value, max, tone = "bg-emerald-500" }) {
 }
 
 export default async function OpsPage({ searchParams }) {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const params = await searchParams;
   const days = params?.days || 14;
   let ops;
@@ -43,7 +46,8 @@ export default async function OpsPage({ searchParams }) {
     throw error;
   }
 
-  // Staff only. A signed-in non-staff user still sees the rest of the page.
+  // The page itself is staff-only (staffDenied above); these panels also tolerate a 403 so
+  // a narrower future permission on one panel degrades to a missing panel, not a crash.
   const staffOnly = (path) => apiGet(path).catch((error) => {
     if (error instanceof ApiError && error.status === 403) return null;
     throw error;

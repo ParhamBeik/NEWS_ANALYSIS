@@ -17,7 +17,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import NotFound, ValidationError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
@@ -30,6 +30,13 @@ from .public import AlertThrottle, ReaderView, valid_push_subscription
 
 MAX_WATCH_ITEMS = 100
 MIN_ONBOARDING_ITEMS = 3
+
+
+class MemberView(APIView):
+    """A signed-in reader's own data. The project default is staff-only (fail closed), so
+    every endpoint a phone-OTP reader may call opts in here, explicitly."""
+
+    permission_classes = [IsAuthenticated]
 
 
 class OTPRequestThrottle(AnonRateThrottle):
@@ -140,7 +147,7 @@ def parse_time(value, field: str) -> time:
         raise ValidationError({field: "use HH:MM"}) from exc
 
 
-class AccountView(APIView):
+class AccountView(MemberView):
     def get(self, request):
         return Response(account_document(account_for(request.user)))
 
@@ -208,7 +215,7 @@ def items_for(slugs) -> list[WatchItem]:
     return items
 
 
-class WatchlistView(APIView):
+class WatchlistView(MemberView):
     def get(self, request):
         return Response({"results": watchlist(request.user)})
 
@@ -231,7 +238,7 @@ class WatchlistView(APIView):
         return Response({"results": watchlist(request.user)}, status=status.HTTP_201_CREATED)
 
 
-class WatchlistItemView(APIView):
+class WatchlistItemView(MemberView):
     def delete(self, request, slug: str):
         deleted, _ = Watch.objects.filter(user=request.user, item__slug=slug).delete()
         if not deleted:
@@ -261,7 +268,7 @@ def device_token(kind, token) -> str:
     return token
 
 
-class DeviceView(APIView):
+class DeviceView(MemberView):
     """Register or drop a push endpoint: the Expo app (fcm/pushe/najva) or the web PWA."""
 
     throttle_classes = [AlertThrottle]
@@ -288,7 +295,7 @@ class DeviceView(APIView):
 # ------------------------------------------------------------------------------ inbox
 
 
-class InboxView(APIView):
+class InboxView(MemberView):
     def get(self, request):
         rows = (
             Alert.objects.filter(user=request.user)
@@ -320,7 +327,7 @@ class InboxView(APIView):
         })
 
 
-class InboxReadView(APIView):
+class InboxReadView(MemberView):
     def post(self, request):
         rows = Alert.objects.filter(user=request.user, read_at__isnull=True)
         if not request.data.get("all"):

@@ -3,6 +3,7 @@ import { apiGet } from "@/lib/api";
 import { number, tehranTime } from "@/lib/display";
 import { language, label } from "@/lib/language";
 import { Card, Metric, SectionTitle, TableScroll } from "@/components/primitives";
+import { staffDenied } from "@/components/StaffGate";
 
 export const metadata = { title: "Collection · News Intelligence" };
 export const dynamic = "force-dynamic";
@@ -14,6 +15,8 @@ function stateTone(state) {
 }
 
 export default async function CollectionPage({ searchParams }) {
+  const denied = await staffDenied();
+  if (denied) return denied;
   const params = (await searchParams) || {};
   const days = [1, 7, 14, 30].includes(Number(params.days)) ? Number(params.days) : 14;
   const [data, lang] = await Promise.all([apiGet(`/api/collection/?days=${days}`), language()]);
@@ -42,7 +45,7 @@ export default async function CollectionPage({ searchParams }) {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <SectionTitle>{tr("Daily collection", "گردآوری روزانه")}</SectionTitle>
         <div className="flex gap-2 text-sm">{[1, 7, 14, 30].map((window) =>
-          <Link key={window} href={`/?days=${window}`} aria-current={days === window ? "page" : undefined}
+          <Link key={window} href={`/collection?days=${window}`} aria-current={days === window ? "page" : undefined}
             className={`rounded-md px-2 py-1 ${days === window ? "bg-emerald-900 text-emerald-200" : "text-slate-400 hover:bg-slate-800"}`}>
             {window}{tr("d", " روز")}
           </Link>
