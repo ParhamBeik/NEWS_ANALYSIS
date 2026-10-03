@@ -28,6 +28,7 @@ from datetime import timedelta
 
 from celery import shared_task
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
@@ -67,6 +68,10 @@ logger = logging.getLogger(__name__)
 RESULT_MODELS = {"classify": Classification, "evaluate": Evaluation, "summarize": Summary}
 
 
+ASSESS_ATTEMPTS = 3
+ASSESS_FAILURE_TTL = 7 * 24 * 3600
+
+
 @shared_task(
     name="inference.assess_event",
     bind=True,
@@ -77,11 +82,12 @@ RESULT_MODELS = {"classify": Classification, "evaluate": Evaluation, "summarize"
     max_retries=3,
 )
 def assess_event(self, event_id: int) -> dict:
-    """Fast event assessment, independent of the legacy 30-minute analyst pipeline."""
-    from core.watch import shortlist, tag_event
+    """Fast event assessment, independent of the legacy 30-minute analyst pipeline.
 
-    from .jev import article_state, decide, matched_event, same_event_candidates, watch_tags
-
+    A failed answer is still billed, and the sweep retries every unassessed event every
+    5 minutes, so the same evidence gets ASSESS_ATTEMPTS provider calls and then waits
+    for new evidence (a correction changes the digest) or for the counter to expire.
+    """
     event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
     if event is None:
         return {"status": "missing"}
@@ -92,6 +98,34 @@ def assess_event(self, event_id: int) -> dict:
         return {"status": "already_assessed", "event": event_id}
     if not jev_configured():
         return {"status": "unassessed", "reason": "provider_not_configured"}
+    failures = f"jev-failed:{event_id}:{digest[:16]}"
+    if cache.get(failures, 0) >= ASSESS_ATTEMPTS:
+        return {"status": "unassessed", "reason": "attempt_cap", "event": event_id}
+    # The 5-minute sweep re-queues whatever is unassessed, so a backlog holds duplicates;
+    # two inference workers must not both pay for the same event.
+    running = f"jev-running:{event_id}"
+    if not cache.add(running, 1, timeout=600):
+        return {"status": "in_progress", "event": event_id}
+    try:
+        return _assess(event, article, evidence, digest, failures)
+    finally:
+        cache.delete(running)
+
+
+def _count_failure(key: str) -> None:
+    cache.add(key, 0, timeout=ASSESS_FAILURE_TTL)
+    try:
+        cache.incr(key)
+    except ValueError:  # expired between add and incr
+        cache.add(key, 1, timeout=ASSESS_FAILURE_TTL)
+
+
+def _assess(event, article, evidence: str, digest: str, failures: str) -> dict:
+    from core.watch import shortlist, tag_event
+
+    from .jev import article_state, decide, matched_event, same_event_candidates, watch_tags
+
+    event_id = event.pk
     run_id = f"event-{event_id}"
     event_time = event.event_time
     from core.events import kept_apart
@@ -118,6 +152,7 @@ def assess_event(self, event_id: int) -> dict:
         return {"status": "unassessed", "reason": "budget_or_credits"}
     except (Fatal, Permanent, Transient) as exc:
         record_ai_failure("jev", failure_kind(exc))
+        _count_failure(failures)
         if isinstance(exc, Transient):
             raise
         logger.warning("event assessment unavailable for %s: %s", event_id, exc)
@@ -158,6 +193,7 @@ def assess_event(self, event_id: int) -> dict:
     except (KeyError, TypeError, ValueError) as exc:
         logger.warning("invalid Jev answer for event %s: %s", event_id, exc)
         record_ai_failure("jev", "invalid_answer")
+        _count_failure(failures)
         return {"status": "unassessed", "reason": "invalid_answer"}
     choice = matched_event(answers, candidates)
     merged = False

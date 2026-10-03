@@ -239,3 +239,26 @@ def test_a_contradicting_report_from_another_group_disputes_the_merged_event(mak
         first.id, joining, "contradicts", 0.81)
     first.refresh_from_db()
     assert first.evidence_level == NewsEvent.Evidence.DISPUTED
+
+
+def test_a_failing_event_stops_buying_answers_until_its_evidence_changes(make_article):
+    from django.core.cache import cache
+
+    from articles.models import Article
+    from inference.tasks import ASSESS_ATTEMPTS
+
+    event = attach_article(make_article())
+    bad = {"answers": {"category": {"choice": "not-a-category"}}}
+    with override_settings(TYPESAFE_API_KEY="test-key"), \
+            patch("inference.jev.decide", return_value=bad) as call:
+        results = [assess_event.run(event.id)["reason"] for _ in range(ASSESS_ATTEMPTS + 2)]
+        assert call.call_count == ASSESS_ATTEMPTS
+        assert results[-1] == "attempt_cap"
+        # A correction is new evidence and earns a fresh try.
+        Article.objects.filter(pk=event.primary_article_id).update(lead="خلاصهٔ اصلاح‌شده")
+        assess_event.run(event.id)
+        assert call.call_count == ASSESS_ATTEMPTS + 1
+        # Another worker already holds this event: no second paid call.
+        cache.add(f"jev-running:{event.id}", 1)
+        assert assess_event.run(event.id)["status"] == "in_progress"
+        assert call.call_count == ASSESS_ATTEMPTS + 1
