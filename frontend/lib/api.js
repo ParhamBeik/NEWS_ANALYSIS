@@ -45,6 +45,17 @@ async function loginRedirect() {
   redirect("/login");
 }
 
+/**
+ * The reader's address for Django's per-client throttles. Without it every server-rendered
+ * page arrives from this container and all readers share one rate-limit bucket. Enabled
+ * only behind the private Caddy edge, which replaces untrusted forwarded IPs.
+ */
+async function clientAddress() {
+  if (process.env.TRUST_PROXY_HEADERS !== "1") return {};
+  const forwarded = (await headers()).get("x-forwarded-for");
+  return forwarded ? { "X-Forwarded-For": forwarded } : {};
+}
+
 export async function apiFetch(path, options = {}) {
   const token = (await cookies()).get("news_token")?.value;
   const response = await fetch(`${API_ORIGIN}${path}`, {
@@ -53,6 +64,7 @@ export async function apiFetch(path, options = {}) {
     signal: options.signal ?? AbortSignal.timeout(15_000),
     headers: {
       "Content-Type": "application/json",
+      ...(await clientAddress()),
       ...(token ? { Authorization: `Token ${token}` } : {}),
       ...options.headers,
     },

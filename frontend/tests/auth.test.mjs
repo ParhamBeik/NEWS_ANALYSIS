@@ -174,3 +174,20 @@ test('the skip link target accepts programmatic keyboard focus', async () => {
   const shell = await readFile(new URL('../components/AppShell.js', import.meta.url), 'utf8');
   assert.match(shell, /<main id="main" tabIndex=\{-1\}/);
 });
+
+test('server-rendered API calls carry the reader address so throttles are per reader', async () => {
+  let sent;
+  const environment = { TRUST_PROXY_HEADERS: '1' };
+  const api = await loadServerModule('../lib/api.js', {
+    process: { env: environment },
+    fetch: async (url, options) => { sent = options; return { ok: true, status: 200, json: async () => ({}) }; },
+  }, {
+    'next/headers': { cookies: async () => ({ get: () => undefined }), headers: async () => new Headers({ 'x-forwarded-for': '203.0.113.9' }) },
+    'next/navigation': { redirect: () => { throw new Error('unexpected redirect'); } },
+  });
+  await api.apiFetch('/api/public/events/');
+  assert.equal(sent.headers['X-Forwarded-For'], '203.0.113.9');
+  environment.TRUST_PROXY_HEADERS = '0';
+  await api.apiFetch('/api/public/events/');
+  assert.equal(sent.headers['X-Forwarded-For'], undefined);
+});
