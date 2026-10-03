@@ -71,8 +71,10 @@ def test_closing_a_gap_queues_one_bounded_backfill(source, django_capture_on_com
                                     ended_at=timezone.now(), state="gap", error_class="network")
     raw = RawArticle(source=source.name, url="https://www.mehrnews.com/news/77",
                      title="تیتر بازیابی‌شده", content="متن کامل " * 40)
+    # The new article queues an assessment on commit; never let that reach the provider.
     with patch("sources.tasks.strategies.fetch", return_value=[raw]), \
             patch("sources.tasks.backfill_gap.delay") as queued, \
+            patch("inference.tasks.assess_event.delay"), \
             django_capture_on_commit_callbacks(execute=True):
         crawl_source.apply(args=[source.name], throw=True)
         crawl_source.apply(args=[source.name], throw=True)  # still covered: no second run
