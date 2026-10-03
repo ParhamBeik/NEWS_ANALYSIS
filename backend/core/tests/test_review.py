@@ -116,6 +116,19 @@ def test_split_moves_the_article_and_its_copies_to_a_new_event(make_article):
     assert list(event.articles.values_list("id", flat=True)) == [first.pk]
 
 
+def test_a_split_out_copy_keeps_its_own_event_when_recrawled(make_article):
+    canonical = make_article()
+    event = attach_article(canonical)
+    copy = make_article(duplicate_of=canonical)
+    attach_article(copy)
+    split = split_article_from_event(event.pk, copy.pk)
+
+    # Its canonical stays the other event's primary; the copy must not try to claim it.
+    assert attach_article(copy).pk == split.pk
+    split.refresh_from_db()
+    assert split.primary_article_id == copy.pk
+
+
 def test_staff_split_is_remembered_by_every_grouping_path(make_article):
     user = get_user_model().objects.create_user("splitter", is_staff=True)
     first = make_article()
