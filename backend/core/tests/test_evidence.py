@@ -64,3 +64,11 @@ def test_a_recrawled_undated_report_keeps_its_event_at_first_sight(make_article)
     refresh_event(event)
     event.refresh_from_db()
     assert event.event_time == first_seen
+
+
+def test_an_aggregator_relay_is_not_a_second_independent_source():
+    origin, relay = report("eghtesadonline"), report("shahrekhabar")
+    relay.source.role = "aggregator"
+    assert evidence_level([origin, relay]) == "single"
+    assert evidence_level([origin, report("tagged", "aggregator")]) == "single"
+    assert evidence_level([origin, relay, report("isna")]) == "multi"

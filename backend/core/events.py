@@ -106,27 +106,32 @@ def _group(source) -> str:
     return getattr(source, "independence_group", "") or source.name
 
 
+def _relays(source) -> bool:
+    """An aggregator only relays another outlet's report (see Source.independence_key)."""
+    return (
+        getattr(source, "role", "") == "aggregator"
+        or getattr(source, "independence_group", "") == "aggregator"
+    )
+
+
 def evidence_level(articles, current: str = "", contradicting=(), primary=None) -> str:
     """single / multi / official from distinct source groups, or disputed.
 
     Outlets in one independence group (e.g. state agencies that copy each other) count
     once. `disputed` wins when a report Jev judged `contradicts` comes from a group other
-    than the lead report's; an aggregator only relays, so it cannot dispute anything.
+    than the lead report's; an aggregator only relays, so it neither disputes nor adds a
+    group.
     Once disputed (by that rule or by staff) the level stays disputed.
     """
     if current == NewsEvent.Evidence.DISPUTED:
         return current
     lead = _group(primary.source) if primary is not None else None
     if any(
-        getattr(a.source, "role", "") != "aggregator" and _group(a.source) != lead
+        not _relays(a.source) and _group(a.source) != lead
         for a in contradicting
     ):
         return NewsEvent.Evidence.DISPUTED
-    # TODO(human): an aggregator (source.role == "aggregator", e.g. Shahr-e Khabar) only
-    # relays another outlet's report, but this set counts it as one more independent group,
-    # so one Eghtesad Online story + its Shahr-e Khabar copy reads as «منابع مستقل».
-    # Decide which articles contribute a group. `a.original_outlet` names the relayed outlet.
-    groups = {_group(a.source) for a in articles}
+    groups = {_group(a.source) for a in articles if not _relays(a.source)}
     if any(group.startswith("official") for group in groups):
         return NewsEvent.Evidence.OFFICIAL
     return NewsEvent.Evidence.MULTI if len(groups) > 1 else NewsEvent.Evidence.SINGLE
