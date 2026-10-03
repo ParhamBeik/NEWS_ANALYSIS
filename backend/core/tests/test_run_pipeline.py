@@ -98,3 +98,14 @@ class TestRebuildAll:
         a log nobody is watching."""
         with pytest.raises(CommandError, match="does not take --rebuild-all"):
             call_command("run_pipeline", "crawl", "--rebuild-all")
+
+
+def test_a_redeploy_keeps_a_schedule_the_operator_switched_off(db):
+    from django_celery_beat.models import PeriodicTask
+
+    call_command("setup_schedule")
+    PeriodicTask.objects.filter(name="crawl-all-sources").update(enabled=False)
+    call_command("setup_schedule")
+    assert not PeriodicTask.objects.get(name="crawl-all-sources").enabled
+    call_command("setup_schedule", disable_all=True)
+    assert not PeriodicTask.objects.filter(enabled=True).exists()

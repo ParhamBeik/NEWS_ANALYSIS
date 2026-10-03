@@ -25,3 +25,18 @@ def test_half_labelled_aggregator_is_rejected(tmp_path):
     )
     with pytest.raises(CommandError, match="aggregator"):
         call_command("seed_sources", path=str(fixture))
+
+
+@pytest.mark.django_db
+def test_a_redeploy_keeps_a_source_the_operator_paused(tmp_path):
+    fixture = tmp_path / "sources.yaml"
+    fixture.write_text("relay:\n  strategy: rss_generic\n  url: https://example.org/rss\n")
+    call_command("seed_sources", path=str(fixture))
+    assert Source.objects.get(name="relay").enabled
+    Source.objects.filter(name="relay").update(enabled=False)
+    call_command("seed_sources", path=str(fixture))
+    assert not Source.objects.get(name="relay").enabled
+    Source.objects.filter(name="relay").update(enabled=True)
+    fixture.write_text(fixture.read_text() + "  enabled: false\n")
+    call_command("seed_sources", path=str(fixture))
+    assert not Source.objects.get(name="relay").enabled

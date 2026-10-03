@@ -70,22 +70,26 @@ class Command(BaseCommand):
                 raise CommandError(
                     f"{name}: role aggregator and group {AGGREGATOR_GROUP!r} go together"
                 )
+            fields = {
+                "display_name": entry.get("display_name", ""),
+                "strategy": strategy,
+                "url": entry["url"],
+                "archive_url": entry.get("archive_url", ""),
+                "tier": entry.get("tier", 2),
+                "priority": entry.get("priority", 50),
+                "public_image_allowed": entry.get("public_image_allowed", False),
+                "language": language,
+                "independence_group": group,
+                "license_mode": license_mode,
+                "role": role,
+            }
+            enabled = entry.get("enabled", True)
+            # Runs on every deploy: a source an operator paused in the admin stays paused.
+            # Only an explicit `enabled: false` in the file turns an existing source off.
             _, created = Source.objects.update_or_create(
                 name=name,
-                defaults={
-                    "display_name": entry.get("display_name", ""),
-                    "strategy": strategy,
-                    "url": entry["url"],
-                    "archive_url": entry.get("archive_url", ""),
-                    "tier": entry.get("tier", 2),
-                    "priority": entry.get("priority", 50),
-                    "enabled": entry.get("enabled", True),
-                    "public_image_allowed": entry.get("public_image_allowed", False),
-                    "language": language,
-                    "independence_group": group,
-                    "license_mode": license_mode,
-                    "role": role,
-                },
+                defaults={**fields, **({} if enabled else {"enabled": False})},
+                create_defaults={**fields, "enabled": enabled},
             )
             created_count += created
             self.stdout.write(f"  {'created' if created else 'updated'} {name}")

@@ -1,8 +1,9 @@
 """Install the periodic schedule into django-celery-beat.
 
-DB-backed rather than a static dict, so a cadence can be changed from the admin without a
-redeploy - which matters because the right crawl interval is an operational judgement that
-will be tuned against real cost, not a constant discovered at design time.
+DB-backed rather than a static dict. Every deploy re-runs this, so cadences and kwargs are
+code (change them here). A task's on/off switch is the operator's: it is set only when the
+task is first installed, so a schedule disabled in the admin (for example to stop spend)
+stays off across deploys. `--disable-all` and the retired run_cycle still force it off.
 
 Cadences and their reasons:
 
@@ -84,6 +85,15 @@ CRON_TASKS = [
 ]
 
 
+def install(name: str, fields: dict, *, enabled: bool, force_off: bool) -> None:
+    """Code owns the schedule; the admin owns whether an installed task runs."""
+    PeriodicTask.objects.update_or_create(
+        name=name,
+        defaults={**fields, **({"enabled": False} if force_off else {})},
+        create_defaults={**fields, "enabled": enabled},
+    )
+
+
 class Command(BaseCommand):
     help = "Create or update the periodic task schedule."
 
@@ -98,15 +108,12 @@ class Command(BaseCommand):
 
         for name, task, every, period, kwargs in INTERVAL_TASKS:
             schedule, _ = IntervalSchedule.objects.get_or_create(every=every, period=period)
-            PeriodicTask.objects.update_or_create(
-                name=name,
-                defaults={
-                    "task": task,
-                    "interval": schedule,
-                    "crontab": None,
-                    "kwargs": json.dumps(kwargs),
-                    "enabled": enabled and task != "inference.run_cycle",
-                },
+            install(
+                name,
+                {"task": task, "interval": schedule, "crontab": None,
+                 "kwargs": json.dumps(kwargs)},
+                enabled=enabled and task != "inference.run_cycle",
+                force_off=not enabled or task == "inference.run_cycle",
             )
             self.stdout.write(f"  {name:28} every {every} {period}")
 
@@ -119,15 +126,12 @@ class Command(BaseCommand):
                 month_of_year="*",
                 timezone=TEHRAN,
             )
-            PeriodicTask.objects.update_or_create(
-                name=name,
-                defaults={
-                    "task": task,
-                    "crontab": schedule,
-                    "interval": None,
-                    "kwargs": json.dumps(kwargs),
-                    "enabled": enabled,
-                },
+            install(
+                name,
+                {"task": task, "crontab": schedule, "interval": None,
+                 "kwargs": json.dumps(kwargs)},
+                enabled=enabled,
+                force_off=not enabled,
             )
             self.stdout.write(f"  {name:28} at {cron['hour']}:{cron['minute']} {TEHRAN}")
 
