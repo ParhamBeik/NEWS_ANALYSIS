@@ -33,9 +33,13 @@ jobs:
   build:
     # The gate. A manual dispatch is always allowed - that is the rollback path, and it must
     # keep working when CI is red, because a red CI is exactly when you need to roll back.
+    # `branches: [main]` matches the head branch NAME only, so a pull request from a fork's
+    # `main` also completes CI here. Only a push to this repository may ship.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
