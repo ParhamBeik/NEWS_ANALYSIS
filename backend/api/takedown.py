@@ -10,13 +10,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from articles.models import Article, NewsEvent, TakedownLog
+from core.events import reported_at
 from core.takedown import set_hidden
 
 ACTIONS = {"hide": True, "unhide": False}
 
 
 def visibility(event: NewsEvent) -> dict:
-    articles = list(event.articles.select_related("source").order_by("published_at", "id"))
+    articles = sorted(
+        event.articles.select_related("source"), key=lambda a: (reported_at(a), a.id)
+    )
     log = TakedownLog.objects.filter(
         Q(kind=TakedownLog.Kind.EVENT, object_id=event.id)
         | Q(kind=TakedownLog.Kind.ARTICLE, object_id__in=[a.id for a in articles])

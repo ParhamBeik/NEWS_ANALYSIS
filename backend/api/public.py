@@ -193,6 +193,9 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
         "first_seen_at": event.first_seen_at,
         "image_url": permitted_image,
         "image_large_url": permitted_large or permitted_image,
+        # The photo may come from a cleared second source; credit that one, not the lead.
+        "image_source": (image.article.source.display_name or image.article.source_id)
+        if image else None,
         "sources": [
             {
                 "name": a.source.display_name or a.source_id,
@@ -462,7 +465,7 @@ class PublicTimelineView(ReaderView):
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
-            .select_related("primary_article__source")
+            .select_related("primary_article__source", "primary_article__image")
             .prefetch_related("articles__source", "articles__image", "assessments",
                               "watch_links__item", "stances")
             .order_by("event_time")[:500]

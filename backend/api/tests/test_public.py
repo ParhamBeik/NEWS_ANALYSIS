@@ -76,6 +76,7 @@ def test_card_borrows_the_photo_of_a_cleared_second_source(source):
     event.articles.add(second)
     card = APIClient().get("/api/public/events/").data["results"][0]
     assert card["image_url"].endswith("c.webp")
+    assert card["image_source"] == "Cleared"
     assert [row["primary"] for row in card["sources"]].count(True) == 1
 
 

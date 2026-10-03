@@ -42,7 +42,7 @@ from rest_framework.views import APIView
 from accounts.models import Account
 from articles.models import Article, EventReview, NewsEvent, UrlStatus
 from core.collection import analysis_summary, collection_summary, coverage_summary
-from core.events import priority_visibility, split_article_from_event
+from core.events import priority_visibility, reported_at, split_article_from_event
 from core.ops import staff_ops
 from core.review import SESSION_SIZE, record_decision, review_queue, review_stats, score_tier
 from core.vocabulary import AXES
@@ -426,7 +426,7 @@ def event_review_card(review: EventReview) -> dict:
                 "is_primary": article.id == event.primary_article_id,
             }
             for article in sorted(
-                event.articles.all(), key=lambda row: (row.published_at or row.fetched_at, row.id)
+                event.articles.all(), key=lambda row: (reported_at(row), row.id)
             )
         ],
     }

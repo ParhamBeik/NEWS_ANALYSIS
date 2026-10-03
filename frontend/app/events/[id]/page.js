@@ -31,6 +31,7 @@ export default async function EventDetail({ params }) {
   const title = headline(event, lang);
   const primaryName = leadSource(event)?.name || null;
   const image = event.image_large_url || event.image_url;
+  const photoBy = event.image_source || primaryName;
   const assessed = tierMeta(event.iran_tier) || tierMeta(event.global_tier);
   const groups = groupSources(event.sources);
 
@@ -46,7 +47,7 @@ export default async function EventDetail({ params }) {
       {/* Only a photo we may republish gets a frame; no 16:9 placeholder above the headline. */}
       {image ? <figure className="overflow-hidden rounded-2xl border border-line bg-card">
         <EventImage src={image} category={event.category} eager
-          alt={primaryName ? tr(`Photo published by ${primaryName}`, `تصویر منتشرشده در ${primaryName}`) : ""}
+          alt={photoBy ? tr(`Photo published by ${photoBy}`, `تصویر منتشرشده در ${photoBy}`) : ""}
           className="aspect-[16/9] w-full" />
       </figure> : null}
       <h1 className="text-2xl font-extrabold leading-snug sm:text-4xl sm:leading-tight" dir="auto">{title}</h1>
