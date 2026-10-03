@@ -31,3 +31,6 @@ frontend/out/
 frontend/.env*.local
 
 graphify-out/
+
+# Redis snapshot written when redis-server runs from the repo root
+dump.rdb

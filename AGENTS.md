@@ -6,6 +6,12 @@ News Intelligence is a Django, Celery, PostgreSQL/pgvector, Redis, and Next.js a
 that crawls Iranian news, deduplicates it, runs inference, supports human review, and exports
 Persian analyst workbooks.
 
+## Architecture
+
+Read before changing structure, data flow or task routing. Claude Code loads it at session start:
+
+@ARCHITECTURE.md
+
 ## Layout
 
 - `backend/`: Django apps, tasks, management commands, migrations, and tests.
