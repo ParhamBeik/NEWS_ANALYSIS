@@ -179,3 +179,16 @@ class TestUpsert:
         event.refresh_from_db()
         assert event.brief_fa == ""
         assert EventRevision.objects.get(event=event).brief_fa == "خلاصهٔ قدیمی"
+
+    def test_a_correction_to_a_gated_article_buys_no_assessment(
+        self, source, django_capture_on_commit_callbacks
+    ):
+        from unittest.mock import patch
+
+        from articles.models import ExtractionTier
+
+        with patch("inference.tasks.assess_event.delay") as queued, \
+                django_capture_on_commit_callbacks(execute=True):
+            upsert(raw(title="کوتاه"), source)
+            upsert(raw(title="کوتاه", extraction_tier=ExtractionTier.CSS, content="متن تازه."), source)
+        queued.assert_not_called()

@@ -139,9 +139,15 @@ def upsert(raw: RawArticle, source, run_id: str = "") -> tuple[Article, bool]:
         event = attach_article(existing)
         if changed_content:
             invalidate_presentation(event, "source_correction")
-            from inference.tasks import assess_event
+            # Same gate as a new article: a correction must not buy a prefiltered row a call.
+            if (
+                existing.duplicate_of_id is None
+                and not existing.prefilter_reason
+                and not existing.quality_flag
+            ):
+                from inference.tasks import assess_event
 
-            transaction.on_commit(lambda event_id=event.pk: assess_event.delay(event_id))
+                transaction.on_commit(lambda event_id=event.pk: assess_event.delay(event_id))
         elif becoming_gone:
             invalidate_presentation(event, "source_withdrawal")
         return existing, False
