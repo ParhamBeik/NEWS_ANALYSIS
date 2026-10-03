@@ -21,7 +21,7 @@ from rest_framework.views import APIView
 
 from articles.models import AlertSubscription, NewsEvent, StorylineEvent
 from core import tiers
-from core.events import ranked_events
+from core.events import ranked_events, reported_at
 from core.vocabulary import event_topic
 from market import portfolio
 from market.models import PriceSnapshot, Symbol
@@ -142,7 +142,7 @@ def publishable_image(primary, articles):
 def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None = None) -> dict:
     articles = sorted(
         (row for row in event.articles.all() if not row.hidden),
-        key=lambda row: row.published_at or row.fetched_at,
+        key=reported_at,
     )
     primary = event.primary_article
     image = publishable_image(primary, articles)

@@ -29,6 +29,15 @@ PRESENTATION_FIELDS = (
 )
 
 
+def reported_at(article: Article):
+    """When a report entered the world: its own date, else when we first saw it.
+
+    Not `fetched_at`: ingest refreshes that on every re-crawl, so an undated item still in
+    its feed would move its event back to "just now" every two minutes.
+    """
+    return article.published_at or article.created_at or article.fetched_at
+
+
 def invalidate_presentation(event: NewsEvent, reason: str) -> None:
     """Retain the old reader copy before fresh source evidence is summarized."""
     event.refresh_from_db()
@@ -60,7 +69,7 @@ def attach_article(article: Article) -> NewsEvent:
         event, _ = NewsEvent.objects.get_or_create(
             primary_article=canonical,
             defaults={
-                "event_time": canonical.published_at or canonical.fetched_at,
+                "event_time": reported_at(canonical),
                 "first_seen_at": canonical.created_at or timezone.now(),
             },
         )
@@ -109,6 +118,10 @@ def evidence_level(articles, current: str = "", contradicting=(), primary=None) 
         for a in contradicting
     ):
         return NewsEvent.Evidence.DISPUTED
+    # TODO(human): an aggregator (source.role == "aggregator", e.g. Shahr-e Khabar) only
+    # relays another outlet's report, but this set counts it as one more independent group,
+    # so one Eghtesad Online story + its Shahr-e Khabar copy reads as «منابع مستقل».
+    # Decide which articles contribute a group. `a.original_outlet` names the relayed outlet.
     groups = {_group(a.source) for a in articles}
     if any(group.startswith("official") for group in groups):
         return NewsEvent.Evidence.OFFICIAL
@@ -129,7 +142,7 @@ def refresh_event(event: NewsEvent) -> None:
     event.evidence_level = evidence_level(
         articles, event.evidence_level, contradicting, primary
     )
-    event.event_time = min(a.published_at or a.fetched_at for a in articles)
+    event.event_time = min(reported_at(a) for a in articles)
     event.first_seen_at = min(a.created_at or a.fetched_at for a in articles)
     if all(a.url_status == UrlStatus.GONE for a in articles):
         event.status = NewsEvent.Status.WITHDRAWN
@@ -228,14 +241,14 @@ def split_article_from_event(event_id: int, article_id: int, user=None) -> NewsE
     if primary_changed:
         # OneToOne: the old event must let go of the article before the new one takes it.
         event.primary_article = min(
-            remaining, key=lambda a: (a.published_at or a.fetched_at, a.id)
+            remaining, key=lambda a: (reported_at(a), a.id)
         )
         event.save(update_fields=["primary_article", "updated_at"])
     event.articles.remove(*moving)
     ArticleStance.objects.filter(event=event, article__in=moving).delete()
     split = NewsEvent.objects.create(
         primary_article=article,
-        event_time=article.published_at or article.fetched_at,
+        event_time=reported_at(article),
         first_seen_at=article.created_at or timezone.now(),
     )
     split.articles.add(*moving)

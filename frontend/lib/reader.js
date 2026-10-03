@@ -142,6 +142,9 @@ export function leadSource(event) {
 
 /** A Persian reader looking at a headline nobody has translated yet. */
 export function untranslated(event, lang) {
+  // A Persian report without an AI translation is still Persian: ask the lead source.
+  const lead = event?.sources?.find((source) => source.primary) ?? event?.sources?.[0];
+  if (lead?.language) return lang === "fa" && !event.title_fa && lead.language !== "fa";
   return lang === "fa" && !event?.title_fa && Boolean(event?.original_title || event?.title_en);
 }
 

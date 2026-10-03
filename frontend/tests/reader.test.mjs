@@ -56,3 +56,10 @@ test("an English-only headline is flagged for Persian readers, not for English o
   assert.equal(untranslated(wire, "en"), false);
   assert.equal(untranslated({ ...wire, title_fa: "نفت ۴ درصد بالا رفت" }, "fa"), false);
 });
+
+test("a Persian report waiting for AI is not tagged English", () => {
+  const persian = { original_title: "دهک‌بندی کالابرگ", title_fa: null, sources: [{ primary: true, language: "fa" }] };
+  assert.equal(untranslated(persian, "fa"), false);
+  const wire = { ...persian, original_title: "Oil jumps 4%", sources: [{ primary: true, language: "en" }] };
+  assert.equal(untranslated(wire, "fa"), true);
+});

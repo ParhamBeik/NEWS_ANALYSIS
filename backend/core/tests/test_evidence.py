@@ -46,3 +46,21 @@ def test_a_contradiction_from_another_independent_group_disputes_the_event():
     # The lead's own group revising itself, or an aggregator relaying, is not a dispute.
     assert evidence_level(articles, "", [state_copy], lead) == "multi"
     assert evidence_level(articles, "", [aggregator], lead) == "multi"
+
+
+def test_a_recrawled_undated_report_keeps_its_event_at_first_sight(make_article):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from articles.models import Article
+
+    undated = make_article(published_at=None)
+    first_seen = timezone.now() - timedelta(hours=20)
+    # Ingest refreshes fetched_at on every re-crawl; created_at is when we first saw it.
+    Article.objects.filter(pk=undated.pk).update(created_at=first_seen, fetched_at=timezone.now())
+    undated.refresh_from_db()
+    event = attach_article(undated)
+    refresh_event(event)
+    event.refresh_from_db()
+    assert event.event_time == first_seen
