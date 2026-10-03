@@ -20,7 +20,7 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
    ─▶ staff swipe review (labels calibrate the model)        ─▶ alerts (off until gated)
 ```
 
-## Parts, where they live, status (2026-10-01)
+## Parts, where they live, status (2026-10-03)
 
 | Part | Code | Status |
 |---|---|---|
@@ -81,17 +81,45 @@ with `date_uncertain`.
 
 ## Owner inputs pending
 
-1. Top up GapGPT (AI is stalled until then).
-2. TypeSafe API key → `TYPESAFE_API_KEY` in the server `.env` (Jev; cheaper than fallback).
-3. `NEWS_MONTHLY_BUDGET_USD=30`, `NEWS_DAILY_BUDGET_USD=1.00` in the server `.env`.
-4. Phone login: `KAVENEGAR_API_KEY` + `KAVENEGAR_OTP_TEMPLATE` (a Verify template with one `%token`).
-5. Push: VAPID keys (web), Firebase service account + project id (app); pick Pushe or Najva for an adapter.
-6. Optional email digest: SMTP `EMAIL_HOST`/user/password.
-7. Portfolio prices: `PORTFOLIO_MARKET_*` in the server `.env`, then `NEWS_MARKET_SOURCE=portfolio` once its series answer; confirm Portfolio keys for gold/fx (assumed `gold_18k`, `usd_irr`) and whether `interval=1h` is served (without it the ±2h window is never scored).
+Everything below is built and waits only on a key, an account, a server edit or a call.
+Server `.env` edits are by hand (prod `.env` is not generated from `.env.example`).
 
-## Next build phases
+**Keys and money (AI is idle until 1 or 2)**
+1. Top up GapGPT. Decisions (fallback), briefs, stance, translated titles, storyline names.
+2. `TYPESAFE_API_KEY` → Jev decisions directly (cheaper; briefs still use GapGPT).
+3. `NEWS_MONTHLY_BUDGET_USD=30`, `NEWS_DAILY_BUDGET_USD=1.00`; drop the now-ignored
+   `NEWS_BRIEF_MIN_SCORE`.
+4. Phone login: `KAVENEGAR_API_KEY`, `KAVENEGAR_OTP_TEMPLATE` (Verify template, one `%token`).
+5. Push: `NEWS_VAPID_*` (web); Firebase project + `google-services.json` and
+   `FCM_PROJECT_ID`/`FCM_CREDENTIALS_FILE` (app; needs a read-only compose mount); choose
+   Pushe or Najva (adapter + native SDK are written after the choice).
+6. Optional: SMTP `EMAIL_*` (digest + staff ops notices), `OPS_ALERT_WEBHOOK_URL`.
 
-1. Collection backbone: source catalog to ~38, coverage gaps, durable retries.
-2. AI backbone: 8 investor topics, watch-item vocabulary, quantile tiers, storylines (built).
-3. Ops page for coverage and AI cost; 4. portfolio price contract; 5. accounts, watchlists,
-   alerts (built); 6. mobile app.
+**Server and accounts**
+7. Prices: merge Portfolio#40 when its prod jobs are idle; set `NEWS_MARKET_SERVICE_KEY` in
+   Portfolio, and `PORTFOLIO_MARKET_BASE_URL=http://portfolio-frontend`,
+   `PORTFOLIO_MARKET_SERVICE_KEY`, `PORTFOLIO_MARKET_HOST` here; then `NEWS_MARKET_SOURCE=portfolio`.
+8. Mobile app API: apply the `@mobile_api` block from `deploy/Caddyfile.snippet` to the
+   shared edge Caddyfile; set `DRF_NUM_PROXIES=1` so throttles see real client IPs.
+9. Store accounts: Cafe Bazaar, Myket, Google Play, Expo (EAS), and a safe upload keystore.
+10. `NEWS_ALERTS_ENABLED=1` once the shadow eval passes.
+
+**Decisions**
+11. Contact address for `/privacy` and `/terms`; confirm the IP-log and backup-rotation lines.
+12. Raw HTML archive (plan) vs storage policy (no second copies): currently dropped.
+13. Backups: plan said Iran-only; the storage policy says none until a plan is approved.
+14. Embeddings (paid) for grouping and storylines: off; storylines use watch items only.
+15. Workbook mapping (evidence level → occurrence, Jev gold relevance → gold; gold *trend*
+    left blank because Jev never predicts direction): confirm with the analyst team.
+16. Portfolio keys for gold/fx (assumed `gold_18k`, `usd_irr`) and whether `interval=1h` exists.
+
+**Needs a proxy abroad (deferred by decision)**: BBC Persian, Iran International, Radio
+Farda, DW/Independent/Euronews Persian, GDELT, CME FedWatch, treasury.gov yields (FRED
+used instead), Reuters/Bloomberg (licence). Stale at TGJU: WTI, copper, Nasdaq, Dow, Nikkei.
+
+## Build status
+
+Phases 1–6 of the plan are built and deployed (PRs #16–#29, 2026-10-02/03), except the
+Portfolio side of Phase 4 (Portfolio#40, open). Still open by design: a three-worker split
+(waits for server capacity), TypeScript migration of the web app (deferred), anything
+behind the proxy abroad (Phase 7).
