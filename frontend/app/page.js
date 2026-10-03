@@ -115,8 +115,8 @@ export default async function NewsHome({ searchParams }) {
             {meta[lang]}
             <span className="text-sm font-normal text-muted">{digits(items.length, lang)} {tr(items.length === 1 ? "event" : "events", "رویداد")}</span>
           </h2>
-          <div className={`grid gap-4 ${columns}`}>
-            {items.map((event, index) => <EventTile key={event.id} event={event} lang={lang} variant={index ? "compact" : "card"} />)}
+          <div className={`grid items-start gap-4 ${columns}`}>
+            {items.map((event, index) => <EventTile key={event.id} event={event} lang={lang} variant={index ? "compact" : "card"} inSection={key} />)}
           </div>
         </section>;
       })}

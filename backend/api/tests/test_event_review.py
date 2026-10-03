@@ -37,7 +37,8 @@ def test_event_review_endpoints_are_staff_only(user, review):
 
 def test_queue_agree_split_and_session_stats(user, review, django_assert_max_num_queries):
     api = client_for(user, staff=True)
-    with django_assert_max_num_queries(8):
+    # 9 = one prefetch for every report image: the card may borrow a cleared outlet's photo.
+    with django_assert_max_num_queries(9):
         queue = api.get("/api/review/queue/?limit=25").json()
     card = queue["results"][0]
     assert queue["pending"] == 1

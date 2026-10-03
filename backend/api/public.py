@@ -128,19 +128,29 @@ class AlertSubscriptionView(APIView):
         return Response(status=204)
 
 
+def publishable_image(primary, articles):
+    """The event's picture: the primary report's if its source may be republished, else the
+    first other report whose source may. A cleared source is a per-source licensing decision
+    (Source.public_image_allowed); an uncleared one never lends its photo to a card."""
+    for article in [primary, *(row for row in articles if row.id != primary.id)]:
+        image = getattr(article, "image", None)
+        if image and image.file and article.source.public_image_allowed:
+            return image
+    return None
+
+
 def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None = None) -> dict:
     articles = sorted(
         (row for row in event.articles.all() if not row.hidden),
         key=lambda row: row.published_at or row.fetched_at,
     )
     primary = event.primary_article
-    image = getattr(primary, "image", None)
-    allowed = bool(image) and primary.source.public_image_allowed
+    image = publishable_image(primary, articles)
     # One stored copy serves card and hero (docs/STORAGE-POLICY.md); legacy rows may
     # still have a separate thumbnail. Same permission gate for both.
-    card = (image.thumbnail or image.file) if allowed else None
+    card = (image.thumbnail or image.file) if image else None
     permitted_image = card.url if card else None
-    permitted_large = image.file.url if allowed and image.file else None
+    permitted_large = image.file.url if image and image.file else None
     latest = max(event.assessments.all(), key=lambda row: row.id, default=None)
     stances = {row.article_id: row.stance for row in event.stances.all()}
     asset_scores = latest.asset_scores if latest else {}
@@ -187,6 +197,8 @@ def event_document(event: NewsEvent, *, detail: bool = False, cuts: dict | None 
             {
                 "name": a.source.display_name or a.source_id,
                 "original_outlet": a.original_outlet or None,
+                "primary": a.id == event.primary_article_id,
+                "language": a.source.language,
                 "url": a.url,
                 "published_at": a.published_at,
                 "first_seen_at": a.created_at,
@@ -268,8 +280,8 @@ class PublicEventsView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source", "primary_article__image")
-            .prefetch_related("articles__source", "assessments", "watch_links__item",
-                              "stances")
+            .prefetch_related("articles__source", "articles__image", "assessments",
+                              "watch_links__item", "stances")
             .order_by("-event_time", "-id")[:300]
         )
         events = list(queryset)
@@ -287,8 +299,8 @@ class PublicEventDetailView(ReaderView):
             NewsEvent.objects.visible()
             .select_related("primary_article__source", "primary_article__image")
             .prefetch_related(
-                "articles__source", "articles__revisions", "assessments", "watch_links__item",
-                "stances",
+                "articles__source", "articles__image", "articles__revisions", "assessments",
+                "watch_links__item", "stances",
             )
             .filter(primary_article__prefilter_reason="", primary_article__quality_flag="")
             .filter(pk=event_id)
@@ -451,8 +463,8 @@ class PublicTimelineView(ReaderView):
             .exclude(category="other")
             .exclude(status=NewsEvent.Status.WITHDRAWN)
             .select_related("primary_article__source")
-            .prefetch_related("articles__source", "assessments", "watch_links__item",
-                              "stances")
+            .prefetch_related("articles__source", "articles__image", "assessments",
+                              "watch_links__item", "stances")
             .order_by("event_time")[:500]
         )
         asset_class = asset["class"]

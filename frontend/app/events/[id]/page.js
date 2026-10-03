@@ -4,7 +4,7 @@ import { CategoryChip, Icon, StatusBadge, TierBadge, WatchChips, When } from "@/
 import { language, label } from "@/lib/language";
 import { loadEvent, loadTakedown } from "./load";
 import TakedownControl from "./TakedownControl";
-import { EVIDENCE, STANCE, digits, groupSources, headline, sep } from "@/lib/reader";
+import { EVIDENCE, STANCE, digits, groupSources, headline, leadSource, sep, tierMeta } from "@/lib/reader";
 
 export const dynamic = "force-dynamic";
 
@@ -22,15 +22,16 @@ export default async function EventDetail({ params }) {
   const lang = await language();
   if (!event) {
     return <article className="mx-auto max-w-3xl space-y-4">
-      <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">Hidden from readers.</p>
+      <p className="rounded-2xl border border-dashed border-line p-4 text-sm text-muted">{lang === "fa" ? "از دید خوانندگان پنهان است." : "Hidden from readers."}</p>
       <TakedownControl state={takedown} />
     </article>;
   }
   const tr = (en, fa) => label(lang, en, fa);
   const pick = (field) => event[`${field}_${lang}`];
   const title = headline(event, lang);
-  const primary = event.sources.find((source) => source.headline === event.original_title) || event.sources[0];
-  const primaryName = primary ? primary.original_outlet || primary.name : null;
+  const primaryName = leadSource(event)?.name || null;
+  const image = event.image_large_url || event.image_url;
+  const assessed = tierMeta(event.iran_tier) || tierMeta(event.global_tier);
   const groups = groupSources(event.sources);
 
   return <article className="mx-auto max-w-3xl space-y-6">
@@ -42,22 +43,28 @@ export default async function EventDetail({ params }) {
     </nav>
 
     <header className="space-y-4">
-      <figure className="overflow-hidden rounded-2xl border border-line bg-card">
-        <EventImage src={event.image_large_url || event.image_url} category={event.category} eager
+      {/* Only a photo we may republish gets a frame; no 16:9 placeholder above the headline. */}
+      {image ? <figure className="overflow-hidden rounded-2xl border border-line bg-card">
+        <EventImage src={image} category={event.category} eager
           alt={primaryName ? tr(`Photo published by ${primaryName}`, `تصویر منتشرشده در ${primaryName}`) : ""}
           className="aspect-[16/9] w-full" />
-      </figure>
+      </figure> : null}
       <h1 className="text-2xl font-extrabold leading-snug sm:text-4xl sm:leading-tight" dir="auto">{title}</h1>
       {title !== event.original_title ? <p className="text-sm text-muted" dir="auto">{event.original_title}</p> : null}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted">
         {primaryName ? <span className="font-semibold text-ink">{primaryName}</span> : null}
         <When iso={event.event_time} lang={lang} time />
-        <StatusBadge status={event.status} lang={lang} />
+        {event.status !== "developing" ? <StatusBadge status={event.status} lang={lang} /> : null}
         {EVIDENCE[event.evidence_level] ? <span className="rounded-full border border-line px-2.5 py-0.5 text-xs">{EVIDENCE[event.evidence_level][lang]}</span> : null}
       </div>
-      <div className="grid gap-3 rounded-2xl border border-line bg-card p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-center">
-        <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge tier={event.iran_tier} lang={lang} prefix={false} /></div>
-        <div className="space-y-1"><p className="text-xs text-muted">{tr("Global significance", "اهمیت جهانی")}</p><TierBadge tier={event.global_tier} lang={lang} prefix={false} /></div>
+      <div className={`grid gap-3 rounded-2xl border border-line bg-card p-4 sm:items-center ${assessed ? "sm:grid-cols-[1fr_1fr_auto]" : "sm:grid-cols-[1fr_auto]"}`}>
+        {assessed ? <>
+          <div className="space-y-1"><p className="text-xs text-muted">{tr("Relevance for Iran", "اهمیت برای ایران")}</p><TierBadge tier={event.iran_tier} lang={lang} prefix={false} /></div>
+          <div className="space-y-1"><p className="text-xs text-muted">{tr("Global significance", "اهمیت جهانی")}</p><TierBadge tier={event.global_tier} lang={lang} prefix={false} /></div>
+        </> : <p className="flex items-center gap-2 text-sm text-muted">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-current motion-safe:animate-pulse" aria-hidden="true" />
+          {tr("Impact for Iran and globally is still being assessed.", "اثر این رویداد بر ایران و جهان در حال ارزیابی است.")}
+        </p>}
         <Link href={`/events/${event.id}/market`} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent-strong px-4 py-3 font-semibold text-white hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
           <Icon name="candles" />{tr("Market impact", "اثر بر بازار")}
         </Link>

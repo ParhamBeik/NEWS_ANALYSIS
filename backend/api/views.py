@@ -403,7 +403,8 @@ def event_review_cards(queryset):
     return queryset.select_related(
         "event__primary_article__source", "event__primary_article__image"
     ).prefetch_related(
-        "event__articles__source", "event__assessments", "event__watch_links__item"
+        "event__articles__source", "event__articles__image", "event__assessments",
+        "event__watch_links__item",
     )
 
 

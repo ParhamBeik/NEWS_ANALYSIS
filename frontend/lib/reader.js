@@ -124,6 +124,27 @@ export function sourceCount(event) {
   return new Set((event.sources || []).map((source) => source.original_outlet || source.name)).size;
 }
 
+/**
+ * Who broke it, for the card byline: the primary report's outlet, how many other independent
+ * outlets carry it, and whether that outlet writes in English (so a Persian reader is told
+ * the headline is untranslated rather than left to wonder why it is in English).
+ */
+export function leadSource(event) {
+  const sources = event?.sources || [];
+  const lead = sources.find((source) => source.primary) || sources[0];
+  if (!lead) return null;
+  return {
+    name: lead.original_outlet || lead.name,
+    others: Math.max(0, sourceCount(event) - 1),
+    english: lead.language === "en",
+  };
+}
+
+/** A Persian reader looking at a headline nobody has translated yet. */
+export function untranslated(event, lang) {
+  return lang === "fa" && !event?.title_fa && Boolean(event?.original_title || event?.title_en);
+}
+
 /** How one report relates to its event (articles.ArticleStance); `reports` is the default. */
 export const STANCE = {
   reports: { en: "Reports", fa: "گزارش" },

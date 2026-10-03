@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  tierMeta, jalali, groupSources, rangeFor, linkedAssets, digits,
+  tierMeta, jalali, groupSources, rangeFor, linkedAssets, digits, leadSource, untranslated,
 } from "../lib/reader.js";
 
 test("API tiers 1-5 get labels and a missing tier stays unassessed", () => {
@@ -37,4 +37,22 @@ test("sources group by outlet and the market window covers the event", () => {
   const catalog = [{ key: "usd_irr", class: "fx" }, { key: "gold_18k", class: "gold" }];
   assert.deepEqual(linkedAssets({ gold: 80, fx: 60 }, catalog).map((a) => a.key), ["gold_18k", "usd_irr"]);
   assert.equal(linkedAssets({}, catalog).length, 2);
+});
+
+test("the byline names the primary outlet and counts the others once each", () => {
+  const event = { sources: [
+    { name: "IRNA", language: "fa" },
+    { name: "ISNA", language: "fa", primary: true },
+    { name: "ISNA", language: "fa" },
+    { name: "Al Jazeera", language: "en" },
+  ] };
+  assert.deepEqual(leadSource(event), { name: "ISNA", others: 2, english: false });
+  assert.equal(leadSource({ sources: [] }), null);
+});
+
+test("an English-only headline is flagged for Persian readers, not for English ones", () => {
+  const wire = { original_title: "Oil jumps 4%", title_fa: null };
+  assert.equal(untranslated(wire, "fa"), true);
+  assert.equal(untranslated(wire, "en"), false);
+  assert.equal(untranslated({ ...wire, title_fa: "نفت ۴ درصد بالا رفت" }, "fa"), false);
 });

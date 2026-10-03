@@ -57,6 +57,28 @@ def test_public_event_large_image_follows_the_source_permission(source):
     assert shown["image_large_url"].endswith("articles/2026/10/a.jpg")
 
 
+def test_card_borrows_the_photo_of_a_cleared_second_source(source):
+    """An uncleared primary source never lends its photo, but a cleared outlet reporting the
+    same event does - so a card is not left imageless when one reporter may be republished."""
+    from sources.models import Source
+
+    event = make_event(source)
+    ArticleImage.objects.create(article=event.primary_article, file="articles/2026/10/p.webp")
+    cleared = Source.objects.create(
+        name="cleared", display_name="Cleared", url="https://cleared.example/rss",
+        strategy=source.strategy, public_image_allowed=True,
+    )
+    second = Article.objects.create(
+        url="https://cleared.example/1", source=cleared, original_title="Same event",
+        content_hash="c" * 32, fetched_at=timezone.now(),
+    )
+    ArticleImage.objects.create(article=second, file="articles/2026/10/c.webp")
+    event.articles.add(second)
+    card = APIClient().get("/api/public/events/").data["results"][0]
+    assert card["image_url"].endswith("c.webp")
+    assert [row["primary"] for row in card["sources"]].count(True) == 1
+
+
 def test_public_feed_excludes_prefiltered_articles(source):
     event = make_event(source)
     Article.objects.filter(pk=event.primary_article_id).update(prefilter_reason="native_category:sports")
