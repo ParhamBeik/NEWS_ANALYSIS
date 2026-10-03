@@ -407,3 +407,37 @@ class AIUsageRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.stage} usage for event {self.event_id}"
+
+
+class EvalRun(models.Model):
+    """One shadow-eval pass of the decision backend over human-labelled items.
+
+    The release gate for a prompt or model change (core.shadow_eval). Compact by design:
+    aggregate metrics only, never per-item text or answers (docs/STORAGE-POLICY.md). Results
+    are per backend and model because GapGPT fallback confidences are not calibrated.
+    """
+
+    class Verdict(models.TextChoices):
+        PASS = "pass", "Pass"
+        FAIL = "fail", "Fail"
+        INSUFFICIENT_LABELS = "insufficient_labels", "Insufficient labels"
+        ABORTED = "aborted", "Aborted"
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    backend = models.CharField(max_length=16)
+    model = models.CharField(max_length=100)
+    question_hash = models.CharField(max_length=64)
+    language = models.CharField(max_length=3)
+    labelled = models.PositiveIntegerField(default=0)
+    grouping_pairs = models.PositiveIntegerField(default=0)
+    failed = models.PositiveIntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=8, default=0)
+    metrics = models.JSONField(default=dict)
+    verdict = models.CharField(max_length=20, choices=Verdict)
+    reasons = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"eval {self.id} {self.backend}:{self.model} {self.verdict}"
