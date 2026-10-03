@@ -19,6 +19,11 @@
 # license_mode        full            store and show the text
 #                     facts_link_out  paywalled or foreign press: keep facts, link out
 # role                primary | aggregator
+# public_image_allowed  true = the reader may show this outlet's article photo (default false).
+#                       A per-source licensing decision by the owner. Cleared 2026-10-03:
+#                       official institutions' own press pages and privately owned Persian
+#                       outlets. State news agencies, institution-affiliated outlets,
+#                       aggregators and facts_link_out foreign press stay off.
 #
 # Not included, and why:
 #   tasnimnews.com  refuses connections from the Frankfurt datacenter IP (curl exit 000 on
@@ -111,6 +116,7 @@ fed_monetary:
   independence_group: fed
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 ecb_press:
   display_name: European Central Bank
@@ -122,6 +128,7 @@ ecb_press:
   independence_group: ecb
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 eia_press:
   display_name: U.S. Energy Information Administration
@@ -133,6 +140,7 @@ eia_press:
   independence_group: us-eia
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 eia_energy:
   display_name: EIA Today in Energy
@@ -144,6 +152,7 @@ eia_energy:
   independence_group: us-eia
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 # Additional official channels checked for HTTP 200, parseable XML and current entries
 # on 2026-09-29. They are separate feed cursors, even where the institution overlaps.
@@ -157,6 +166,7 @@ fed_enforcement:
   independence_group: fed
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 fed_speeches:
   display_name: Federal Reserve speeches and testimony
@@ -168,6 +178,7 @@ fed_speeches:
   independence_group: fed
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 ecb_blog:
   display_name: European Central Bank blog
@@ -179,6 +190,7 @@ ecb_blog:
   independence_group: ecb
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 ecb_statistics:
   display_name: European Central Bank statistical releases
@@ -190,6 +202,7 @@ ecb_statistics:
   independence_group: ecb
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 bea_releases:
   display_name: U.S. Bureau of Economic Analysis
@@ -201,6 +214,7 @@ bea_releases:
   independence_group: us-bea
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 # Phase 1 catalog, 2026-10-02. Every feed below was fetched from the Tehran server
 # (45.139.10.12) and returned HTTP 200 XML with items from the last few days. All use
@@ -241,6 +255,7 @@ asriran:
   independence_group: private-asriran
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 entekhab:
   display_name: انتخاب
@@ -252,6 +267,7 @@ entekhab:
   independence_group: private-entekhab
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 khabaronline:
   display_name: خبرآنلاین
@@ -263,6 +279,7 @@ khabaronline:
   independence_group: private-khabaronline
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 hamshahri:
   display_name: همشهری آنلاین
@@ -307,6 +324,7 @@ shargh:
   independence_group: private-reformist-shargh
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 etemad:
   display_name: اعتماد
@@ -318,6 +336,7 @@ etemad:
   independence_group: private-reformist-etemad
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 # Economy and markets.
 shana:
@@ -352,6 +371,7 @@ donya_eqtesad:
   independence_group: private-donya-eqtesad
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 eghtesadonline:
   display_name: اقتصادآنلاین
@@ -363,6 +383,7 @@ eghtesadonline:
   independence_group: private-eghtesadonline
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 eghtesadnews:
   display_name: اقتصادنیوز
@@ -374,6 +395,7 @@ eghtesadnews:
   independence_group: private-eghtesadnews
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 ecoiran:
   display_name: اکوایران
@@ -385,6 +407,7 @@ ecoiran:
   independence_group: private-ecoiran
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 tejaratnews:
   display_name: تجارت نیوز
@@ -396,6 +419,7 @@ tejaratnews:
   independence_group: private-tejaratnews
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 # --- Official ----------------------------------------------------------------------
 iaea_news:
@@ -408,6 +432,7 @@ iaea_news:
   independence_group: iaea
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 state_dept:
   display_name: U.S. State Department press releases
@@ -419,6 +444,7 @@ state_dept:
   independence_group: us-state-dept
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 un_news:
   display_name: UN News
@@ -430,6 +456,7 @@ un_news:
   independence_group: un
   license_mode: full
   role: primary
+  public_image_allowed: true
 
 # --- International press: facts and a link, never the copy -------------------------
 aljazeera:
