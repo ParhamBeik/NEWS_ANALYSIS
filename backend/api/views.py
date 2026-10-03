@@ -51,6 +51,7 @@ from inference.models import (
     AIUsageRecord,
     Classification,
     DeadLetter,
+    EvalRun,
     Evaluation,
     NodeEvent,
     PromptVariant,
@@ -775,6 +776,20 @@ class CalibrationView(APIView):
         from market.reactions import calibration
 
         return Response(calibration())
+
+
+class EvalRunsView(APIView):
+    """Staff only: the latest shadow-eval release-gate runs (core.shadow_eval)."""
+
+    permission_classes = [IsAdminUser]
+    LIMIT = 10
+
+    def get(self, request):
+        rows = EvalRun.objects.values(
+            "id", "created_at", "backend", "model", "question_hash", "language", "labelled",
+            "grouping_pairs", "failed", "cost_usd", "metrics", "verdict", "reasons",
+        )[: self.LIMIT]
+        return Response({"runs": list(rows)})
 
 
 class KPIView(APIView):

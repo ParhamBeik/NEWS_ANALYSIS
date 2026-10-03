@@ -13,6 +13,7 @@ Briefs are prose, which Jev does not write, and always go to GapGPT.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import requests
@@ -234,6 +235,48 @@ def stance(answers: dict) -> tuple[str, float | None]:
     if confidence is not None and not 0 <= confidence <= 1:
         confidence = None
     return choice, confidence
+
+
+def article_state(article) -> dict:
+    """The report Jev judges: one article's text, as assess_event and shadow_eval send it."""
+    return {
+        "title": article.original_title,
+        "lead": article.lead,
+        "body": article.content[:5000],
+        "source": article.source.display_name or article.source_id,
+        "native_category": article.native_category,
+    }
+
+
+def same_event_candidates(events) -> dict[str, str]:
+    """`same_event` criteria for candidate events (primary_article selected)."""
+    return {
+        f"event_{row.id}": f"Same occurrence: {row.primary_article.original_title[:180]}"
+        for row in events
+    }
+
+
+# Below this probability a "same occurrence" answer does not merge.
+MATCH_PROBABILITY = 0.9
+
+
+def matched_event(answers: dict, candidates: dict[str, str]) -> str | None:
+    """The candidate key a decision merges into, or None. The one merge rule."""
+    matched = answers.get("same_event") or {}
+    choice = matched.get("choice", "none")
+    try:
+        probability = float(matched.get("probabilities", {}).get(choice, 0))
+    except (TypeError, ValueError, AttributeError):
+        probability = 0
+    return choice if choice in candidates and MATCH_PROBABILITY <= probability <= 1 else None
+
+
+def question_hash(backend: str | None = None) -> str:
+    """Hash of the typed question set a backend is asked; a change means re-run shadow_eval."""
+    backend = backend or backend_name()
+    questions = _questions({"event_0": "candidate"}, multi=backend == "gapgpt")
+    payload = json.dumps({"backend": backend, "questions": questions}, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------- TypeSafe

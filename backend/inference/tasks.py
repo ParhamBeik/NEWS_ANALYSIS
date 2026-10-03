@@ -80,7 +80,7 @@ def assess_event(self, event_id: int) -> dict:
     """Fast event assessment, independent of the legacy 30-minute analyst pipeline."""
     from core.watch import shortlist, tag_event
 
-    from .jev import decide, watch_tags
+    from .jev import article_state, decide, matched_event, same_event_candidates, watch_tags
 
     event = NewsEvent.objects.select_related("primary_article__source").filter(pk=event_id).first()
     if event is None:
@@ -96,9 +96,8 @@ def assess_event(self, event_id: int) -> dict:
     event_time = event.event_time
     from core.events import kept_apart
 
-    candidates = {
-        f"event_{row.id}": f"Same occurrence: {row.primary_article.original_title[:180]}"
-        for row in NewsEvent.objects.filter(
+    candidates = same_event_candidates(
+        NewsEvent.objects.filter(
             event_time__range=(event_time - timedelta(hours=36), event_time + timedelta(hours=36))
         )
         .visible()
@@ -106,16 +105,10 @@ def assess_event(self, event_id: int) -> dict:
         .exclude(pk__in=kept_apart(event_id))
         .select_related("primary_article")
         .order_by("-event_time")[:10]
-    }
+    )
     try:
         response = decide(
-            {
-                "title": article.original_title,
-                "lead": article.lead,
-                "body": article.content[:5000],
-                "source": article.source.display_name or article.source_id,
-                "native_category": article.native_category,
-            },
+            article_state(article),
             run_id,
             candidates,
             shortlist(evidence, WatchItem.objects.filter(enabled=True)),
@@ -166,14 +159,9 @@ def assess_event(self, event_id: int) -> dict:
         logger.warning("invalid Jev answer for event %s: %s", event_id, exc)
         record_ai_failure("jev", "invalid_answer")
         return {"status": "unassessed", "reason": "invalid_answer"}
-    matched = answers.get("same_event", {})
-    choice = matched.get("choice", "none")
-    try:
-        match_probability = float(matched.get("probabilities", {}).get(choice, 0))
-    except (TypeError, ValueError):
-        match_probability = 0
+    choice = matched_event(answers, candidates)
     merged = False
-    if choice in candidates and 0.9 <= match_probability <= 1:
+    if choice:
         from core.events import merge_events
 
         joining = list(event.articles.values_list("id", flat=True))
