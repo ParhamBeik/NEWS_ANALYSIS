@@ -191,3 +191,16 @@ test('server-rendered API calls carry the reader address so throttles are per re
   await api.apiFetch('/api/public/events/');
   assert.equal(sent.headers['X-Forwarded-For'], undefined);
 });
+
+test('workbook downloads preserve staff denial without a login loop', async () => {
+  let status = 403;
+  const route = await loadServerModule('../app/exports/download/[...name]/route.js', { Response }, {
+    '@/lib/api': { apiFetch: async () => ({ status, ok: false }) },
+    'next/navigation': { redirect: (to) => { throw Object.assign(new Error('redirect'), { to }); } },
+  });
+  const context = { params: Promise.resolve({ name: ['Excel Files', 'report.xlsx'] }) };
+  const denied = await route.GET({}, context);
+  assert.equal(denied.status, 403);
+  status = 401;
+  await assert.rejects(route.GET({}, context), (error) => error.to === '/login?next=%2Fexports');
+});

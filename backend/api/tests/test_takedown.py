@@ -105,5 +105,7 @@ def test_signed_in_readers_get_no_text_from_facts_link_out_articles(staff):
     reader = APIClient()
     reader.force_authenticate(get_user_model().objects.create_user("reader2", password="x"))
     for path in ("/api/articles/", f"/api/articles/{article.id}/"):
-        assert "Paywalled" not in str(reader.get(path).data)
+        response = reader.get(path)
+        assert response.status_code == 403
+        assert "Paywalled" not in str(response.data)
     assert staff.get(f"/api/articles/{article.id}/").data["content"] == "Paywalled body."
