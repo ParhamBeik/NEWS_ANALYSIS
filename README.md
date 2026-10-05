@@ -144,27 +144,26 @@ default. The security boundary is Django, not the middleware.
 
 ## Deployment
 
-`main` → CI → GHCR → VPS. `deploy.yml` builds both images tagged with the commit SHA,
-writes those exact tags into `/opt/apps/news-intel/deploy/.env`, and runs `compose up -d`;
+`main` → CI → GHCR → VPS, the same pipeline as the other three apps on this VPS.
+`deploy.yml` builds both images on GitHub, tagged with the commit SHA. The VPS cannot
+reach `files.pythonhosted.org`, and GitHub-hosted runners cannot reach the VPS, so the
+deploy job runs on the VPS's own runner (`vps-news`, user `gh-runner`, label `vps`),
+which dials out to GitHub. That user has no Docker access; its one sudo right is the
+root-owned `/usr/local/sbin/app-release`, which refuses a SHA not on `main`, checks it
+out in `/opt/apps/news-intel` and runs `deploy/release.sh` with `IMAGE_TAG=<sha>`.
+`release.sh` writes those exact tags into `deploy/.env`, pulls, and runs `compose up -d`;
 a one-shot `migrate` service runs migrations and `collectstatic` before anything serves.
-The deploy job runs on the Mac's `newsintel-mac` GitHub runner, installed under
-`~/.local/share/newsintel-runner` as a user LaunchAgent. GitHub-hosted runners cannot
-reach the VPS's SSH port, and the VPS runner could not reliably report job results
-back to GitHub. CI and image builds still use GitHub-hosted runners. Keep the Mac
-awake and online for deployment; otherwise the job queues until the runner returns.
-This Mac account holds the VPS SSH key, so keep the deploy workflow restricted to
-reviewed `main`.
 
 **Nothing deploys unless CI passed.** Deploy triggers on CI's completion, not on the push,
 and builds the exact commit CI tested — so a second push while CI is running cannot ship
 code no test ever saw. A red CI means no deploy at all; the previous release keeps serving.
 
-**A failed deploy rolls its images back.** The tags currently serving are written to
-`deploy/.rollback` *before* anything changes. After `up -d` the workflow polls `/login`
-(200) and the protected `/ops` route (307), then checks service health, scheduled jobs,
-staff-level API reads on the VPS. A failed check
-restores the previous image tags. Migrations are not rolled back; keep schema
-changes compatible with the prior image. Old tagged images are retained for rollback.
+**A failed deploy rolls back.** The SHA serving now is read from `/opt/apps/news-intel/.release`
+*before* anything changes. `release.sh` polls `deploy/check-stack.sh` (service health,
+scheduled jobs, staff-level API reads), then the workflow polls `/login` (200) and the
+protected `/ops` route (307). A failed check redeploys the previous SHA's images.
+Migrations are not rolled back; keep schema changes compatible with the prior image.
+Old tagged images are retained for rollback.
 
 To roll back by hand, run the Deploy workflow with a previous SHA as the `tag` input. It
 pulls the existing images under that tag without rebuilding current source. This works

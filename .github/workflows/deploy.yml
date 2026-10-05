@@ -110,144 +110,50 @@ jobs:
 
   deploy:
     needs: build
-    # GitHub-hosted runners cannot SSH to this VPS; its own runner loses the
-    # GitHub job connection. The Mac has working access to both endpoints.
-    runs-on: [self-hosted, macOS, ARM64, newsintel-deploy-mac]
+    # Same deploy half as the other three apps on this VPS. GitHub-hosted runners
+    # cannot reach the VPS, so its own runner dials out and collects this job. It runs
+    # as gh-runner, which has no Docker access; its one sudo right is the root-owned
+    # /usr/local/sbin/app-release, which refuses a SHA not on main, checks it out in
+    # /opt/apps/news-intel and runs deploy/release.sh with IMAGE_TAG=<sha>.
+    runs-on: [self-hosted, vps]
     environment: production
+    env:
+      APP: news
+      TAG: ${{ needs.build.outputs.tag }}
+      PUBLIC_URL: https://news.parhambm.ir
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-
-      - name: Ship compose files
-        run: |
-          scp -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes \
-            -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            deploy/docker-compose.prod.yml \
-            deploy/check-stack.sh \
-            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/apps/news-intel/deploy/
-
-      # Written BEFORE anything changes, because a rollback target you record after the fact
-      # is the broken version. `.rollback` is the only record of what was serving; nothing
-      # else on the box remembers the previous tag once .env has been rewritten.
+      # Recorded before anything changes: after the fact it would be the broken version.
       - name: Record the version currently serving
         id: record
+        run: echo "previous=$(cat /opt/apps/news-intel/.release 2>/dev/null || true)" >> "$GITHUB_OUTPUT"
+
+      - name: Pull images and restart
+        run: printf '%s\n' "$GHCR_TOKEN" | sudo -n /usr/local/sbin/app-release "$APP" "$TAG" "${{ github.actor }}"
+
+      # Two URLs, not one. /login proved only that Next was answering, which is how a
+      # broken sign-out and any /ops or /kpi regression shipped green. /ops is behind the
+      # login gate, so 307 is the correct healthy answer - a 500 there means the
+      # dashboard blew up and must not stay deployed.
+      - name: Smoke-test through the public edge
         run: |
-          ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
-            cd /opt/apps/news-intel/deploy
-            touch .env
-            {
-              grep '^BACKEND_IMAGE='  .env || true
-              grep '^FRONTEND_IMAGE=' .env || true
-            } > .rollback
-            echo "will roll back to:"
-            cat .rollback
-          EOF
-
-      - name: Pull and restart
-        run: |
-          ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<EOF
-            cd /opt/apps/news-intel/deploy
-
-            # Log in to GHCR on the host. The package is private, so a bare pull would 401.
-            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            # Pin the exact images this run built. Writing them into .env rather than
-            # passing them inline means a later manual 'docker compose up -d' on the box
-            # brings up the SAME version, instead of silently drifting to :latest.
-            sed -i '/^BACKEND_IMAGE=/d;/^FRONTEND_IMAGE=/d' .env
-            echo "BACKEND_IMAGE=${{ needs.build.outputs.image_base }}-backend:${{ needs.build.outputs.tag }}" >> .env
-            echo "FRONTEND_IMAGE=${{ needs.build.outputs.image_base }}-frontend:${{ needs.build.outputs.tag }}" >> .env
-
-            # GHCR resets connections from Iran mid-layer (2026-10-02: "read: connection reset
-            # by peer"). Finished layers are kept, so each retry only resumes the rest.
-            for attempt in 1 2 3 4 5; do
-              docker compose -f docker-compose.prod.yml pull && break
-              [ "\$attempt" = 5 ] && exit 1
-              sleep \$((attempt * 15))
-            done
-            # A paused crawl worker has accumulated periodic jobs. Recreating it would
-            # immediately run every stale cycle. Preserve both queues under release-tagged
-            # keys, then let Beat enqueue fresh work for the replacement worker.
-            if docker inspect -f '{{.State.Paused}}' newsintel-worker-crawl-1 | grep -qx true; then
-              touch .crawl-was-paused-${{ needs.build.outputs.tag }}
-              if docker exec newsintel-redis-1 redis-cli EXISTS crawl | grep -qx 1; then
-                docker exec newsintel-redis-1 redis-cli RENAMENX crawl release-backlog-crawl-${{ needs.build.outputs.tag }} | grep -qx 1
-              fi
-              if docker exec newsintel-redis-1 redis-cli EXISTS default | grep -qx 1; then
-                docker exec newsintel-redis-1 redis-cli RENAMENX default release-backlog-default-${{ needs.build.outputs.tag }} | grep -qx 1
-              fi
-            fi
-            # 'up -d' recreates only what changed. The 'migrate' service is a one-shot that
-            # the app services wait on via service_completed_successfully, so schema changes
-            # land before anything serves them.
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-
-            # Dangling images only (no -a). The previous release stays TAGGED, so it is never
-            # a prune candidate and is always there to roll back to. Removing -a is the whole
-            # point: 'prune -a' would delete the last working image to save disk.
-            docker image prune -f
-          EOF
-
-      - name: Verify the deploy actually serves
-        id: verify
-        run: |
-          # Poll rather than sleep-and-hope: gunicorn plus migrations can take 30s, and a
-          # fixed sleep either wastes time or reports success before the app is up.
-          #
-          # Two URLs, not one. /login proved only that Next was answering, which is how a
-          # broken sign-out and any /ops or /kpi regression shipped green. /ops is behind the
-          # login gate, so 307 is the correct healthy answer - a 500 there means the
-          # dashboard blew up and must not stay deployed.
           check() {
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ secrets.NEWS_DOMAIN }}$1" || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$PUBLIC_URL$1" || true)
             [ "$code" = "$2" ]
           }
           for attempt in $(seq 1 20); do
-            if check /login 200 && check /ops 307 && \
-               ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-                 'sh /opt/apps/news-intel/deploy/check-stack.sh'; then
-              echo "live after ${attempt} attempts"
-              exit 0
+            if check /login 200 && check /ops 307; then
+              echo "serving after ${attempt} attempt(s)"; exit 0
             fi
-            echo "attempt ${attempt}: not healthy yet"
             sleep 6
           done
-          echo "::error::site did not pass its health checks after deploy"
-          exit 1
+          echo "::error::$PUBLIC_URL did not pass its checks after deploy"; exit 1
 
-      # After tags are recorded, a failed pull, restart or verification needs rollback.
-      - name: Roll back to the previous version
-        if: failure() && steps.record.outcome == 'success'
+      - name: Roll back to the previous release
+        if: failure() && steps.record.outputs.previous != '' && steps.record.outputs.previous != env.TAG
+        env:
+          PREVIOUS: ${{ steps.record.outputs.previous }}
         run: |
-          echo "::warning::deploy failed after recording previous tags - rolling back"
-          ssh -i ~/.ssh/vps_45_139_10_12 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} bash -euo pipefail <<'EOF'
-            cd /opt/apps/news-intel/deploy
-            echo "--- why it failed ---"
-            docker compose -f docker-compose.prod.yml ps
-            docker compose -f docker-compose.prod.yml logs --tail=80 backend frontend
-
-            if [ ! -s .rollback ]; then
-              echo "no previous version recorded - leaving the stack as it is"
-              exit 1
-            fi
-            echo "--- restoring ---"
-            cat .rollback
-            sed -i '/^BACKEND_IMAGE=/d;/^FRONTEND_IMAGE=/d' .env
-            cat .rollback >> .env
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            if [ -f .crawl-was-paused-${{ needs.build.outputs.tag }} ]; then
-              docker compose -f docker-compose.prod.yml pause worker-crawl
-            fi
-          EOF
-
-          for attempt in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "https://${{ secrets.NEWS_DOMAIN }}/login" || true)
-            if [ "$code" = "200" ]; then
-              echo "::notice::rolled back; the previous version is serving again"
-              exit 1
-            fi
-            sleep 6
-          done
-          echo "::error::ROLLBACK ALSO FAILED - the site is down and needs a human"
-          exit 1
+          echo "::warning::deploy failed - redeploying $PREVIOUS"
+          printf '%s\n' "$GHCR_TOKEN" | sudo -n /usr/local/sbin/app-release "$APP" "$PREVIOUS" "${{ github.actor }}"
+          echo "::notice::rolled back to $PREVIOUS; this run stays red"
