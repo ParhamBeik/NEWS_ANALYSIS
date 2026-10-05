@@ -54,7 +54,7 @@ sources ─▶ crawl (every 2 min) ─▶ article stored + versioned ─▶ even
 | Watchlist alerts | `core/alerts.py`, `accounts.fan_out_event`, `/inbox` | Built (Phase 5), behind `NEWS_ALERTS_ENABLED`: dial, 5 pushes/day, quiet hours 23-07, tier 5 exempt; inbox always; web push + FCM adapters, Pushe/Najva tokens stored only |
 | Ops dashboard | `frontend/app/ops/`, `api` `OpsView`, `OpsStaffView`, `CalibrationView`, `core/ops.py` | Live; staff panels: AI cost vs ceilings, errors by cause, freshness SLO (Phase 3), market calibration per tier/asset class |
 | Staff ops alerts | `core/ops_alerts.py`, task `core.ops_alerts` | Every 5 min, 6 h dedup; logs always, email/webhook once `EMAIL_HOST` / `OPS_ALERT_WEBHOOK_URL` are set |
-| Deploy | `.github/workflows/`, `deploy/` | `main` → CI → GHCR → Mac runner → server; health gate + auto-rollback |
+| Deploy | `.github/workflows/`, `deploy/` | `main` → CI → GHCR → VPS runner (app-release); health gate + auto-rollback |
 
 ## Blocked: network
 
